@@ -3,7 +3,7 @@
   const $=id=>document.getElementById(id),app=window.RedlineApp,SVG='http://www.w3.org/2000/svg';
   let current=null,photos=[],pending=[],busy=false,dirty=false,suppress=false,resumePhotos=false,cityIndex=null,exifReady=null,photoPanelRequest=0,photosRequested=false;
   let activeCity='',galleryItems=[],importing=false,photoMode='',dragDepth=0,selecting=false,thumbQueue=Promise.resolve();
-  let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0;
+  let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0,anchor=null,drawn=null,reopen=null;
   const chosen=new Set(),thumbJobs=new Set(),openedCovers=new Set(),lastPages=new Map();
   const photoLabel=count=>`${count} photo${count===1?'':'s'}`;
   const plural=(count,word)=>`${count} ${word}${count===1?'':'s'}`;
@@ -13,7 +13,8 @@
   const canAnimate=el=>typeof el?.animate==='function'&&'finished' in (window.Animation?.prototype||{})&&!reduced();
   // A turn already under way counts as arrived, so quick presses add up.
   const shownPage=()=>turning?.target??albumPage;
-  const twoPage=()=>innerWidth>=900;
+  // The album lies open across two pages on wide screens and whenever the screen is held landscape, like a real one; portrait phones and tablets show one page.
+  const twoPage=()=>innerWidth>=900||innerWidth>=600&&innerWidth>innerHeight;
   const stopNumber=index=>String(index+1).padStart(2,'0');
   const hash=text=>{let h=7;for(const c of String(text))h=(h*31+c.charCodeAt(0))|0;return Math.abs(h);};
   const icons={
@@ -66,32 +67,41 @@
     return svg;
   }
 
-  // Trips and Photos are modal sheets; only one is open, and Escape or a click outside closes it.
+  // The logbook opens inside the voyage planner; the album is a modal book. Only one is open at a time.
   const triggers={'trip-panel':'trips-button','photo-panel':'photos-button'};
+  const isOpen=id=>id==='trip-panel'?!$(id).hidden:$(id).open;
+  // Closing returns focus to where the panel was opened from: the keyboard's place, or the map after a click,
+  // a shortcut on the map, or a close by pointer, so Return then sets sail instead of reopening the panel.
+  const openedFrom={};let clickOpened=false;
   function closePanel(id,{focus=false}={}){
-    const panel=$(id);if(panel.open)panel.close();
+    const panel=$(id);
+    if(id==='trip-panel'){panel.hidden=true;closeTripMenus();}
+    else{if(panel.open)panel.close();photosRequested=false;photoPanelRequest++;dragDepth=0;$('photo-drop-hint').hidden=true;setSelecting(false);if(current&&drawn?.trip===current.id)lastPages.set(current.id,placeAt(shownPage(),drawn.two));document.body.classList.remove('sheet-open');}
     $(triggers[id]).setAttribute('aria-expanded','false');
-    if(id==='photo-panel'){photosRequested=false;photoPanelRequest++;dragDepth=0;$('photo-drop-hint').hidden=true;setSelecting(false);if(current)lastPages.set(current.id,shownPage());}
-    else closeTripMenus();
-    if(focus)$(triggers[id]).focus({preventScroll:true});
-    document.body.classList.toggle('sheet-open',Object.keys(triggers).some(key=>$(key).open));
+    if(focus){const back=focus==='map'?$('map'):openedFrom[id];(back?.isConnected&&back!==document.body&&!back.closest('[hidden],[inert]')?back:$(triggers[id])).focus({preventScroll:true});}
   }
   function openPanel(id){
-    for(const other of Object.keys(triggers))if(other!==id&&$(other).open)closePanel(other);
-    app.closeSearch?.();if(!$(id).open)$(id).showModal();$(triggers[id]).setAttribute('aria-expanded','true');document.body.classList.add('sheet-open');
+    if(!isOpen(id)){const at=document.activeElement;openedFrom[id]=clickOpened||!at||at===document.body?$('map'):at;}
+    for(const other of Object.keys(triggers))if(other!==id&&isOpen(other))closePanel(other);
+    app.closeSearch?.();$(triggers[id]).setAttribute('aria-expanded','true');
+    if(id==='trip-panel'){$(id).hidden=false;return;}
+    if(!$(id).open)$(id).showModal();document.body.classList.add('sheet-open');
   }
-  for(const id of Object.keys(triggers)){
-    const panel=$(id);
-    panel.addEventListener('close',()=>{if($(triggers[id]).getAttribute('aria-expanded')==='true')closePanel(id);});
-    panel.addEventListener('cancel',event=>{event.preventDefault();if(id==='photo-panel'&&selecting){setSelecting(false);return;}closePanel(id,{focus:true});});
+  // The logbook folds away when you work elsewhere: on the map, or in the planner's search, ports and travel controls.
+  const keepsLogbook='.voyage-head,#trip-panel';
+  document.addEventListener('pointerdown',event=>{if(isOpen('trip-panel')&&!event.target.closest?.(`${keepsLogbook},dialog`))closePanel('trip-panel');},true);
+  document.addEventListener('focusin',event=>{if(isOpen('trip-panel')&&!event.target.closest?.(`${keepsLogbook},dialog`))closePanel('trip-panel');});
+  // Travel keys pressed outside the logbook fold it first, so the voyage never plays behind it.
+  document.addEventListener('keydown',event=>{if(isOpen('trip-panel')&&!event.altKey&&!event.ctrlKey&&!event.metaKey&&!event.isComposing&&!document.querySelector('dialog[open]')&&!event.target.closest?.('input,textarea,select,[contenteditable="true"],#trip-panel,dialog')&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','Backspace','Delete'].includes(event.key))closePanel('trip-panel');},true);
+  {
+    const panel=$('photo-panel');
+    panel.addEventListener('close',()=>{if($('photos-button').getAttribute('aria-expanded')==='true')closePanel('photo-panel');});
+    panel.addEventListener('cancel',event=>{event.preventDefault();if(selecting){setSelecting(false);$('select-photos').focus({preventScroll:true});return;}closePanel('photo-panel',{focus:true});});
     let pressed=null;panel.addEventListener('pointerdown',event=>{pressed=event.target;});
     panel.addEventListener('click',event=>{
       // Only a press and release on the backdrop closes; a drag that ends there does not.
       const started=pressed;pressed=null;if(started!==event.target)return;
-      if(event.target.classList?.contains('album-stage')){closePanel(id,{focus:true});return;}
-      if(event.target!==panel)return;
-      const box=panel.getBoundingClientRect(),outside=event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom;
-      if(outside||id==='photo-panel')closePanel(id,{focus:true});
+      if(event.target===panel||event.target.classList?.contains('album-stage'))closePanel('photo-panel',{focus:'map'});
     });
   }
   function discardPending(){pending.forEach(p=>{URL.revokeObjectURL(p.url);if(p.thumbUrl)URL.revokeObjectURL(p.thumbUrl);});pending=[];renderReview();}
@@ -101,15 +111,26 @@
   function tripDate(value){const date=new Date(value);if(!Number.isFinite(date.getTime()))return '';return date.toLocaleDateString(undefined,{month:'short',day:'numeric',...(date.getFullYear()===new Date().getFullYear()?{}:{year:'numeric'})});}
   function updateCurrentTrip(){
     const stops=app.getStops();
-    $('current-trip-label').textContent=current?'This trip':'This route';
-    $('trip-state').textContent=current?(dirty?'Unsaved changes':'All changes saved'):stops.length?`${plural(stops.length,'stop')} · not saved yet`:'Add a destination to begin';
+    $('current-trip-label').textContent=current?'This voyage':'An unsaved course';
+    $('trip-state').textContent=current?(dirty?'Unsaved changes':'All changes saved'):stops.length?`${plural(stops.length,'port')} · not saved yet`:'Chart a port of call to begin';
     $('trip-state').classList.toggle('unsaved',!current||dirty);
     const button=$('trip-name-form').querySelector('button'),renamed=!!current&&$('trip-name').value.trim()!==current.title,settled=!!current&&!dirty&&!renamed;
-    button.textContent=!current?'Save trip':dirty?'Save changes':renamed?'Rename':'Saved';
+    button.textContent=!current?'Save':dirty?'Save changes':renamed?'Rename':'Saved';
     button.classList.toggle('quiet',settled);button.disabled=busy||settled;
   }
   $('trip-name').addEventListener('input',()=>updateCurrentTrip());
   function drawCurrentMap(){$('current-trip-map').replaceChildren(routeMap(app.getStops().map(stop=>[stop.longitude,stop.latitude])));}
+  // A save from the seal or an export refreshes an open logbook, and focus stays on the same voyage.
+  function listFocus(){const el=document.activeElement,row=el?.closest?.('#trip-list .trip-card');return row?{id:row.dataset.tripId,part:el.classList.contains('trip-more')?'.trip-more':'.trip-open'}:null;}
+  async function refreshLogbook(focus=null){
+    if(!isOpen('trip-panel'))return;drawCurrentMap();
+    // A half-typed rename survives the rebuild.
+    const form=$('trip-list').querySelector('.trip-rename-form'),active=document.activeElement,renaming=form&&{id:form.closest('.trip-card').dataset.tripId,value:form.querySelector('input').value,focused:form.contains(active)};
+    await listTrips(renaming?null:focus);if(!renaming)return;
+    const item=[...$('trip-list').querySelectorAll('.trip-card')].find(el=>el.dataset.tripId===renaming.id),trip=tripCache.find(t=>t.id===renaming.id);if(!item||!trip)return;
+    startRename(item,trip);const input=item.querySelector('.trip-rename-form input');input.value=renaming.value;
+    if(!renaming.focused){const row=focus&&[...$('trip-list').querySelectorAll('.trip-card')].find(el=>el.dataset.tripId===focus.id);(row?.querySelector(focus.part)||(active?.isConnected?active:null))?.focus({preventScroll:true});}
+  }
   function closeTripMenus(except=null){document.querySelectorAll('#trip-list .trip-menu').forEach(menu=>{if(menu===except)return;menu.hidden=true;menu.previousElementSibling?.setAttribute('aria-expanded','false');});}
   function tripCard(trip,index){
     const item=document.createElement('li'),map=document.createElement('div'),body=document.createElement('div'),open=document.createElement('button'),name=document.createElement('span'),detail=document.createElement('span');
@@ -118,15 +139,15 @@
     if(trip.coverUrl){const cover=document.createElement('img');cover.className='trip-cover';cover.src=trip.coverUrl;cover.alt='';cover.loading='lazy';cover.style.setProperty('--tilt',`${(hash(trip.id)%7-3)*1.1}deg`);map.append(cover);}
     open.type='button';open.className='trip-open';open.disabled=busy;name.className='trip-name';name.textContent=trip.title;open.append(name);
     if(trip.id===current?.id){open.setAttribute('aria-current','true');const badge=document.createElement('span');badge.className='trip-current';badge.textContent='Open now';body.append(badge);}
-    detail.className='trip-meta';detail.textContent=[plural(trip.stopCount??0,'stop'),trip.photoCount?photoLabel(trip.photoCount):'',tripDate(trip.updatedAt)].filter(Boolean).join(' · ');
+    detail.className='trip-meta';detail.textContent=[plural(trip.stopCount??0,'port'),trip.photoCount?photoLabel(trip.photoCount):'',tripDate(trip.updatedAt)].filter(Boolean).join(' · ');
     body.className='trip-card-body';body.prepend(open);body.append(detail);
-    open.addEventListener('click',()=>trip.id===current?.id?closePanel('trip-panel',{focus:true}):loadTrip(trip.id));
+    open.addEventListener('click',event=>trip.id===current?.id?closePanel('trip-panel',{focus:event.detail?'map':true}):loadTrip(trip.id,{keyboard:!event.detail}));
     const more=document.createElement('button'),menu=document.createElement('div');
     more.type='button';more.className='icon-button trip-more';more.innerHTML=icons.more;more.title='More';more.setAttribute('aria-label',`More for ${trip.title}`);more.setAttribute('aria-haspopup','menu');more.setAttribute('aria-expanded','false');more.disabled=busy;
     menu.className='trip-menu';menu.setAttribute('role','menu');menu.hidden=true;
     const entry=(className,label,action)=>{const button=document.createElement('button');button.type='button';button.className=className;button.setAttribute('role','menuitem');button.textContent=label;button.disabled=busy;button.addEventListener('click',()=>{closeTripMenus();more.focus({preventScroll:true});action();});menu.append(button);};
     entry('trip-rename','Rename',()=>startRename(item,trip));entry('trip-export','Export',()=>exportTrips(false,trip.id));entry('trip-delete','Delete…',()=>deleteTrip(trip));
-    more.addEventListener('click',()=>{const show=menu.hidden;closeTripMenus(menu);menu.hidden=!show;more.setAttribute('aria-expanded',String(show));if(show)menu.querySelector('button')?.focus({preventScroll:true});});
+    more.addEventListener('click',()=>{const show=menu.hidden;closeTripMenus(menu);menu.hidden=!show;more.setAttribute('aria-expanded',String(show));if(show){menu.scrollIntoView?.({block:'nearest'});menu.querySelector('button')?.focus({preventScroll:true});}});
     menu.addEventListener('keydown',event=>{
       const items=[...menu.querySelectorAll('button')],at=items.indexOf(document.activeElement);
       if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeTripMenus();more.focus({preventScroll:true});}
@@ -138,8 +159,8 @@
   function renderTripCards(focus=null){
     const list=$('trip-list'),query=$('trip-search').value.trim().toLowerCase(),shown=tripCache.filter(trip=>!query||trip.title.toLowerCase().includes(query));
     list.replaceChildren(...shown.map(tripCard));
-    if(!tripCache.length||!shown.length){const empty=document.createElement('li');empty.className='trip-empty';empty.textContent=tripCache.length?'No saved trip has that name.':'No saved trips yet. Name this route above to keep it.';list.append(empty);}
-    if(focus&&$('trip-panel').open){
+    if(!tripCache.length||!shown.length){const empty=document.createElement('li');empty.className='trip-empty';empty.textContent=tripCache.length?'No voyage by that name.':'No voyages kept yet. Name this course above to keep it.';list.append(empty);}
+    if(focus&&isOpen('trip-panel')){
       const row=[...list.querySelectorAll('.trip-card')].find(el=>el.dataset.tripId===focus.id);
       (row?.querySelector(focus.part||'.trip-open')||list.querySelector('.trip-open')||$('trip-name')).focus({preventScroll:true});
     }
@@ -148,7 +169,7 @@
   async function listTrips(focus=null){
     try{
       const {trips}=await api('/trips');tripCache=trips;
-      $('trips-summary').textContent=trips.length?`${plural(trips.length,'trip')} saved in this browser`:'Nothing saved yet';
+      $('trips-summary').textContent=trips.length?`${plural(trips.length,'voyage')} kept in this browser`:'No voyages kept yet';
       $('trip-search-label').hidden=trips.length<7;if(trips.length<7)$('trip-search').value='';renderTripCards(focus);
     }catch(error){showError('trip-message',error);}
   }
@@ -187,11 +208,13 @@
       message('trip-message',`Deleted “${trip.title}”.`);
     }catch(error){showError('trip-message',error);}finally{busy=false;update();await listTrips({id:trip.id});}
   }
-  async function loadTrip(id){
+  async function loadTrip(id,{keyboard=true}={}){
     if(busy||!canSwitch())return;
-    busy=true;update();
-    try{const data=await api(`/trips/${id}`);photoPanelRequest++;discardPending();activeCity='';setSelecting(false);suppress=true;app.setStops(data.trip.stops);suppress=false;current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};photos=data.photos;dirty=false;albumPage=lastPages.get(id)||0;remember();renderGallery();closePanel('trip-panel');message('trip-message','');}
-    catch(error){showError('trip-message',error);}finally{suppress=false;busy=false;update();}
+    busy=true;update();let loaded=false;
+    try{const data=await api(`/trips/${id}`);photoPanelRequest++;discardPending();activeCity='';setSelecting(false);suppress=true;app.setStops(data.trip.stops);suppress=false;current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};photos=data.photos;dirty=false;reopen=lastPages.get(id)||null;albumPage=reopen?.index??0;remember();renderGallery();closePanel('trip-panel');message('trip-message','');loaded=true;}
+    catch(error){showError('trip-message',error);}
+    // Focus leaves the folded logbook for its tab (enabled again once busy clears), or for the map after a click.
+    finally{suppress=false;busy=false;update();const active=document.activeElement;if(loaded&&(!active||active===document.body||$('trip-panel').contains(active)))$(keyboard?'trips-button':'map').focus({preventScroll:true});}
   }
   async function saveCurrent(title){
     const route=app.getStops(),name=(title||current?.title||'').trim();if(!name)throw Error('Give this trip a name.');
@@ -203,34 +226,46 @@
     }
     current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:JSON.stringify(data.trip.stops)};dirty=fingerprint()!==current.hash;remember();update();return data.trip;
   }
+  // Only the logbook's own scroller moves: the panel around it is still unfolding.
+  function revealInLogbook(el){
+    const scroller=$('trip-panel').querySelector('.logbook-scroll'),box=scroller.getBoundingClientRect(),target=el.getBoundingClientRect(),above=target.top-(box.top+12),below=target.bottom-(box.top+scroller.clientHeight)+12;
+    if(above<0)scroller.scrollTop+=above;else if(below>0)scroller.scrollTop+=Math.min(below,above);
+  }
+  // An already open logbook keeps what is being typed into it.
   function openTrips(note=''){
-    openPanel('trip-panel');$('trip-name').value=current?.title||'';$('trip-search').value='';message('trip-message',note);drawCurrentMap();updateCurrentTrip();listTrips();
-    if(!current||note)$('trip-name').focus();else $('trip-panel').querySelector('.close-panel').focus({preventScroll:true});
+    const wasOpen=isOpen('trip-panel');openPanel('trip-panel');
+    if(!wasOpen){$('trip-name').value=current?.title||'';$('trip-search').value='';drawCurrentMap();listTrips();}
+    message('trip-message',note);updateCurrentTrip();
+    if(!current||note){$('trip-name').focus({preventScroll:true});revealInLogbook($('trip-name-form'));if(note)revealInLogbook($('trip-message'));}else $('trip-panel').focus({preventScroll:true});
   }
   // Opening the album never commits route edits; saving or moving photos does that first.
   function requireTrip(){
     if(!current){resumePhotos=true;openTrips('Name and save this trip to add photos.');return false;}
     return true;
   }
-  $('trips-button').addEventListener('click',()=>{if($('trip-panel').open){closePanel('trip-panel');return;}resumePhotos=false;openTrips();});
+  $('trips-button').addEventListener('click',event=>{if(isOpen('trip-panel')){closePanel('trip-panel',{focus:event.detail?'map':false});return;}resumePhotos=false;clickOpened=event.detail>0;openTrips();clickOpened=false;});
   $('save-trip').addEventListener('click',async()=>{
-    if(!current){openTrips();return;}
-    busy=true;update();try{await saveCurrent();$('save-trip').textContent='Saved';setTimeout(()=>$('save-trip').textContent='Save',1300);}catch(error){openTrips();showError('trip-message',error);}finally{busy=false;update();}
+    if(!current){if(isOpen('trip-panel')&&$('trip-name').value.trim())$('trip-name-form').requestSubmit();else openTrips();return;}
+    const focus=listFocus();let saved=false;busy=true;update();
+    try{await saveCurrent();saved=true;$('save-trip').textContent='Saved';setTimeout(()=>$('save-trip').textContent='Save',1300);}catch(error){openTrips();showError('trip-message',error);}finally{busy=false;update();if(saved)await refreshLogbook(focus);}
   });
   $('trip-name-form').addEventListener('submit',async event=>{
-    event.preventDefault();if(busy)return;busy=true;update();
+    event.preventDefault();if(busy)return;
+    // A saved form disables its button, so keyboard focus moves back to the name.
+    const refocus=document.activeElement===$('trip-name-form').querySelector('button');let album=false;busy=true;update();
     try{
       const renaming=current&&!dirty&&$('trip-name').value.trim()!==current.title;
       await saveCurrent($('trip-name').value);message('trip-message',renaming?'Trip renamed.':'');
-      if(resumePhotos){resumePhotos=false;closePanel('trip-panel');showPhotos();}else{drawCurrentMap();await listTrips();}
+      // A voyage named so its photos can be added goes on to its album once saving is done.
+      if(resumePhotos){resumePhotos=false;closePanel('trip-panel');album=true;}else{drawCurrentMap();await listTrips();if(refocus&&isOpen('trip-panel'))$('trip-name').focus({preventScroll:true});}
     }
-    catch(error){showError('trip-message',error);}finally{busy=false;update();}
+    catch(error){showError('trip-message',error);}finally{busy=false;update();if(album)showPhotos();}
   });
   $('new-trip').addEventListener('click',()=>{if(!canSwitch())return;discardPending();setSelecting(false);current=null;photos=[];activeCity='';albumPage=0;suppress=true;app.setStops([]);suppress=false;dirty=false;remember();update();renderGallery();closePanel('trip-panel');$('destination').focus();});
-  document.querySelectorAll('[data-close]').forEach(button=>button.addEventListener('click',()=>closePanel(button.dataset.close,{focus:true})));
+  document.querySelectorAll('[data-close]').forEach(button=>button.addEventListener('click',event=>closePanel(button.dataset.close,{focus:event.detail?'map':true})));
   document.addEventListener('pointerdown',event=>{if(!event.target.closest?.('.trip-menu,.trip-more'))closeTripMenus();},true);
-  window.addEventListener('resize',()=>{if(!$('photo-panel').open||resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;if(view==='album')renderAlbum();});});
-  window.addEventListener('redline:routechange',()=>{if(suppress)return;dirty=current?fingerprint()!==current.hash:app.getStops().length>0;update();if($('trip-panel').open)drawCurrentMap();if($('photo-panel').open){renderReview();renderGallery();}});
+  window.addEventListener('resize',()=>{if(!$('photo-panel').open||resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;if(view!=='album')return;const had=$('album-pages').contains(document.activeElement)||!!turning?.had;renderAlbum();keepAlbumFocus(had);});});
+  window.addEventListener('redline:routechange',()=>{if(suppress)return;dirty=current?fingerprint()!==current.hash:app.getStops().length>0;update();if(isOpen('trip-panel'))drawCurrentMap();if($('photo-panel').open){renderReview();renderGallery();}});
   window.addEventListener('beforeunload',event=>{if(pending.length||dirty){event.preventDefault();event.returnValue='';}});
 
   // ---------- Photos ----------
@@ -242,27 +277,28 @@
     photosRequested=true;const version=++photoPanelRequest;
     try{
       if(!requireTrip()||version!==photoPanelRequest)return;
-      const firstVisit=!openedCovers.has(current.id);albumPage=lastPages.get(current.id)||0;
+      const firstVisit=!openedCovers.has(current.id);reopen=lastPages.get(current.id)||null;albumPage=reopen?.index??0;
       openPanel('photo-panel');renderGallery();renderReview();message('photo-message','');
-      if(view==='album'&&firstVisit&&!city&&!pending.length){openedCovers.add(current.id);openCover();}
+      // The first visit shows the closed album for a moment, then opens its cover.
+      if(firstVisit&&!city){openedCovers.add(current.id);if(albumPage===0)setTimeout(()=>{if($('photo-panel').open&&view==='album'&&!pending.length&&shownPage()===0)turnTo(step());},650);}
       const tripId=current.id,data=await api(`/trips/${tripId}`);if(version!==photoPanelRequest||current?.id!==tripId)return;
       photos=data.photos;if(!turning)renderGallery();update();if(city)goToCity(city);
     }catch(error){if(version===photoPanelRequest){openPanel('photo-panel');showError('photo-message',error);}}
     finally{if(version===photoPanelRequest)photosRequested=false;}
   }
-  $('photos-button').addEventListener('click',()=>{if(photosRequested||$('photo-panel').open){closePanel('photo-panel');return;}showPhotos();});
+  $('photos-button').addEventListener('click',event=>{if(photosRequested||$('photo-panel').open){closePanel('photo-panel');return;}clickOpened=event.detail>0;showPhotos();clickOpened=false;});
   document.addEventListener('keydown',async event=>{
     const viewer=$('photo-viewer').open,info=$('info-dialog').open;
     if(event.key==='Escape'&&!event.defaultPrevented&&!viewer&&!info){
-      if($('trip-panel').open){event.preventDefault();closePanel('trip-panel',{focus:true});return;}
+      if(isOpen('trip-panel')){event.preventDefault();closePanel('trip-panel',{focus:true});return;}
       if($('photo-panel').open){event.preventDefault();if(selecting){setSelecting(false);$('select-photos').focus({preventScroll:true});return;}closePanel('photo-panel',{focus:true});return;}
     }
     if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"]'))return;
     // The album turns like a book from the keyboard.
     if($('photo-panel').open&&!viewer&&mode()==='album'){
-      const step=twoPage()?2:1,turns={ArrowRight:step,PageDown:step,ArrowLeft:-step,PageUp:-step};
+      const turns={ArrowRight:step(),PageDown:step(),ArrowLeft:-step(),PageUp:-step()};
       if(event.key in turns){event.preventDefault();turnTo(shownPage()+turns[event.key]);return;}
-      if(event.key==='Home'||event.key==='End'){event.preventDefault();turnTo(event.key==='Home'?0:pages.length-1);return;}
+      if(event.key==='Home'||event.key==='End'){event.preventDefault();turnTo(event.key==='Home'?0:lastPage());return;}
     }
     const key=event.key.toLowerCase(),button={t:'trips-button',s:'save-trip',p:'photos-button'}[key];
     if(!button||info)return;
@@ -270,7 +306,7 @@
     event.preventDefault();if(event.repeat)return;
     if(document.body.classList.contains('map-only'))window.RedlineApp.showControls();
     if(key==='p'&&$('photo-panel').open){closePanel('photo-panel',{focus:true});return;}
-    if(key==='t'&&$('trip-panel').open){closePanel('trip-panel',{focus:true});return;}
+    if(key==='t'&&isOpen('trip-panel')){closePanel('trip-panel',{focus:true});return;}
     $(button).click();
   });
 
@@ -372,7 +408,8 @@
     $('photo-trip-name').textContent=current?.title||'';
     $('gallery-count').textContent=photoLabel(photos.length);$('gallery-count').hidden=reviewing||!photos.length;
     $('choose-photos').querySelector('span').textContent=pending.length?'Add more':'Add photos';
-    $('album-pages').hidden=current_!=='album';$('album-sheet').hidden=current_==='album';$('album-foot').classList.toggle('away',current_!=='album');
+    // Controls that fade away also leave the tab order, so they can't turn a hidden album.
+    $('album-pages').hidden=current_!=='album';$('album-sheet').hidden=current_==='album';$('album-foot').classList.toggle('away',current_!=='album');$('album-foot').inert=current_!=='album';
     $('photo-gallery').hidden=current_!=='sheet';$('photo-review').hidden=!reviewing;
     $('photo-review').setAttribute('aria-busy',String(importing));
     $('gallery-toolbar').hidden=current_!=='sheet'||!photos.length||selecting;
@@ -380,7 +417,7 @@
     $('photo-bulk').hidden=!pending.length;$('photo-import-actions').hidden=!pending.length;
     $('album-view').setAttribute('aria-pressed',String(view==='album'));$('sheet-view').setAttribute('aria-pressed',String(view==='sheet'));
     $('album-view').disabled=$('sheet-view').disabled=reviewing;$('album-modes').classList.toggle('away',reviewing);
-    $('gallery-filter').classList.toggle('away',reviewing||!photos.length);
+    $('gallery-filter').classList.toggle('away',reviewing||!photos.length);$('gallery-filter').inert=reviewing||!photos.length;
     $('photo-panel').classList.toggle('selecting',selecting&&!reviewing);
   }
   function setView(next){
@@ -504,18 +541,20 @@
     updateChosen();renderPhotoMode();
   }
   // City dividers stick out of the album's edge, like the tabs in a real one.
+  // A focused tab keeps keyboard focus when the tabs are rebuilt, as they are after every turn.
   function renderTabs(groups){
-    const nav=$('gallery-filter');
+    const nav=$('gallery-filter'),focused=nav.contains(document.activeElement)?document.activeElement.dataset.filter:null;
     nav.replaceChildren(...groups.map((group,i)=>{
-      const tab=document.createElement('button');tab.type='button';tab.className='album-tab gallery-chip';tab.dataset.filter=group.id;tab.style.setProperty('--tab',String(i%6));tab.disabled=busy;
+      const tab=document.createElement('button');tab.type='button';tab.className='album-tab';tab.dataset.filter=group.id;tab.style.setProperty('--tab',String(i%6));tab.disabled=busy;
       if(group.stop!==undefined){const number=document.createElement('span');number.className='chip-stop';number.textContent=stopNumber(group.stop);tab.append(number);}
       const name=document.createElement('span'),count=document.createElement('span');name.className='tab-name';name.textContent=group.name;count.className='chip-count';count.textContent=String(group.items.length);tab.append(name,count);
       tab.title=`${group.name} · ${photoLabel(group.items.length)}`;tab.addEventListener('click',()=>goToCity(group.id));
       return tab;
     }));
-    markTab();
+    markTab();if(focused)[...nav.children].find(tab=>tab.dataset.filter===focused)?.focus({preventScroll:true});
   }
-  function markTab(){[...$('gallery-filter').children].forEach(tab=>{const on=tab.dataset.filter===activeCity;tab.setAttribute('aria-pressed',String(on));if(on)tab.setAttribute('aria-current','true');else tab.removeAttribute('aria-current');});}
+  // The current tab scrolls into view in a long row or column of tabs.
+  function markTab(){const nav=$('gallery-filter');[...nav.children].forEach(tab=>{const on=tab.dataset.filter===activeCity;tab.setAttribute('aria-pressed',String(on));if(on)tab.setAttribute('aria-current','true');else tab.removeAttribute('aria-current');});nav.querySelector('[aria-current="true"]')?.scrollIntoView?.({block:'nearest',inline:'nearest'});}
   function goToCity(id,{instant=false}={}){
     activeCity=id;markTab();
     if(view==='album'){const index=pages.findIndex(page=>page.type==='city'&&page.first&&page.group.id===id);if(index>=0)turnTo(index,{instant});return;}
@@ -524,108 +563,183 @@
   }
 
   // ---------- The album ----------
+  // Pages run cover, endpaper, title, contents, city chapters, endpaper, back cover. Side by side,
+  // spread s shows pages 2s−1 and 2s, so a closed book shows only its front or its back cover.
+  // `albumPage` is a page index; with two pages it is the right-hand page of the open spread.
   function albumPages(){
-    const list=[{type:'inside'},{type:'title'}];
-    for(const group of photoGroups()){let rest=group.items,first=true;while(first||rest.length){const room=first?3:4;list.push({type:'city',group,items:rest.slice(0,room),first,from:group.items.length-rest.length});rest=rest.slice(room);first=false;}}
+    const groups=photoGroups(),list=[{type:'cover'},{type:'inside'},{type:'title'}],rows=contentsRows();
+    // Long voyages continue their contents over as many pages as they need.
+    if(groups.length>1)for(let i=0;i<groups.length;i+=rows)list.push({type:'contents',groups:groups.slice(i,i+rows),continued:i>0});
+    for(const group of groups){let rest=group.items,first=true;while(first||rest.length){const room=first?3:4;list.push({type:'city',group,items:rest.slice(0,room),first,from:group.items.length-rest.length});rest=rest.slice(room);first=false;}}
     if(!photos.length)list.push({type:'empty'});
+    // Side by side, the closing endpaper falls on a right-hand page, so the back cover closes the book alone.
+    if(twoPage()&&list.length%2)list.push({type:'blank'});
+    list.push({type:'inside',end:true},{type:'back'});
     return list;
   }
-  const firstPage=()=>twoPage()?0:1;
-  function clampPage(index){const last=Math.max(firstPage(),pages.length-1);index=Math.max(firstPage(),Math.min(index,last));return twoPage()?index-index%2:index;}
+  // A contents page lists eight ports, or fewer on a short page: margins take about a sixth of it,
+  // the heading up to two lines (about 70px, as 'continued' wraps), and each row 18px at the smallest type.
+  const CONTENTS_ROWS=8;
+  function contentsRows(){const book=$('album-book'),style=getComputedStyle(book),page=book.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom);return page>0?Math.max(3,Math.min(CONTENTS_ROWS,Math.floor((page*.84-70)/18))):CONTENTS_ROWS;}
+  const lastPage=()=>twoPage()?pages.length:pages.length-1;
+  function clampPage(index){index=Math.max(0,Math.min(index,lastPage()));return twoPage()?Math.ceil(index/2)*2:index;}
+  const visiblePages=index=>twoPage()?[index-1,index]:[index];
+  const step=()=>twoPage()?2:1;
   function pageOfPhoto(id){pages=albumPages();return pages.findIndex(page=>page.type==='city'&&page.items.some(photo=>photo.id===id));}
+  const folioOf=index=>index-1;
   function shade(kind='turn'){const el=document.createElement('span');el.className=`page-shade ${kind}`;el.setAttribute('aria-hidden','true');return el;}
-  function folio(el,index){if(index<2)return;const number=document.createElement('span');number.className='folio';number.textContent=String(index-1);el.append(number);}
+  function folio(el,index,page){if(!['city','contents','empty'].includes(page.type))return;const number=document.createElement('span');number.className='folio';number.textContent=String(folioOf(index));el.append(number);}
   function printElement(photo,group,position){
     const figure=document.createElement('figure'),frame=document.createElement('div'),corners=document.createElement('span');
     figure.className='print';figure.dataset.photoId=photo.id;setRatio(figure,photo);
-    figure.style.setProperty('--tilt',`${((hash(photo.id)%9)-4)*.42}deg`);
+    figure.style.setProperty('--tilt',`${((hash(photo.id)%9)-4)*.38}deg`);
     frame.className='print-frame';corners.className='print-corners';corners.setAttribute('aria-hidden','true');
     const button=previewButton(photo,(event,origin)=>{if(Date.now()<suppressClick)return;openPhoto(photo,group,origin);},{saved:true});button.classList.add('print-photo');
     button.setAttribute('aria-label',`Open photo ${position+1} of ${group.items.length} in ${group.name}`);
     frame.append(button,corners);figure.append(frame);
     const note=postcardLine(photo);
     if(note){const caption=document.createElement('figcaption');caption.textContent=note;figure.append(caption);}
-    else if(hasPostcard(photo)){const caption=document.createElement('figcaption');caption.className='postcard-mark';caption.innerHTML=icons.postcard;caption.append(' postcard');figure.append(caption);}
     return figure;
   }
+  // Prints are arranged by shape: portraits stand side by side or run down the page beside a landscape.
+  function layoutOf(items){
+    const portrait=items.map(photo=>photo.width&&photo.height?photo.height>photo.width*1.05:false),n=items.length;
+    if(n===2)return portrait.some(Boolean)?'n-2 side':'n-2';
+    if(n===3)return portrait[0]?'n-3 tall':'n-3';
+    return `n-${n}`;
+  }
+  function coverFace(el,back=false){
+    el.classList.add(back?'album-back':'album-cover');
+    el.innerHTML=back
+      ?'<div class="back-mark"><svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" stroke-width=".9"/><path d="M20 4 22.4 17.6 36 20 22.4 22.4 20 36 17.6 22.4 4 20 17.6 17.6Z" fill="currentColor"/></svg><p>Redline</p></div>'
+      :'<div class="cover-plate"><svg class="cover-emblem" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" stroke-width=".9"/><circle cx="20" cy="20" r="13.5" fill="none" stroke="currentColor" stroke-width=".5" stroke-dasharray="1 2"/><path d="M20 4 22.4 17.6 36 20 22.4 22.4 20 36 17.6 22.4 4 20 17.6 17.6Z" fill="currentColor"/></svg><p class="cover-kicker">A travel album</p><p class="cover-title"></p><span class="cover-rule"></span><p class="cover-meta"></p></div>';
+    if(!back){
+      el.querySelector('.cover-title').textContent=current?.title||'Photos';
+      const stops=app.getStops();el.querySelector('.cover-meta').textContent=[plural(stops.length,'port'),photoLabel(photos.length)].join(' · ');
+    }
+  }
   function pageElement(page,index,side){
-    const el=document.createElement('section');el.className=`album-page ${side}`;el.dataset.page=String(index);
-    if(!page){el.classList.add('blank');return el;}
+    const el=document.createElement('section');el.className=`album-page ${side}`;el.dataset.page=String(index);el.dataset.type=page?.type||'void';
+    if(!page){el.classList.add('void');el.setAttribute('aria-hidden','true');return el;}
     el.classList.add(`page-${page.type}`);
-    if(page.type==='inside'){
-      el.innerHTML='<div class="bookplate"><span class="bookplate-rule"></span><p class="bookplate-label">A Redline album</p><p class="bookplate-title"></p><span class="bookplate-rule"></span></div>';
-      el.querySelector('.bookplate-title').textContent=current?.title||'Travels';
+    if(page.type==='cover'||page.type==='back')coverFace(el,page.type==='back');
+    else if(page.type==='inside'){
+      if(!page.end){el.innerHTML='<div class="bookplate"><span class="bookplate-rule"></span><p class="bookplate-label">This album belongs to the voyage</p><p class="bookplate-title"></p><span class="bookplate-rule"></span></div>';el.querySelector('.bookplate-title').textContent=current?.title||'Travels';}
     }else if(page.type==='title'){
       const stops=app.getStops(),block=document.createElement('div');block.className='title-block';
       block.innerHTML='<p class="eyebrow">Our travels</p><h3 class="album-name"></h3><p class="title-meta"></p><div class="title-map"></div><p class="title-route"></p>';
       block.querySelector('.album-name').textContent=current?.title||'Photos';
-      block.querySelector('.title-meta').textContent=[plural(stops.length,'stop'),photoLabel(photos.length)].join(' · ');
+      block.querySelector('.title-meta').textContent=[plural(stops.length,'port'),photoLabel(photos.length)].join(' · ');
       block.querySelector('.title-map').append(routeMap(stops.map(stop=>[stop.longitude,stop.latitude]),{aspect:1.6}));
       const names=stops.map(stop=>stop.name);block.querySelector('.title-route').textContent=(names.length>8?[...names.slice(0,4),'…',...names.slice(-3)]:names).join(' → ');
       el.append(block);
+    }else if(page.type==='contents'){
+      const block=document.createElement('div'),list=document.createElement('ol');block.className='contents';
+      block.innerHTML=`<p class="eyebrow">Contents</p><h3 class="contents-title">${page.continued?'Ports of call, continued':'Ports of call'}</h3>`;list.className='contents-list';
+      for(const group of page.groups){
+        const at=pages.findIndex(other=>other.type==='city'&&other.first&&other.group===group),item=document.createElement('li'),button=document.createElement('button');
+        button.type='button';button.disabled=busy;
+        button.innerHTML='<span class="contents-no"></span><span class="contents-name"></span><span class="contents-dots" aria-hidden="true"></span><span class="contents-page"></span>';
+        button.querySelector('.contents-no').textContent=group.stop!==undefined?stopNumber(group.stop):'·';
+        button.querySelector('.contents-name').textContent=group.name;button.querySelector('.contents-page').textContent=String(folioOf(at));
+        button.setAttribute('aria-label',`${group.name}, page ${folioOf(at)}`);button.addEventListener('click',()=>goToCity(group.id));
+        item.append(button);list.append(item);
+      }
+      block.append(list);el.append(block);
     }else if(page.type==='empty'){
       const empty=document.createElement('div'),art=document.createElement('div'),label=document.createElement('p'),hint=document.createElement('p'),add=document.createElement('button');empty.className='photo-empty';
       art.className='photo-empty-art';art.innerHTML=icons.photos;label.textContent='No photos yet';hint.className='photo-empty-hint';hint.textContent='Drop photos onto the album or add them from your device. Photos with location data find their city on your route.';
       add.type='button';add.className='small-button';add.textContent='Add photos';add.disabled=busy;add.addEventListener('click',()=>$('choose-photos').click());empty.append(art,label,hint,add);el.append(empty);
-    }else{
+    }else if(page.type==='city'){
       const {group}=page,head=document.createElement('header');head.className='page-head';
       if(page.first){
         const number=document.createElement('span'),title=document.createElement('h3'),detail=document.createElement('p');
-        number.className='page-stop';number.textContent=group.stop!==undefined?`Stop ${stopNumber(group.stop)}`:'Elsewhere';
+        number.className='page-stop';number.textContent=group.stop!==undefined?`Port ${stopNumber(group.stop)}`:'Elsewhere';
         title.className='city-name';title.textContent=group.name;detail.className='page-country';detail.textContent=[group.country,photoLabel(group.items.length)].filter(Boolean).join(' · ');
         head.append(number,title,detail);if(group.stop!==undefined)head.append(mapButton(group));
       }else{head.classList.add('continued');head.textContent=`${group.name}, continued`;}
-      const prints=document.createElement('div'),count=page.items.length;
-      prints.className=`prints n-${count}`;
-      if(count===2&&page.items.every(photo=>photo.width&&photo.width<photo.height))prints.classList.add('side-by-side');
+      const prints=document.createElement('div');prints.className=`prints ${layoutOf(page.items)}`;
       page.items.forEach((photo,i)=>prints.append(printElement(photo,group,page.from+i)));
       el.append(head,prints);
     }
-    folio(el,index);
-    if(side!=='single'||index>firstPage()||index<pages.length-1){
+    folio(el,index,page);
+    if(!['cover','back','blank'].includes(page.type)||(side==='single'&&page.type!=='back')){
       const corner=document.createElement('button');corner.type='button';corner.className='page-corner';corner.tabIndex=-1;corner.setAttribute('aria-hidden','true');
-      corner.addEventListener('click',()=>turnTo(shownPage()+(side==='left'?-1:1)*(twoPage()?2:1)));el.append(corner);
+      corner.addEventListener('click',()=>turnTo(shownPage()+(side==='left'?-1:1)*step()));el.append(corner);
     }
     return el;
   }
-  function spread(index){return twoPage()?[pageElement(pages[index],index,'left'),pageElement(pages[index+1],index+1,'right')]:[pageElement(pages[index],index,'single')];}
+  function stateClasses(index){
+    const book=$('album-book'),last=lastPage();
+    book.classList.toggle('closed-front',index===0);book.classList.toggle('closed-back',index===last);
+    // The page block thickens on the side already read.
+    const read=last?index/last:0;$('album-pages').style.setProperty('--read',read.toFixed(3));
+  }
+  // Page numbers change with the layout (one page or two, and how many ports a contents page holds),
+  // so the album keeps its place by what is on the page: the back cover, the endpapers, or the same page.
+  function placeAt(index,two){
+    const shown=(two?[index-1,index]:[index]).map(i=>pages[i]);
+    if(shown.some(other=>other?.type==='back'))return {back:true,index};
+    // The chosen city's page anchors the place, or else the first page with something on it.
+    const page=shown.find(other=>other?.type==='city'&&other.group.id===activeCity)||shown.find(other=>other&&other.type!=='blank'&&!other.end);
+    if(!page)return {end:true,index};
+    return {type:page.type,id:page.group?.id??page.groups?.[0]?.id,from:page.from,index};
+  }
+  function pageAt(place){
+    if(place.back)return lastPage();
+    const found=pages.findIndex(page=>place.end?page.end:page.type===place.type&&!page.end&&(page.group?page.group.id===place.id&&page.from===place.from:!page.groups||page.groups.some(group=>group.id===place.id)));
+    return found<0?place.index:found;
+  }
   function renderAlbum(){
     if(turning){const token=turning;turning=null;token.animations.forEach(animation=>animation.cancel());albumPage=token.target;}
-    pages=albumPages();albumPage=clampPage(albumPage);
-    const root=$('album-pages');root.classList.toggle('single',!twoPage());root.replaceChildren(...spread(albumPage));
-    updateAlbumNav();
+    const two=twoPage(),rows=contentsRows(),place=reopen||(drawn&&(drawn.two!==two||drawn.rows!==rows)?placeAt(albumPage,drawn.two):null);
+    reopen=null;pages=albumPages();albumPage=clampPage(place?pageAt(place):albumPage);drawn={two,rows,trip:current?.id};
+    const root=$('album-pages');root.classList.toggle('single',!two);
+    root.replaceChildren(...visiblePages(albumPage).map((index,i)=>pageElement(pages[index],index,two?(i?'right':'left'):'single')));
+    stateClasses(albumPage);updateAlbumNav();
   }
-  function cityAt(index){return pages[index]?.type==='city'?pages[index].group:pages[index+1]?.type==='city'&&twoPage()?pages[index+1].group:null;}
-  function updateAlbumNav(){
-    const two=twoPage(),last=clampPage(pages.length-1),city=cityAt(albumPage);
-    $('album-previous').disabled=albumPage<=firstPage();$('album-next').disabled=albumPage>=last;
-    const shown=two?[albumPage,albumPage+1].filter(i=>i>=2&&i<pages.length):[albumPage].filter(i=>i>=2);
-    const where=albumPage<2&&(!two||albumPage===0)?'Title page':city?city.name:'';
-    $('album-position').textContent=[where,shown.length?`${shown.length>1?'pages':'page'} ${shown.map(i=>i-1).join('–')} of ${Math.max(0,pages.length-2)}`:''].filter(Boolean).join(' · ');
-    const scrub=$('album-scrub');scrub.min=String(firstPage());scrub.max=String(last);scrub.step=String(two?2:1);scrub.value=String(albumPage);scrub.disabled=last<=firstPage();
-    // Keep the chosen tab when its city shares this spread; otherwise follow the pages.
-    const onSpread=id=>[albumPage,two?albumPage+1:albumPage].some(i=>pages[i]?.type==='city'&&pages[i].group.id===id);
-    if(city&&!onSpread(activeCity)){activeCity=city.id;}markTab();
-    $('album-book').classList.toggle('at-start',albumPage<=firstPage());$('album-book').classList.toggle('at-end',albumPage>=last);
+  // The cities on these pages, left page first.
+  const citiesAt=index=>[...new Map(visiblePages(index).map(i=>pages[i]).filter(page=>page?.type==='city').map(page=>[page.group.id,page.group])).values()];
+  // The page label and tabs follow a turn as soon as it starts.
+  function updateAlbumNav(at=albumPage){
+    const last=lastPage(),cities=citiesAt(at),shown=visiblePages(at).filter(i=>['city','contents','empty'].includes(pages[i]?.type));
+    $('album-previous').disabled=at<=0;$('album-next').disabled=at>=last;
+    const types=visiblePages(at).map(i=>pages[i]?.type);
+    const where=types.includes('cover')?'Front cover':types.includes('back')?'Back cover':types.includes('title')?'Title page':cities.length?cities.map(city=>city.name).join(' & '):types.includes('contents')?'Contents':types.includes('empty')?'No photos yet':'Endpapers';
+    $('album-position').textContent=[where,shown.length&&!types.includes('title')?`${shown.length>1?'pages':'page'} ${shown.map(folioOf).join('–')}`:''].filter(Boolean).join(' · ');
+    // The slider speaks the same page names and numbers as the label.
+    const scrub=$('album-scrub');scrub.min='0';scrub.max=String(last);scrub.step=String(step());scrub.value=String(at);scrub.disabled=!last;scrub.setAttribute('aria-valuetext',$('album-position').textContent);
+    // Keep the chosen tab when its city shares these pages; otherwise follow the first city on them.
+    if(cities.length&&!cities.some(city=>city.id===activeCity))activeCity=cities[0].id;markTab();
   }
-  function preload(index){for(const page of [pages[index],pages[index+1]])for(const photo of page?.items||[]){const image=new Image();image.decoding='async';image.src=photo.thumbUrl||photo.url;}}
+  function preload(index){for(const i of visiblePages(index))for(const photo of pages[i]?.items||[]){const image=new Image();image.decoding='async';image.src=photo.thumbUrl||photo.url;}}
+  // Focus on a page that turned away (a contents entry, say) moves to the current tab, so the keyboard keeps its place.
+  function keepAlbumFocus(had){
+    const active=document.activeElement;if(!had||active&&active!==document.body)return;
+    const tab=[...$('gallery-filter').children].find(el=>el.getAttribute('aria-current')==='true');
+    (tab&&!$('gallery-filter').inert?tab:$('album-next').disabled?$('album-previous'):$('album-next')).focus({preventScroll:true});
+  }
   // A page turns over its spine: the leaf carries the old page on its front and the next on its back.
   async function turnTo(target,{instant=false}={}){
     if(!pages.length)pages=albumPages();
-    if(turning){const token=turning;turning=null;token.animations.forEach(animation=>animation.cancel());albumPage=token.target;}
+    // A second press toward the page already turning to lets that turn finish.
+    if(turning&&!instant&&clampPage(target)===turning.target)return;
+    let had=$('album-pages').contains(document.activeElement);
+    if(turning){const token=turning;turning=null;had||=token.had;token.animations.forEach(animation=>animation.cancel());albumPage=token.target;}
     target=clampPage(target);
-    if(target===albumPage){renderAlbum();return;}
+    if(target===albumPage){renderAlbum();keepAlbumFocus(had);return;}
     const from=albumPage,forward=target>from,root=$('album-pages');
-    if(instant||!canAnimate(root)||!$('photo-panel').open){albumPage=target;renderAlbum();preload(target+(forward?2:-2));return;}
-    const token={target,animations:[]};turning=token;
+    if(instant||!canAnimate(root)||!$('photo-panel').open){albumPage=target;renderAlbum();keepAlbumFocus(had);preload(target+(forward?1:-1)*step());return;}
+    const token={target,animations:[],had};turning=token;
     if(twoPage()){
-      const left=forward?from:target,right=forward?target+1:from+1,frontIndex=forward?from+1:from,backIndex=forward?target:target+1;
+      const left=forward?from-1:target-1,right=forward?target:from,frontIndex=forward?from:from-1,backIndex=forward?target-1:target;
       const under=[pageElement(pages[left],left,'left'),pageElement(pages[right],right,'right')];
       const leaf=document.createElement('div'),front=pageElement(pages[frontIndex],frontIndex,forward?'right':'left'),back=pageElement(pages[backIndex],backIndex,forward?'left':'right');
       leaf.className=`album-leaf ${forward?'turn-forward':'turn-back'}`;front.classList.add('leaf-face','leaf-front');back.classList.add('leaf-face','leaf-back');
       const frontShade=shade(),backShade=shade(),cast=shade('cast');front.append(frontShade);back.append(backShade);under[forward?1:0].append(cast);
-      leaf.append(front,back);root.replaceChildren(...under,leaf);
-      const distance=Math.abs(target-from)/2,timing={duration:Math.min(1100,760+distance*30),easing:'cubic-bezier(.645,.045,.355,1)',fill:'forwards'};
+      leaf.append(front,back);root.replaceChildren(...under,leaf);stateClasses(target);updateAlbumNav(target);
+      const cover=[pages[frontIndex]?.type,pages[backIndex]?.type].some(type=>type==='cover'||type==='back');
+      const timing={duration:cover?1050:Math.min(1100,780+Math.abs(target-from)*12),easing:'cubic-bezier(.645,.045,.355,1)',fill:'forwards'};
       token.animations.push(
         leaf.animate([{transform:'rotateY(0deg)'},{transform:`rotateY(${forward?-180:180}deg)`}],timing),
         frontShade.animate([{opacity:0},{opacity:.42,offset:.5},{opacity:.42}],timing),
@@ -633,37 +747,22 @@
         cast.animate([{opacity:.55},{opacity:0}],timing));
     }else{
       const below=pageElement(pages[forward?target:from],forward?target:from,'single'),above=pageElement(pages[forward?from:target],forward?from:target,'single');
-      above.classList.add('single-leaf');root.replaceChildren(below,above);
+      above.classList.add('single-leaf');root.replaceChildren(below,above);stateClasses(target);updateAlbumNav(target);
       const out=[{transform:'perspective(1600px) rotateY(0deg)',opacity:1},{transform:'perspective(1600px) rotateY(-82deg)',opacity:.2}];
       token.animations.push(above.animate(forward?out:[...out].reverse(),{duration:560,easing:'cubic-bezier(.45,.05,.25,1)',fill:'forwards'}));
     }
     await Promise.all(token.animations.map(animation=>animation.finished)).catch(()=>{});
-    if(turning!==token)return;turning=null;albumPage=target;renderGallery();preload(target+(forward?2:-2));
+    if(turning!==token)return;turning=null;albumPage=target;renderGallery();keepAlbumFocus(had);preload(target+(forward?1:-1)*step());
   }
-  // The first visit opens the cover like a real album.
-  function openCover(){
-    const root=$('album-pages');
-    if(!twoPage()||!canAnimate(root)||albumPage!==0)return;
-    const leaf=document.createElement('div'),front=document.createElement('section'),back=pageElement(pages[0],0,'left');
-    leaf.className='album-leaf turn-forward cover-leaf';front.className='album-page right leaf-face leaf-front album-cover';back.classList.add('leaf-face','leaf-back');
-    front.innerHTML='<div class="cover-plate"><span class="cover-rule"></span><p class="cover-kicker">Travel album</p><p class="cover-title"></p><span class="cover-rule"></span></div>';
-    front.querySelector('.cover-title').textContent=current?.title||'Photos';
-    leaf.append(front,back);root.append(leaf);
-    const token={target:0,animations:[]};turning=token;
-    const timing={duration:1150,delay:180,easing:'cubic-bezier(.6,.04,.28,1)',fill:'both'};
-    token.animations.push(leaf.animate([{transform:'rotateY(0deg)'},{transform:'rotateY(-180deg)'}],timing));
-    const left=root.querySelector('.album-page.left');if(left)token.animations.push(left.animate([{opacity:0},{opacity:0,offset:.48},{opacity:1,offset:.52},{opacity:1}],timing));
-    Promise.all(token.animations.map(animation=>animation.finished)).catch(()=>{}).then(()=>{if(turning===token){turning=null;renderGallery();}});
-  }
-  $('album-previous').addEventListener('click',()=>turnTo(shownPage()-(twoPage()?2:1)));
-  $('album-next').addEventListener('click',()=>turnTo(shownPage()+(twoPage()?2:1)));
+  $('album-previous').addEventListener('click',()=>turnTo(shownPage()-step()));
+  $('album-next').addEventListener('click',()=>turnTo(shownPage()+step()));
   $('album-scrub').addEventListener('input',()=>turnTo(Number($('album-scrub').value),{instant:true}));
   let swipe=null,suppressClick=0;
   $('album-pages').addEventListener('pointerdown',event=>{swipe=event.pointerType==='touch'?{x:event.clientX,y:event.clientY,id:event.pointerId}:null;});
   $('album-pages').addEventListener('pointerup',event=>{
     if(!swipe||swipe.id!==event.pointerId)return;const dx=event.clientX-swipe.x,dy=event.clientY-swipe.y;swipe=null;
     if(Math.abs(dx)<50||Math.abs(dx)<Math.abs(dy)*1.4)return;
-    suppressClick=Date.now()+400;turnTo(shownPage()+(dx<0?1:-1)*(twoPage()?2:1));
+    suppressClick=Date.now()+400;turnTo(shownPage()+(dx<0?1:-1)*step());
   });
 
   // "All photos": a contact sheet, where photos are selected, moved, and deleted.
@@ -674,7 +773,6 @@
       art.innerHTML=icons.photos;art.className='photo-empty-art';label.textContent='No photos yet';hint.className='photo-empty-hint';hint.textContent='Drop photos here or add them from your device. Photos with location data find their city on your route.';
       add.type='button';add.className='small-button';add.textContent='Add photos';add.disabled=busy;add.addEventListener('click',()=>$('choose-photos').click());empty.append(art,label,hint,add);container.append(empty);
     }
-    let frame=0;
     for(const group of groups){
       const section=document.createElement('section'),top=document.createElement('div'),place=document.createElement('div'),heading=document.createElement('h3'),count=document.createElement('span'),grid=document.createElement('div');
       section.className='gallery-city';section.dataset.stopId=group.id;top.className='gallery-city-heading';heading.textContent=group.name;count.className='gallery-city-count';count.textContent=photoLabel(group.items.length);
@@ -684,24 +782,28 @@
       top.append(place,count);if(group.stop!==undefined)top.append(mapButton(group));
       grid.className='photo-grid';
       group.items.forEach((photo,i)=>{
-        const tile=document.createElement('div'),number=document.createElement('span');tile.className='photo-tile';tile.dataset.photoId=photo.id;
-        const button=previewButton(photo,(event,origin)=>{if(selecting){toggleChosen(photo.id);return;}openPhoto(photo,group,origin);},{saved:true});
+        const tile=document.createElement('div');tile.className='photo-tile';tile.dataset.photoId=photo.id;
+        const button=previewButton(photo,(event,origin)=>{if(selecting){toggleChosen(photo.id,event.shiftKey);return;}openPhoto(photo,group,origin);},{saved:true});
         button.setAttribute('aria-label',`${selecting?'Select':'Open'} photo ${i+1} in ${group.name}`);
         if(selecting){button.setAttribute('aria-pressed',String(chosen.has(photo.id)));const mark=document.createElement('span');mark.className='photo-check';mark.innerHTML=icons.check;tile.append(mark);}
         if(hasPostcard(photo)){const card=document.createElement('span');card.className='postcard-badge';card.title='Postcard written';card.innerHTML=icons.postcard;tile.append(card);}
-        number.className='frame-number';number.textContent=String(++frame).padStart(2,'0');number.setAttribute('aria-hidden','true');
-        tile.prepend(button);tile.append(number);grid.append(tile);
+        tile.prepend(button);grid.append(tile);
       });
       section.append(top,grid);container.append(section);
     }
   }
   function setSelecting(value){
-    if(selecting===value)return;selecting=value;chosen.clear();
-    $('select-photos').setAttribute('aria-pressed',String(value));
+    if(selecting===value)return;selecting=value;chosen.clear();anchor=null;
     if(value&&view!=='sheet'){view='sheet';}
     if($('photo-panel').open)renderGallery();else renderPhotoMode();
   }
-  function toggleChosen(id){if(chosen.has(id))chosen.delete(id);else chosen.add(id);updateChosen();}
+  // Shift-click selects every photo between the last photo clicked and this one, like Photos.
+  function toggleChosen(id,range=false){
+    const order=galleryItems.map(photo=>photo.id),from=order.indexOf(anchor),to=order.indexOf(id);
+    if(range&&from>=0&&to>=0){for(const key of order.slice(Math.min(from,to),Math.max(from,to)+1))chosen.add(key);}
+    else{if(chosen.has(id))chosen.delete(id);else chosen.add(id);anchor=id;}
+    updateChosen();
+  }
   function updateChosen(){
     const count=chosen.size,visible=galleryItems.length;
     $('gallery-selection-count').textContent=count?`${count} selected`:'Tap photos to select';
@@ -709,11 +811,13 @@
     $('select-visible').disabled=busy||!visible;$('move-photos').disabled=busy||!count;$('delete-photos').disabled=busy||!count;
     document.querySelectorAll('#photo-gallery .photo-tile').forEach(tile=>{const on=chosen.has(tile.dataset.photoId);tile.classList.toggle('chosen',on);if(selecting)tile.querySelector('.photo-image')?.setAttribute('aria-pressed',String(on));});
   }
-  $('select-photos').addEventListener('click',()=>setSelecting(!selecting));
+  // Select, a bulk move, or a bulk delete can hide or disable the focused control; focus moves to Done, Select, or the album.
+  function keepFocus(){const at=document.activeElement,gone=el=>!el||el===document.body||el.disabled||!!el.closest('[hidden]');if($('photo-panel').open&&gone(at))[selecting&&$('done-selecting'),$('select-photos'),$('photo-panel')].find(el=>el&&!gone(el))?.focus({preventScroll:true});}
+  $('select-photos').addEventListener('click',()=>{setSelecting(!selecting);keepFocus();});
   $('done-selecting').addEventListener('click',()=>{setSelecting(false);$('select-photos').focus({preventScroll:true});});
   $('select-visible').addEventListener('click',()=>{const all=galleryItems.every(photo=>chosen.has(photo.id));for(const photo of galleryItems)all?chosen.delete(photo.id):chosen.add(photo.id);updateChosen();});
-  $('move-photos').addEventListener('change',()=>{const stopId=$('move-photos').value;$('move-photos').value='';if(stopId&&chosen.size)movePhotos([...chosen],stopId).catch(()=>{});});
-  $('delete-photos').addEventListener('click',()=>{if(chosen.size)deletePhotos([...chosen]).catch(()=>{});});
+  $('move-photos').addEventListener('change',()=>{const stopId=$('move-photos').value;$('move-photos').value='';if(stopId&&chosen.size)movePhotos([...chosen],stopId).catch(()=>{}).then(keepFocus);});
+  $('delete-photos').addEventListener('click',()=>{if(chosen.size)deletePhotos([...chosen]).catch(()=>{}).then(keepFocus);});
   async function movePhotos(ids,stopId){
     if(busy||!current)throw Error('Please wait for the current change to finish.');
     busy=true;update();
@@ -756,16 +860,16 @@
     const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;link.hidden=true;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
   }
   async function exportTrips(all,tripId=current?.id){
-    if(busy)return;busy=true;update();
+    if(busy)return;const focus=listFocus();let saved=false;busy=true;update();
     try{
       const own=!all&&tripId===current?.id;
-      if(own&&dirty){if(!current)throw Error('Name and save this trip before exporting.');await saveCurrent();}
+      if(own&&dirty){if(!current)throw Error('Name and save this trip before exporting.');await saveCurrent();saved=true;}
       if(own&&pending.length)throw Error('Save the pending photos before exporting.');
       if(!all&&!tripId)throw Error('Name and save this trip before exporting.');
       const blob=await window.RedlineStorage.exportArchive(all?null:tripId);
       const title=all?'Redline-backup':(tripCache.find(trip=>trip.id===tripId)?.title||current?.title||'Redline-trip');
       downloadBackup(blob,`${title.replace(/[^a-zA-Z0-9_-]+/g,'-')}.redline`);message('trip-message','Backup downloaded. Keep it somewhere private.');
-    }catch(error){showError('trip-message',error);}finally{busy=false;update();}
+    }catch(error){showError('trip-message',error);}finally{busy=false;update();if(saved)await refreshLogbook(focus);}
   }
   $('export-trip').addEventListener('click',()=>exportTrips(false));
   $('backup-trips').addEventListener('click',()=>exportTrips(true));

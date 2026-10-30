@@ -52,40 +52,49 @@
       <button id="reset-view" title="Show the world" aria-label="Show the world"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><ellipse cx="10" cy="10" rx="3" ry="6.5"/><path d="M3.5 10h13"/></svg></button>
       <button id="info-button" title="Information" aria-label="Information" aria-haspopup="dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M10 9v5M10 6v.5"/></svg></button>
     </div>
-    <section id="route-dock" class="route-dock" aria-label="Plan your route">
-      <div class="dock-heading"><span id="route-caption" hidden></span><div class="trip-actions"><button id="trips-button" aria-keyshortcuts="T" aria-haspopup="dialog" aria-controls="trip-panel" aria-expanded="false" class="text-button">Trips</button><button id="save-trip" aria-keyshortcuts="S" class="text-button">Save</button><button id="photos-button" aria-keyshortcuts="P" aria-haspopup="dialog" aria-controls="photo-panel" aria-expanded="false" class="text-button">Photos <span id="photo-count"></span></button><span id="trip-title"></span></div><div class="dock-tools"><button id="clear" class="text-button">Clear</button><button id="toggle-stops" class="icon-button" aria-label="Collapse cities" title="Collapse cities" aria-controls="route-stops-panel" aria-expanded="true"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4"/></svg></button></div></div>
-      <div id="route-stops-panel"><ol id="stop-list" aria-label="Destinations in travel order"></ol>
-      <p id="empty-hint" hidden></p></div>
+    <section id="route-dock" class="route-dock" aria-label="Voyage planner">
+      <div class="voyage-head">
+        <svg class="voyage-compass" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17.5" fill="none" stroke="currentColor" stroke-width=".8"/><circle cx="20" cy="20" r="14" fill="none" stroke="currentColor" stroke-width=".5" stroke-dasharray="1 2.2"/><path d="M8.7 8.7 21.2 18.8 20 20 18.8 21.2ZM31.3 8.7 21.2 21.2 20 20 18.8 18.8ZM31.3 31.3 18.8 21.2 20 20 21.2 18.8ZM8.7 31.3 18.8 18.8 20 20 21.2 21.2Z" fill="currentColor" opacity=".35"/><g class="needle"><path d="M20 2.5 22.6 17.4 37.5 20 22.6 22.6 20 37.5 17.4 22.6 2.5 20 17.4 17.4Z" fill="currentColor" opacity=".82"/><path d="M20 2.5 22.6 17.4 20 20 17.4 17.4Z" fill="#a3342b"/></g><circle cx="20" cy="20" r="1.7" fill="#f4ead4"/></svg>
+        <div class="voyage-title"><span class="voyage-kicker">The voyage of</span><span id="trip-title"></span></div>
+        <div class="voyage-actions">
+          <button id="trips-button" class="voyage-tab" type="button" aria-keyshortcuts="T" aria-controls="trip-panel" aria-expanded="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 3.5h9.5a1.5 1.5 0 0 1 1.5 1.5v11.5H6a1.5 1.5 0 0 1-1.5-1.5zM4.5 15A1.5 1.5 0 0 1 6 13.5h9.5M7.5 6.5h5M7.5 9h4"/></svg><span>Logbook</span></button>
+          <button id="photos-button" class="voyage-tab" type="button" aria-keyshortcuts="P" aria-haspopup="dialog" aria-controls="photo-panel" aria-expanded="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v11h-13zM3.5 12.5l3.5-3.5 3 3 2.5-2.5 4 4"/><circle cx="12.8" cy="7.6" r="1.2"/></svg><span>Album</span> <span id="photo-count"></span></button>
+          <button id="save-trip" class="seal-button" type="button" aria-keyshortcuts="S" title="Save this voyage (S)">Save</button>
+        </div>
+      </div>
+      <div id="trip-panel" class="logbook" hidden role="region" aria-labelledby="trips-heading" tabindex="-1">
+        <div class="logbook-inner"><div class="logbook-scroll">
+          <div class="logbook-head"><h2 id="trips-heading">Ship’s log</h2><p id="trips-summary"></p><button class="close-panel icon-button" data-close="trip-panel" aria-label="Close the logbook" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>
+          <section class="current-trip" aria-labelledby="current-trip-label">
+            <div id="current-trip-map" class="trip-map current-map" aria-hidden="true"></div>
+            <div class="current-trip-info">
+              <p id="current-trip-label" class="eyebrow">This voyage</p>
+              <form id="trip-name-form"><label for="trip-name" class="sr-only">Voyage name</label><input id="trip-name" placeholder="Name this voyage" maxlength="80" required autocomplete="off"><button type="submit">Save</button></form>
+              <p id="trip-state" class="trip-state"></p>
+              <div class="current-actions"><button id="new-trip" class="text-button" type="button">+ Begin a new voyage</button><button id="export-trip" class="text-button" type="button">Export this voyage</button></div>
+            </div>
+          </section>
+          <p id="trip-message" class="panel-message" role="status"></p>
+          <div class="trip-list-heading"><h3>Voyages on this device</h3><label id="trip-search-label" class="trip-search" hidden><span class="sr-only">Find a voyage</span><input id="trip-search" type="search" placeholder="Find a voyage" autocomplete="off"></label></div>
+          <ul id="trip-list" class="trip-grid" aria-label="Saved voyages"></ul>
+          <div class="logbook-foot"><p class="storage-note">Kept in this browser only.</p><button id="backup-trips" class="text-button" type="button">Back up all</button><button id="import-trips" class="text-button" type="button">Import backup</button><input id="trip-backup-file" type="file" accept=".redline,application/octet-stream" hidden></div>
+        </div></div>
+      </div>
+      <div class="ports-head"><span class="ports-label">Ports of call</span><span class="ports-rule" aria-hidden="true"></span><button id="clear" class="text-button" type="button">Clear</button><button id="toggle-stops" class="icon-button" type="button" aria-label="Collapse ports" title="Collapse ports" aria-controls="route-stops-panel" aria-expanded="true"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4"/></svg></button></div>
+      <div id="route-stops-panel"><ol id="stop-list" aria-label="Ports in travel order"></ol>
+      <p id="empty-hint" hidden>No ports yet. Chart a course below.</p></div>
       <div class="input-row">
         <form id="destination-form" autocomplete="off">
           <svg class="search-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
           <label for="destination" class="sr-only">Search for a destination</label>
-          <input id="destination" placeholder="Add a destination…" maxlength="120" role="combobox" aria-expanded="false" aria-controls="suggestions" aria-autocomplete="list">
+          <input id="destination" placeholder="Chart a course to…" maxlength="120" role="combobox" aria-expanded="false" aria-controls="suggestions" aria-autocomplete="list">
           <button class="add-button" type="submit" title="Add destination" aria-label="Add destination">↵</button>
         </form>
-        <div class="travel-controls"><button id="previous-city" class="icon-button" aria-label="Previous city" title="Previous city"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button><button id="play" class="play-button"><svg id="play-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5z"/></svg><span id="play-label">Trace route</span></button><button id="next-city" class="icon-button" aria-label="Next city" title="Next city"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button></div>
+        <div class="travel-controls"><button id="previous-city" class="icon-button" aria-label="Previous port" title="Previous port"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button><button id="play" class="play-button"><svg id="play-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5z"/></svg><span id="play-label">Set sail</span></button><button id="next-city" class="icon-button" aria-label="Next port" title="Next port"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button></div>
       </div>
       <div class="suggestion-panel" id="suggestion-panel" hidden><div id="suggestions" role="listbox" aria-label="Matching destinations"></div><p id="search-message" role="status"></p><p class="search-credit"><a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo / GeoNames</a></p></div>
       <p id="status" class="status" role="status" aria-live="polite"></p>
     </section>
-    <dialog id="trip-panel" class="trips-sheet" aria-labelledby="trips-heading" tabindex="-1">
-      <header class="sheet-head"><div><h2 id="trips-heading">Trips</h2><p id="trips-summary" class="sheet-subtitle"></p></div><button class="close-panel" data-close="trip-panel" aria-label="Close trips" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></header>
-      <div class="sheet-body">
-        <section class="current-trip" aria-labelledby="current-trip-label">
-          <div id="current-trip-map" class="trip-map current-map" aria-hidden="true"></div>
-          <div class="current-trip-info">
-            <p id="current-trip-label" class="eyebrow">This route</p>
-            <form id="trip-name-form"><label for="trip-name" class="sr-only">Trip name</label><input id="trip-name" placeholder="Name this trip" maxlength="80" required autocomplete="off"><button type="submit">Save trip</button></form>
-            <p id="trip-state" class="trip-state"></p>
-            <div class="current-actions"><button id="new-trip" class="text-button" type="button">+ Start a new trip</button><button id="export-trip" class="text-button" type="button">Export this trip</button></div>
-          </div>
-        </section>
-        <p id="trip-message" class="panel-message" role="status"></p>
-        <div class="trip-list-heading"><h3>Saved on this device</h3><label id="trip-search-label" class="trip-search" hidden><span class="sr-only">Find a trip</span><input id="trip-search" type="search" placeholder="Find a trip" autocomplete="off"></label></div>
-        <ul id="trip-list" class="trip-grid" aria-label="Saved trips"></ul>
-      </div>
-      <footer class="sheet-foot trip-backups"><span class="storage-note">Trips and photos stay in this browser.</span><button id="backup-trips" class="text-button" type="button">Back up all</button><button id="import-trips" class="text-button" type="button">Import backup</button><input id="trip-backup-file" type="file" accept=".redline,application/octet-stream" hidden></footer>
-    </dialog>
     <dialog id="photo-panel" class="album" aria-labelledby="photos-heading" tabindex="-1">
       <div class="album-top">
         <div class="album-title"><h2 id="photos-heading">Photos</h2><p class="album-subtitle"><span id="photo-trip-name"></span><span id="gallery-count"></span></p></div>
@@ -98,7 +107,7 @@
         <div id="album-book" class="album-book">
           <div id="album-pages" class="album-pages"></div>
           <div id="album-sheet" class="album-sheet" hidden>
-            <div id="gallery-toolbar" class="gallery-toolbar" hidden><span class="sheet-label">Every photo, by city</span><button id="select-photos" class="text-button toolbar-button" type="button" aria-pressed="false">Select</button></div>
+            <div id="gallery-toolbar" class="gallery-toolbar" hidden><span class="sheet-label">Every photo, by city</span><button id="select-photos" class="text-button toolbar-button" type="button">Select</button></div>
             <div id="gallery-actions" class="gallery-actions" hidden role="toolbar" aria-label="Selected photos"><span id="gallery-selection-count" role="status" aria-live="polite"></span><button id="select-visible" class="text-button" type="button">Select all</button><span class="toolbar-spacer"></span><label for="move-photos" class="sr-only">Move selected photos to a city</label><select id="move-photos"><option value="">Move to…</option></select><button id="delete-photos" class="text-button danger-button" type="button">Delete</button><button id="done-selecting" class="small-button" type="button">Done</button></div>
             <div id="photo-bulk" class="photo-bulk" hidden><label class="photo-select-all"><input id="select-all-photos" type="checkbox"><span id="photo-selection-count">Select all</span></label><select id="bulk-photo-city" aria-label="Assign a city to the selected photos"><option value="">Assign a city…</option></select></div>
             <div id="photo-progress" class="photo-progress" role="progressbar" aria-label="Processing photos" aria-valuemin="0" hidden><span></span></div>
@@ -120,23 +129,23 @@
       <p id="photo-message" class="panel-message" role="status" aria-live="polite"></p>
     </dialog>
     <dialog id="photo-viewer" aria-label="Photo and postcard">
-      <button id="close-photo-viewer" class="viewer-close" title="Close (Esc)" aria-label="Close photo"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
-      <button id="close-postcard" class="viewer-close" title="Close (Esc)" aria-label="Close postcard" aria-hidden="true" inert><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button><span id="postcard-save-status" class="sr-only" role="status"></span>
+      <span id="postcard-save-status" class="sr-only" role="status"></span>
       <div id="postcard-stage"><div id="postcard-card">
-        <div id="postcard-front" class="postcard-face"><div class="viewer-photo"><img id="full-photo" alt="" draggable="false"><button id="viewer-previous" class="viewer-edge previous" type="button" tabindex="-1" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m12 5-5 5 5 5"/></svg></button><button id="viewer-next" class="viewer-edge next" type="button" tabindex="-1" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m8 5 5 5-5 5"/></svg></button></div>
+        <div id="postcard-front" class="postcard-face"><div class="viewer-photo"><img id="full-photo" alt="" draggable="false"><button id="viewer-previous" class="viewer-edge previous" type="button" aria-label="Previous photo" title="Previous photo (←)" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button><button id="viewer-next" class="viewer-edge next" type="button" aria-label="Next photo" title="Next photo (→)" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button></div>
           <div class="photo-viewer-footer">
             <div class="photo-viewer-caption"><p id="photo-caption"></p><label for="photo-city" class="sr-only">Move this photo to another city</label><select id="photo-city" hidden></select></div>
             <div class="photo-viewer-tools">
+              <span id="photo-position" role="status" aria-live="polite" hidden></span>
               <button id="flip-postcard" class="viewer-tool" type="button" title="Write on the back (F)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5.5h14v9H3zM10.5 8h4M10.5 10.5h4M5.5 8h3"/></svg><span>Postcard</span></button>
               <button id="delete-photo" class="viewer-tool" type="button" title="Delete photo" aria-label="Delete photo" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6h11M8 6V4.2h4V6M6.2 6l.7 10h6.2l.7-10M8.6 8.6v5M11.4 8.6v5"/></svg></button>
-              <nav id="photo-navigation" aria-label="Browse photos" hidden><button id="previous-photo" type="button" aria-label="Previous photo" title="Previous photo (←)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button><span id="photo-position" role="status" aria-live="polite"></span><button id="next-photo" type="button" aria-label="Next photo" title="Next photo (→)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button></nav>
+              <button id="close-photo-viewer" class="viewer-tool viewer-close" type="button" title="Close (Esc)" aria-label="Close photo"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
             </div>
           </div>
         </div>
         <div id="postcard-back" class="postcard-face" aria-hidden="true" inert>
           <div class="postcard-heading"><span id="postcard-place"></span><span class="postcard-stamp" aria-hidden="true"></span></div>
           <div class="postcard-columns"><textarea id="postcard-message" maxlength="1200" placeholder="Message" aria-label="Postcard message"></textarea><div class="postcard-address"><input id="postcard-recipient" maxlength="120" placeholder="To" aria-label="Postcard recipient"><textarea id="postcard-address" maxlength="400" placeholder="Address" aria-label="Postcard address"></textarea><input id="postcard-sender" maxlength="120" placeholder="From" aria-label="Postcard sender"></div></div>
-          <div class="postcard-actions"><button id="unflip-postcard" type="button" title="Show the photo (F)">← Photo</button><span id="postcard-saved" aria-hidden="true"></span><button id="print-postcard" type="button">Print</button><button id="share-postcard" type="button" disabled>Share</button></div>
+          <div class="postcard-actions"><button id="unflip-postcard" type="button" title="Show the photo (F)">← Photo</button><span id="postcard-saved" aria-hidden="true"></span><button id="print-postcard" type="button">Print</button><button id="share-postcard" type="button" disabled>Share</button><button id="close-postcard" class="viewer-tool viewer-close" type="button" title="Close (Esc)" aria-label="Close postcard" aria-hidden="true" inert><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>
         </div>
       </div></div>
       <p id="postcard-error" class="panel-message error" role="alert"></p>
@@ -144,15 +153,13 @@
     <dialog id="info-dialog" aria-labelledby="info-title">
       <div class="panel-top"><h2 id="info-title">A few bearings</h2><button id="close-info" class="close-panel" aria-label="Close information" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>
       <dl class="info-shortcuts">
-        <dt>Add a city</dt><dd>Type a name and press Enter. Use ↑ ↓ to choose a search result.</dd>
-        <dt>Arrange the trip</dt><dd>Click a route city to zoom to that stop. Drag its name to reorder, or focus it and use Alt + arrow keys. The chevron collapses the list.</dd>
-        <dt>Trace</dt><dd>Press Space to start or resume, and hold it for 2× speed. Click the trace button to pause. A full trace finishes at the world overview. Zoom during travel to follow the line at your chosen level.</dd>
-        <dt>One city at a time</dt><dd>Use the arrows beside Trace or your keyboard’s arrow keys. The camera gently follows the route and settles with both cities in view. Press again during travel to arrive instantly in the same view. The trip loops both ways through the overview: Back from the overview goes to the last city. Return, Home, or the globe glides back to the whole-world overview.</dd>
+        <dt>Chart a course</dt><dd>Type a port of call and press Enter. Use ↑ ↓ to choose a search result. Drag a port’s name to reorder it, or focus it and use Alt + arrow keys. The chevron folds the list away.</dd>
+        <dt>Set sail</dt><dd>Press Return or Space to start or resume the trace, and hold either for 2× speed. The Set sail button pauses. A full voyage finishes at the world overview. Zoom during travel to follow the line at your chosen level.</dd>
+        <dt>One port at a time</dt><dd>Click a port to look at it within the whole voyage. The arrows beside Set sail, or your arrow keys, then sail on from that port to the next or previous one; press again during travel to arrive at once. Backspace (Delete on a Mac), Home, or the globe glides back to the overview.</dd>
         <dt>Just the map</dt><dd>Press H to hide the controls. H, Escape, or a double-click on the map brings them back.</dd>
-        <dt>Keep your trips</dt><dd>S saves your trip. T opens Trips: name this route, open any saved trip from its little map, or use ⋯ to rename, export, or delete one. Trips, photos, and postcard notes stay in this browser, with no account needed. Use Back up all regularly and Import to restore or move devices. Clearing website data or using private browsing can erase local saves. Backups contain your photos and notes; keep them private.</dd>
-        <dt>Photos</dt><dd>P opens the album. Turn its pages with the arrows, ← →, the page corners, or a swipe; the tabs on its edge jump to a city, and the pin finds that city on the map. All photos shows every photo at once, where Select moves or deletes several. Add photos, or drag them anywhere onto the page: photos with location data find their city, and you can assign the rest one by one or all at once. Escape closes the viewer or the album. Location metadata is read to suggest a city and removed from the stored photo. City locations: <a href="https://www.geonames.org/" target="_blank" rel="noreferrer">GeoNames</a>.</dd>
-        <dt>The viewer</dt><dd>Use ← → or swipe to browse. Change the city under a photo to move it, or use the bin to delete it.</dd>
-        <dt>Postcards</dt><dd>Choose Postcard, press F, or click the photo to turn it over. Write on the back; it saves automatically. Print or Ctrl + P (⌘ + P on Mac) prints both sides. Share sends an image of both sides through your device’s share menu, or downloads it when file sharing is unavailable.</dd>
+        <dt>The logbook</dt><dd>S seals (saves) the voyage. T opens the logbook inside the planner: name this voyage, open another from its little chart, or use ⋯ to rename, export, or delete one. Voyages, photos, and postcards stay in this browser with no account; use Back up all regularly and Import backup to restore or move devices. Clearing website data or private browsing can erase them, and backups contain your photos and notes, so keep them private.</dd>
+        <dt>The album</dt><dd>P opens the voyage’s album, from its front cover to its back cover. Turn pages with the arrows, ← →, the page corners, a swipe, or the slider; Home and End close it on either cover. The contents page and the tabs on its edge jump to a port, and the pin beside a port’s name finds it on the map. All photos shows every photo at once; press Select, then click photos (Shift-click selects a run) to move or delete them. Add photos, or drag them anywhere onto the page; photos with location data find their port. City locations: <a href="https://www.geonames.org/" target="_blank" rel="noreferrer">GeoNames</a>.</dd>
+        <dt>Photos and postcards</dt><dd>Click a print to open it; browse its port with ← →, a swipe, or the arrows at the photo’s edges. Change the city under a photo to move it, or use the bin to delete it. Choose Postcard, press F, or click the photo to turn it over and write on the back; it saves automatically. Print or Ctrl + P (⌘ + P on Mac) prints both sides, and Share sends an image of both sides.</dd>
         <dt>The map</dt><dd>Scroll or use + / − to zoom. Drag to pan when zoomed in. Country, city, and regional detail appears as you zoom.</dd>
       </dl>
     </dialog>
