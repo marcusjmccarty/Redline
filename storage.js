@@ -1,12 +1,12 @@
 (() => {
   'use strict';
-  const MAX_PHOTO = 4*1024*1024;
+  const MAX_PHOTO = 4*1024*1024, MAX_THUMB = 1024*1024;
   const fail = (message, status=400) => { throw Object.assign(Error(message), {status}); };
   const idValid = id => typeof id === 'string' && /^[a-zA-Z0-9_-]{8,80}$/.test(id);
   const now = () => new Date().toISOString();
   const timestamp = value => typeof value==='string' && value.length<50 && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : now();
   let opening;
-  const urls = new Map();
+  const urls = new Map(), thumbs = new Map();
   const request = operation => new Promise((resolve,reject) => {
     operation.onsuccess = () => resolve(operation.result);
     operation.onerror = () => reject(operation.error);
@@ -70,10 +70,15 @@
     }
     return result;
   }
+  const dimension = value => { const n=Number(value); return Number.isInteger(n)&&n>0&&n<=20000?n:null; };
   function photoDto(record) {
     if (!urls.has(record.id)) urls.set(record.id,URL.createObjectURL(record.blob));
-    const {blob,tripId,...photo}=record;
-    return {...photo,url:urls.get(record.id)};
+    if (record.thumb && !thumbs.has(record.id)) thumbs.set(record.id,URL.createObjectURL(record.thumb));
+    const {blob,thumb,tripId,...photo}=record;
+    return {...photo,url:urls.get(record.id),thumbUrl:thumbs.get(record.id)||null};
+  }
+  function forget(id) {
+    for (const cache of [urls,thumbs]) { if (cache.has(id)) { URL.revokeObjectURL(cache.get(id)); cache.delete(id); } }
   }
   const ownTrip = async (store,id) => {
     const trip=idValid(id)?await request(store.get(id)):null;
@@ -81,9 +86,27 @@
     return trip;
   };
   async function persist() { try { return await navigator.storage?.persist?.(); } catch { return false; } }
-  async function cleanPhoto(blob) {
-    if (!blob || blob.type!=='image/jpeg' || !blob.size || blob.size>MAX_PHOTO) fail('Use a processed JPEG smaller than 4 MB.');
+  async function cleanPhoto(blob, max=MAX_PHOTO) {
+    if (!blob || blob.type!=='image/jpeg' || !blob.size || blob.size>max) fail(max===MAX_PHOTO?'Use a processed JPEG smaller than 4 MB.':'The photo preview is too large.');
     return new Blob([window.RedlineJPEG.stripJpegMetadata(await blob.arrayBuffer())],{type:'image/jpeg'});
+  }
+  // Optional small preview and pixel size; galleries fall back to the full photo without them.
+  async function extras(form) {
+    const thumb=form?.get?.('thumb'),result={};
+    if (thumb && typeof thumb!=='string') result.thumb=await cleanPhoto(thumb,MAX_THUMB);
+    const width=dimension(form?.get?.('width')),height=dimension(form?.get?.('height'));
+    if (width && height) Object.assign(result,{width,height});
+    return result;
+  }
+  function photoIds(body) {
+    const ids=body?.ids;
+    if (!Array.isArray(ids) || !ids.length || ids.length>300 || !ids.every(idValid) || new Set(ids).size!==ids.length) fail('Choose photos from this trip.');
+    return ids;
+  }
+  async function tripPhotos(stores,trip,ids) {
+    const photos=await Promise.all(ids.map(id=>request(stores.photos.get(id))));
+    if (photos.some(photo=>!photo || photo.tripId!==trip.id)) fail('Some photos are no longer in this trip. Reopen it and try again.',409);
+    return photos;
   }
 
   async function api(path, options={}) {
@@ -94,7 +117,7 @@
       if (method==='GET') return transaction(['trips','photos'],'readonly',async stores=>{
         const trips=await request(stores.trips.getAll()),photos=await request(stores.photos.getAll());
         const counts=new Map(); for (const photo of photos) counts.set(photo.tripId,(counts.get(photo.tripId)||0)+1);
-        return {trips:trips.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).map(({stops,...trip})=>({...trip,photoCount:counts.get(trip.id)||0}))};
+        return {trips:trips.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).map(({stops,...trip})=>({...trip,stopCount:stops.length,photoCount:counts.get(trip.id)||0}))};
       });
       if (method==='POST') {
         const data=tripData(body); persist();
@@ -120,16 +143,66 @@
           await request(trips.put(trip)); return {trip};
         });
       }
+      if (method==='DELETE') {
+        const ids=await transaction(['trips','photos'],'readwrite',async stores=>{
+          const trip=await ownTrip(stores.trips,parts[1]),keys=await request(stores.photos.index('tripId').getAllKeys(trip.id));
+          for (const key of keys) await request(stores.photos.delete(key));
+          await request(stores.trips.delete(trip.id)); return keys;
+        });
+        ids.forEach(forget); return {deleted:true,photoCount:ids.length};
+      }
     }
     if (parts[0]==='trips' && parts.length===3 && parts[2]==='photos' && method==='POST') {
-      const blob=await cleanPhoto(body?.get?.('photo')),stopId=body.get('stopId');
+      const blob=await cleanPhoto(body?.get?.('photo')),stopId=body.get('stopId'),more=await extras(body);
       const record=await transaction(['trips','photos'],'readwrite',async stores=>{
         const trip=await ownTrip(stores.trips,parts[1]),stop=trip.stops.find(s=>s.id===stopId);
         if (!stop) fail('Save this city in your trip before adding its photos.');
         if (await request(stores.photos.index('tripId').count(trip.id))>=300) fail('This trip already has 300 photos.',409);
-        const photo={id:crypto.randomUUID(),tripId:trip.id,stopId:stop.id,city:stop,blob,createdAt:now(),postcard:{},postcardRevision:1};
+        const photo={id:crypto.randomUUID(),tripId:trip.id,stopId:stop.id,city:stop,blob,...more,createdAt:now(),postcard:{},postcardRevision:1};
         await request(stores.photos.add(photo)); return photo;
       });
+      return {photo:photoDto(record)};
+    }
+    // Renaming touches only the title, with the same stale-tab check as a full save.
+    if (parts[0]==='trips' && parts.length===3 && parts[2]==='title' && method==='PUT') {
+      const title=typeof body?.title==='string'?body.title.trim():'';
+      if (!title || title.length>80) fail('Give the trip a name (up to 80 characters).');
+      return transaction(['trips'],'readwrite',async ({trips})=>{
+        const before=await ownTrip(trips,parts[1]);
+        if (!Number.isInteger(body.revision) || body.revision!==before.revision) fail('This trip was updated in another tab. Reopen it before renaming.',409);
+        const trip={...before,title,revision:before.revision+1,updatedAt:now()};
+        await request(trips.put(trip)); const {stops,...summary}=trip; return {trip:summary};
+      });
+    }
+    // Moving and deleting several photos are single atomic changes.
+    if (parts[0]==='trips' && parts.length===3 && parts[2]==='photos' && method==='PUT') {
+      const ids=photoIds(body);
+      const records=await transaction(['trips','photos'],'readwrite',async stores=>{
+        const trip=await ownTrip(stores.trips,parts[1]),stop=trip.stops.find(s=>s.id===body.stopId);
+        if (!stop) fail('Save this city in your trip before moving photos there.');
+        const photos=await tripPhotos(stores,trip,ids);
+        for (const photo of photos) { photo.stopId=stop.id; photo.city=stop; await request(stores.photos.put(photo)); }
+        return photos;
+      });
+      return {photos:records.map(photoDto)};
+    }
+    if (parts[0]==='trips' && parts.length===3 && parts[2]==='photos' && method==='DELETE') {
+      const ids=photoIds(body);
+      await transaction(['trips','photos'],'readwrite',async stores=>{
+        const trip=await ownTrip(stores.trips,parts[1]);await tripPhotos(stores,trip,ids);
+        for (const id of ids) await request(stores.photos.delete(id));
+      });
+      ids.forEach(forget); return {deleted:ids.length};
+    }
+    if (parts[0]==='photos' && parts.length===3 && parts[2]==='thumb' && method==='PUT') {
+      const more=await extras(body);if (!more.thumb) fail('Choose a photo preview.');
+      const record=await transaction(['photos'],'readwrite',async ({photos})=>{
+        const photo=idValid(parts[1])?await request(photos.get(parts[1])):null;
+        if (!photo) fail('Photo not found.',404);
+        Object.assign(photo,more);await request(photos.put(photo));return photo;
+      });
+      // Only the preview changes; the full photo URL may still be on screen.
+      if (thumbs.has(record.id)) { URL.revokeObjectURL(thumbs.get(record.id)); thumbs.delete(record.id); }
       return {photo:photoDto(record)};
     }
     if (parts[0]==='photos' && parts.length===3 && parts[2]==='postcard' && method==='PUT') {
@@ -166,7 +239,8 @@
         const snapshot=p.city==null?null:city(p.city);
         if (snapshot && snapshot.id!==p.stopId) fail('The backup contains an invalid photo location.');
         const blob=await cleanPhoto(entry.blob);
-        photos.push({id:crypto.randomUUID(),tripId:trip.id,stopId:p.stopId||null,city:snapshot,blob,createdAt:timestamp(p.createdAt),postcard:postcard(p.postcard),postcardRevision:1});
+        const width=dimension(p.width),height=dimension(p.height);
+        photos.push({id:crypto.randomUUID(),tripId:trip.id,stopId:p.stopId||null,city:snapshot,blob,...(width&&height?{width,height}:{}),createdAt:timestamp(p.createdAt),postcard:postcard(p.postcard),postcardRevision:1});
       }
     }
     if (!trips.length) fail('This backup has no trips.');

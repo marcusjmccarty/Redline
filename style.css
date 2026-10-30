@@ -33,8 +33,8 @@ form[aria-busy=true] .add-button{opacity:.45}.route-dock{bottom:24px}.map-instru
 .stop-grip:before{display:none}#map.zoomed-out,#map.zoomed-out.dragging{cursor:default}.status:empty{display:none}.status{margin:7px 0 0}
 #regions path{fill:none;stroke:#9e8d70;stroke-width:.5;stroke-opacity:.65;stroke-dasharray:2 2;vector-effect:non-scaling-stroke;pointer-events:none}
 .dock-heading{justify-content:space-between;gap:12px}.trip-actions{display:flex;align-items:center;gap:16px;min-width:0;font-family:Arial,sans-serif;letter-spacing:0}.trip-actions button{white-space:nowrap}#trip-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:italic 12px Georgia,serif;letter-spacing:0;color:#7a6c55}.trip-actions button.dirty{color:var(--red)}#photo-count{font:9px 'Courier New',monospace}
-.library-panel{position:absolute;z-index:6;right:24px;top:25px;bottom:200px;width:min(340px,calc(100vw - 32px));max-height:680px;overflow:auto;background:#f6f0e3;border:1px solid #b0a08578;box-shadow:0 7px 25px #59422316;border-radius:3px;padding:19px}.panel-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.panel-top h2{margin:0;font:22px Georgia,serif;font-weight:normal}.close-panel{border:0;background:none;color:#8f8069;font-size:24px;padding:0 3px}.library-panel form{display:flex}.library-panel form input{font-size:13px}.library-panel form button,.small-button{border:1px solid #ad9b7f;border-radius:2px;background:#eee4d1;color:#5e513d;font-size:11px;padding:10px 12px;white-space:nowrap}.new-trip{margin:17px 0}.saved-trip{display:flex;align-items:center;justify-content:space-between;width:100%;gap:12px;padding:13px 0;border:0;border-top:1px solid #bead913b;background:none;text-align:left;color:var(--ink);font:16px Georgia,serif}.saved-trip span{font:10px Arial,sans-serif;color:var(--muted)}.saved-trip.active{color:var(--red)}.panel-message{font:12px Arial,sans-serif;line-height:1.5;color:#866f55}.panel-message:empty{display:none}.panel-message.error{color:#a3342b}.panel-message a{color:var(--red)}.photo-toolbar{display:flex;justify-content:space-between}.photo-note{font:10px Arial,sans-serif;color:#928069;line-height:1.5;margin:10px 0 15px}.review-photo{display:grid;grid-template-columns:58px 1fr 20px;gap:9px;align-items:center;padding:10px 0;border-top:1px solid #bead913b}.review-photo img{width:58px;height:58px;object-fit:cover}.review-photo select{width:100%;font:12px Arial,sans-serif;padding:7px;border:1px solid #c2b398;background:#fbf6ec;color:#66533c;min-width:0}.review-photo small{display:block;font:10px Arial,sans-serif;color:#8f7c61;margin-top:5px}.review-photo button{border:0;background:none;color:#8f7c61;font-size:17px;padding:0}.review-photo button:disabled{opacity:.4}.gallery-city h3{font:16px Georgia,serif;font-weight:normal;margin:20px 0 8px}.photo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.photo-grid button{padding:0;border:0;background:none;aspect-ratio:1;overflow:hidden}.photo-grid img{width:100%;height:100%;object-fit:cover;display:block}#photo-viewer::backdrop{background:#211c16b8}#upload-photos{margin-top:10px;width:100%}
-@media(max-width:650px){.library-panel{top:18px;right:16px;bottom:195px;width:calc(100% - 32px);padding:15px}.trip-actions{gap:12px}#trip-title{max-width:95px}.trip-actions .text-button{font-size:11px}}
+.panel-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.panel-top h2{margin:0;font:22px Georgia,serif;font-weight:normal}.small-button{border:1px solid #ad9b7f;border-radius:2px;background:#eee4d1;color:#5e513d;font-size:11px;padding:10px 12px;white-space:nowrap}.panel-message{font:12px Arial,sans-serif;line-height:1.5;color:#866f55}.panel-message:empty{display:none}.panel-message.error{color:#a3342b}.panel-message a{color:var(--red)}#photo-viewer::backdrop{background:#211c16b8}
+@media(max-width:650px){.trip-actions{gap:12px}#trip-title{max-width:95px}.trip-actions .text-button{font-size:11px}}
 /* Unobtrusive route and presentation controls. */
 .dock-tools{display:flex;align-items:center;gap:12px;flex:none}.icon-button{display:inline-grid;place-items:center;flex:none;width:30px;height:30px;padding:5px;border:0;background:none;color:#81715a;cursor:pointer}.icon-button:hover{color:var(--red)}.icon-button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}#toggle-stops{width:22px;height:22px;padding:2px}#toggle-stops[aria-expanded=false] svg{transform:rotate(180deg)}.stops-collapsed .input-row{margin-top:9px}#stop-list .stop-grip[aria-current=step]{color:var(--red)}.stop-drag-preview{position:fixed;left:0;top:0;z-index:30;pointer-events:none;padding:9px 12px;background:#f7f0e2;border:1px solid #b4a181;border-radius:3px;box-shadow:0 8px 20px #48321d35;font:16px Georgia,serif;color:var(--ink);white-space:nowrap;display:flex;align-items:center;will-change:transform}.reordering,.reordering *{cursor:grabbing!important;user-select:none!important}.map-only .route-dock,.map-only .map-instruments,.map-only .zoom-controls,.map-only .library-panel{visibility:hidden;pointer-events:none}#map:focus{outline:none}
 /* A photo and its postcard share one quiet, reversible card. */
@@ -54,12 +54,6 @@ form[aria-busy=true] .add-button{opacity:.45}.route-dock{bottom:24px}.map-instru
 .print-message,.print-back .postcard-address{min-height:0;min-width:0;overflow:hidden}
 @media print{#postcard-print-root{position:static;left:auto;top:auto;visibility:visible!important}}
 
-/* The photograph keeps its own proportions and its quiet paper mount. */
-
-
-
-
-
 #postcard-back textarea,#postcard-back input{font-size:clamp(12px,1.6vw,17px)}
 #postcard-stage.portrait .postcard-columns{grid-template-columns:1fr;grid-template-rows:1fr 1fr;gap:5%}
 #postcard-stage.portrait .postcard-address{border-left:0;border-top:1px solid #b6a58b;padding:5% 0 0}
@@ -74,10 +68,6 @@ form[aria-busy=true] .add-button{opacity:.45}.route-dock{bottom:24px}.map-instru
 #photo-viewer{max-width:90vw;max-height:90svh;padding:16px;border:1px solid #a79577;border-radius:0;background:#eee4d1;color:var(--ink);overflow:visible;transform-style:preserve-3d;transform:perspective(1600px) rotateY(0deg);transition:transform 1s cubic-bezier(.4,0,.2,1)}
 #photo-viewer.flipped{transform:perspective(1600px) rotateY(180deg)}
 #full-photo{width:auto;height:auto;max-width:calc(90vw - 40px);max-height:75svh;display:block;object-fit:contain;cursor:pointer;user-select:none;-webkit-user-select:none}
-.viewer-close{position:absolute;top:4px;border:0;background:transparent;color:#66533c;font-size:24px;cursor:pointer;backface-visibility:hidden;-webkit-backface-visibility:hidden}
-#close-photo-viewer{right:8px;transform:translateZ(1px)}
-#close-postcard{left:8px;transform:rotateY(180deg) translateZ(1px)}
-#photo-caption{font:15px Georgia,serif;margin:10px 0 0}
 #postcard-stage{width:fit-content;max-width:100%;transform-style:preserve-3d}
 #postcard-card{position:relative;width:fit-content;max-width:100%;height:auto;transform-style:preserve-3d}
 .postcard-face{backface-visibility:hidden;-webkit-backface-visibility:hidden;overflow:hidden}
@@ -85,13 +75,3 @@ form[aria-busy=true] .add-button{opacity:.45}.route-dock{bottom:24px}.map-instru
 #postcard-back{position:absolute;inset:0;transform:rotateY(180deg);display:flex;flex-direction:column;padding:4%;background:#eee4d1;border:0;color:#625440}
 #photo-viewer.flipped #postcard-error{transform:rotateY(180deg)}
 @media(prefers-reduced-motion:reduce){#photo-viewer{transition:none}}
-
-/* Original compact photo panel, with quiet import and management controls. */
-.photo-toolbar{align-items:center;gap:12px;margin-bottom:10px}
-.photo-bulk{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0 12px;border-top:1px solid #bead914d}.photo-select-all{display:flex;align-items:center;gap:6px;white-space:nowrap;font:10px Arial,sans-serif;color:#81715a}.photo-select-all input,.photo-pick input{width:13px;height:13px;margin:0;padding:0;accent-color:var(--red);cursor:pointer}.photo-bulk select{min-width:0;max-width:55%;font:11px Arial,sans-serif;color:#66533c;border:1px solid #c2b398;padding:6px;background:#fbf6ec}
-.photo-tile{position:relative;min-width:0}.photo-image{display:block;width:100%;aspect-ratio:1;padding:0;border:0;background:none;overflow:hidden;cursor:zoom-in}.photo-image img{width:100%;height:100%;object-fit:cover;display:block}.photo-pick{position:absolute;top:12px;left:2px;display:grid;place-items:center;width:20px;height:20px;background:#f6f0e3e6;border-radius:2px}.photo-tile.selected .photo-image{outline:1px solid var(--red);outline-offset:-1px}
-.review-photo{display:grid;grid-template-columns:58px minmax(0,1fr);gap:9px;padding:10px 0}.review-photo .photo-image{width:58px;height:58px}.review-photo .photo-tile-tools{display:grid;grid-template-columns:minmax(0,1fr) 20px;align-items:center;gap:8px;padding:0}.review-photo .photo-tile-tools select{font:12px Arial,sans-serif;border:1px solid #c2b398;background:#fbf6ec;padding:7px;color:#66533c}
-.photo-tile-tools{display:flex;align-items:center;gap:3px}.photo-tile-tools select{min-width:0;width:100%;font:11px Arial,sans-serif;color:#75634a;background:transparent;border:0;padding:4px 0}.photo-tile-tools .remove-photo{flex:none;width:20px;aspect-ratio:auto;background:none;border:0;padding:0;font:17px Arial,sans-serif;color:#9a876d;overflow:visible}.photo-tile-tools .remove-photo:hover{color:var(--red)}
-.photo-empty{font:italic 14px Georgia,serif;color:#94836a;margin:20px 0}
-
-.trip-backups{display:flex;gap:18px;align-items:center;margin-top:18px;padding-top:14px;border-top:1px solid #b4a58b66}.storage-note{font:10px Georgia,serif;color:var(--muted);margin:10px 0 0}
