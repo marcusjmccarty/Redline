@@ -43,9 +43,8 @@
   let animation = 0, running = false, lines = [], searchTimer, controller, searchVersion = 0, results = [], selected = -1;
   let resultsQuery = '', resultsReady = false, addingQuery = '';
   let progress=null,activeLeg=null,geometry=[],playback=null,lastTick=null;
-  let traceZoom=null,idleZoom=null,suppressStopClickUntil=0,insetRight=0;
-  const photoCounts=new Map();
-  const heldKeys=new Map();
+  let traceZoom=null,idleZoom=null,suppressStopClickUntil=0,insetRight=0,spaceSince=null;
+  const labelSlots=new Map(),labelWidths=new Map(),zoomControls=document.querySelector('.zoom-controls');
   const WORLD_W=1440,WORLD_H=720,MAX_ZOOM=(4/3)**9;
   let view={x:0,y:0,w:WORLD_W,h:WORLD_H};
   let baseView={...view},viewFrame=0,zoomLevel=1,activeStopId=null;
@@ -68,6 +67,7 @@
   function stopAnimation() {
     cancelAnimationFrame(animation);animation=0;lastTick=null;playback=null;idleZoom=null;setPlayState(false);
   }
+  const stopShown=i=>!(activeLeg?.destination===i&&Math.abs(progress-i)>1e-7)&&(progress===null||i<=progress+1e-7||activeLeg?.origin===i);
   function paintProgress(){
     lines.forEach((path,i)=>{
       const amount=progress===null?1:Math.max(0,Math.min(1,progress-i));
@@ -79,8 +79,7 @@
       }
     });
     [...$('route-stops').children].forEach((node,i)=>{
-      const waiting=activeLeg?.destination===i&&Math.abs(progress-i)>1e-7;
-      const visible=!waiting&&(progress===null||i<=progress+1e-7||activeLeg?.origin===i);
+      const visible=stopShown(i);
       node.style.opacity=visible?'1':'0';node.setAttribute('aria-hidden',String(!visible));
       node.setAttribute('tabindex',visible?'0':'-1');node.style.pointerEvents=visible?'':'none';
     });
@@ -89,17 +88,10 @@
     stopAnimation();traceZoom=null;progress=null;activeLeg=null;activeStopId=null;$('route-lines').replaceChildren();$('route-stops').replaceChildren();$('stop-list').replaceChildren();lines=[];
     stops.forEach((place,index)=>{
       if(index) {const path=svg('path',{class:'route-path'});$('route-lines').append(path);lines.push(path);}
-      const [x,y]=project(place),group=svg('g',{'data-index':index}),dot=svg('circle',{cx:x,cy:y,r:4.5,class:'stop-dot'});
-      const label=svg('text',{x:x+10,y:y-12,class:'stop-label'});
+      const [x,y]=project(place),group=svg('g',{'data-index':index,transform:`translate(${x} ${y})`}),dot=svg('circle',{cx:0,cy:0,r:4.5,class:'stop-dot'});
+      const label=svg('text',{x:10,y:-12,class:'stop-label label-hidden'});
       label.textContent=place.name.toUpperCase();
-      const near=stops.slice(0,index).some(p=>{const [px,py]=project(p);return Math.abs(x-px)<95&&Math.abs(y-py)<30;});
-      if(near) label.setAttribute('y',y+22);
-      if(x>1250){label.setAttribute('x',x-10);label.setAttribute('text-anchor','end');}
-      const badge=svg('g',{class:'photo-badge','aria-hidden':'true'}),frame=svg('rect',{x:0,y:0,height:15,rx:2}),camera=svg('path',{d:'M3.5 5.5h1.6l.9-1.3h2.6l.9 1.3h1.6v5.3H3.5z',class:'photo-badge-icon'}),lens=svg('circle',{cx:7.6,cy:8,r:1.5,class:'photo-badge-icon'}),count=svg('text',{x:14,y:11});
-      badge.append(frame,camera,lens,count);
-      badge.addEventListener('pointerdown',event=>event.stopPropagation());
-      badge.addEventListener('click',event=>{event.stopPropagation();window.dispatchEvent(new CustomEvent('redline:openphotos',{detail:{stopId:place.id}}));});
-      group.append(dot,label,badge);$('route-stops').append(group);paintBadge(group,place.id);
+      group.append(dot,label);$('route-stops').append(group);
       group.setAttribute('role','button');group.setAttribute('aria-label',`Go to ${place.name}, stop ${index+1}`);
       group.addEventListener('pointerdown',event=>event.stopPropagation());
       group.addEventListener('click',()=>jumpToCity(index));
@@ -115,6 +107,7 @@
       grip.addEventListener('pointerdown',event=>startStopDrag(event,index,grip));
     });
     rebuildGeometry();
+    for(const text of $('route-stops').querySelectorAll('.stop-label'))text._width=labelWidth(text);
     $('empty-hint').hidden=stops.length>0;$('stop-list').hidden=stops.length===0;
     $('play').disabled=stops.length<2;$('clear').disabled=stops.length===0;
     if(!stops.some(p=>p.id===activeStopId))activeStopId=null;
@@ -123,11 +116,11 @@
     $('status').textContent='';
     scheduleView();
   }
-  function paintBadge(group,id){
-    const badge=group.querySelector('.photo-badge'),count=photoCounts.get(id)||0;if(!badge)return;
-    badge.style.display=count?'':'none';if(!count)return;
-    const text=String(count);badge.querySelector('text').textContent=text;badge.querySelector('rect').setAttribute('width',String(18+text.length*6));
-    badge.querySelector('title')?.remove();const title=svg('title');title.textContent=`${count} photo${count===1?'':'s'} · open gallery`;badge.prepend(title);
+  // Label widths are measured once per name; Courier's fixed advance is the fallback.
+  function labelWidth(text){
+    const name=text.textContent;
+    if(!labelWidths.has(name)){let width=0;try{width=text.getComputedTextLength();}catch{}if(!(width>0))return window.RedlineLabels?.estimate(name)??name.length*8.3;labelWidths.set(name,width);}
+    return labelWidths.get(name);
   }
   function moveStop(from,to) {
     if(from===to)return;
@@ -192,7 +185,7 @@
       beginLeg(run.target,run.direction,run.returnToOverview);return true;
     }
     function tick(now){
-      const speed=[...heldKeys.values()].some(since=>now-since>=180)?2:1;
+      const speed=spaceSince!==null&&now-spaceSince>=180?2:1;
       const elapsed=lastTick===null?0:Math.max(0,Math.min(80,now-lastTick));lastTick=now;
       const run=playback;
       if(run.settling){
@@ -312,13 +305,12 @@
   $('play').addEventListener('click',trace);
   $('clear').addEventListener('click',()=>{stops=[];drawRoute();persist();input.value='';closeSearch();input.focus();});
   const labelNodes=new Map();
-  function renderLabels(matrix,bounds) {
+  // Place names avoid the route's dots, its chosen label boxes, and the dock.
+  function renderLabels(matrix,bounds,occupied) {
     const layer=$('place-labels'),width=bounds.width,height=bounds.height;
     layer.setAttribute('viewBox',`0 0 ${width} ${height}`);
-    const occupied=[],visible=new Set();
+    const visible=new Set();
     const screen=(x,y)=>[x*matrix.a+matrix.e-bounds.left,y*matrix.d+matrix.f-bounds.top];
-    for(const p of stops){const [x,y]=screen(...project(p));occupied.push({x:x-8,y:y-29,w:Math.min(240,p.name.length*8+25),h:49});}
-    const dock=$('route-dock').getBoundingClientRect();if(!document.body.classList.contains('map-only'))occupied.push({x:dock.left-bounds.left-8,y:dock.top-bounds.top-8,w:dock.width+16,h:dock.height+16});
     function placeLabel(key,name,x,y,isCity) {
       const [sx,sy]=screen(x,y),font=isCity?11:12,w=name.length*(isCity?5.8:7.1)+12;
       const box={x:isCity?sx+5:sx-w/2,y:sy-(isCity?13:8),w,h:18};
@@ -363,25 +355,45 @@
     view=constrainView(view);
     map.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);
     const bounds=map.getBoundingClientRect(),matrix=map.getScreenCTM();if(!matrix||!bounds.width||!bounds.height)return;
+    // Read every overlay box before writing, so a frame forces at most one layout.
+    const local=(el,pad)=>{const r=el.getBoundingClientRect();return {x:r.left-bounds.left-pad,y:r.top-bounds.top-pad,w:r.width+pad*2,h:r.height+pad*2};};
+    const controls=!document.body.classList.contains('map-only'),dock=controls?local($('route-dock'),8):null,obstacles=[];
+    if(controls){obstacles.push({x:dock.x+4,y:dock.y+4,w:dock.w-8,h:dock.h-8});if(zoomControls)obstacles.push(local(zoomControls,4));}
+    if(insetRight)obstacles.push({x:bounds.width-insetRight,y:0,w:insetRight,h:bounds.height});
     paintAntarctica(matrix,bounds);
     zoomLevel=baseView.w/view.w;
     $('zoom-in').disabled=zoomLevel>=MAX_ZOOM-.001;$('zoom-out').disabled=zoomLevel<=1.001;
     map.classList.toggle('zoomed-out',zoomLevel<=1.001);$('regions').style.display=zoomLevel>=1.6?'':'none';
+    const occupied=paintStops(matrix,bounds,obstacles);
+    for(const label of $('map-labels').children){
+      label.setAttribute('x','0');label.setAttribute('y','0');
+      label.setAttribute('transform',`translate(${label.dataset.mapX} ${label.dataset.mapY}) scale(${1/matrix.a} ${1/matrix.d}) rotate(${label.dataset.mapRotation})`);
+    }
+    if(dock)occupied.push(dock);
+    renderLabels(matrix,bounds,occupied);paintProgress();
+  }
+  function paintStops(matrix,bounds,obstacles){
+    const items=[],texts=[],occupied=[];
     [...$('route-stops').children].forEach((group,index)=>{
       const [x,y]=project(stops[index]),dot=group.querySelector('circle'),text=group.querySelector('text');
       // Keep dots and labels at a fixed screen size while zooming.
       group.setAttribute('transform',`translate(${x} ${y}) scale(${1/matrix.a} ${1/matrix.d})`);
       dot.setAttribute('cx','0');dot.setAttribute('cy','0');dot.setAttribute('r','4.5');text.style.fontSize='13px';text.style.strokeWidth='4px';text.style.letterSpacing='.5px';
-      text.setAttribute('x','10');text.setAttribute('y','-12');text.setAttribute('text-anchor','start');
-      const flipped=(x-view.x)*matrix.a>bounds.width-180,badge=group.querySelector('.photo-badge');
-      if(flipped){text.setAttribute('x','-10');text.setAttribute('text-anchor','end');}
-      if(badge)badge.setAttribute('transform',`translate(${flipped?-9-Number(badge.querySelector('rect').getAttribute('width')||24):9} 3)`);
+      // Unreached stops stay out of the layout while a trace reveals them.
+      if(!stopShown(index))return;
+      const sx=x*matrix.a+matrix.e-bounds.left,sy=y*matrix.d+matrix.f-bounds.top,id=stops[index].id;
+      items.push({id,x:sx,y:sy,width:text._width??text.textContent.length*8.3,height:14,priority:id===activeStopId?-1:index});texts.push(text);
+      occupied.push({x:sx-7,y:sy-7,w:14,h:14});
     });
-    for(const label of $('map-labels').children){
-      label.setAttribute('x','0');label.setAttribute('y','0');
-      label.setAttribute('transform',`translate(${label.dataset.mapX} ${label.dataset.mapY}) scale(${1/matrix.a} ${1/matrix.d}) rotate(${label.dataset.mapRotation})`);
-    }
-    renderLabels(matrix,bounds);paintProgress();
+    const flip=item=>{const end=item.x>bounds.width-180;return {name:end?'left-above':'right-above',x:end?-10:10,y:-12,anchor:end?'end':'start',box:{x:end?item.x-12-item.width:item.x+8,y:item.y-23,w:item.width+4,h:14}};};
+    const placed=window.RedlineLabels?RedlineLabels.place(items,{width:bounds.width,height:bounds.height,obstacles,previous:labelSlots}):items.map(flip);
+    labelSlots.clear();
+    placed.forEach((slot,i)=>{
+      const text=texts[i];text.classList.toggle('label-hidden',!slot);if(!slot)return;
+      labelSlots.set(items[i].id,slot.name);occupied.push(slot.box);
+      if(text._slot!==slot.name){text._slot=slot.name;text.setAttribute('x',slot.x);text.setAttribute('y',slot.y);text.setAttribute('text-anchor',slot.anchor);}
+    });
+    return occupied;
   }
   function scheduleView(){if(!viewFrame)viewFrame=requestAnimationFrame(paintView);}
   function resizeMap(){
@@ -401,7 +413,7 @@
       if(run.settling)run.settling.elapsed=0;
       return;
     }
-    if(playback?.phase==='overview'){stopAnimation();traceZoom=null;progress=null;activeLeg=null;activeStopId=null;updateActiveStop();}
+    if(playback?.phase==='overview'){stopAnimation();showWorld();}
     const matrix=map.getScreenCTM(),rx=clientX===undefined ? .5 : Math.max(0,Math.min(1,((clientX-matrix.e)/matrix.a-view.x)/view.w)),ry=clientY===undefined ? .5 : Math.max(0,Math.min(1,((clientY-matrix.f)/matrix.d-view.y)/view.h));
     const width=Math.max(baseView.w/MAX_ZOOM,Math.min(baseView.w,(idleZoom?.width||view.w)*factor));
     const anchor={x:view.x+view.w*rx,y:view.y+view.h*ry,rx,ry};
@@ -420,7 +432,7 @@
     animation=requestAnimationFrame(tick);
   }
   $('zoom-in').addEventListener('click',()=>zoom(.75));$('zoom-out').addEventListener('click',()=>zoom(4/3));
-  $('reset-view').addEventListener('click',()=>goToStep(0));
+  $('reset-view').addEventListener('click',()=>showOverview());
   map.addEventListener('wheel',event=>{event.preventDefault();if(!event.deltaY)return;const units=event.deltaMode===1?16:event.deltaMode===2?map.getBoundingClientRect().height:1;const delta=Math.max(-160,Math.min(160,event.deltaY*units));zoom(Math.exp(delta*(event.ctrlKey?.008:.0018)),event.clientX,event.clientY);},{passive:false});
   let drag=null;
   map.addEventListener('pointerdown',event=>{if(event.button!==0||baseView.w/view.w<=1.001)return;stopAnimation();const m=map.getScreenCTM();drag={x:event.clientX,y:event.clientY,vx:view.x,vy:view.y,scaleX:m.a,scaleY:m.d,id:event.pointerId};map.setPointerCapture(event.pointerId);map.classList.add('dragging');});
@@ -436,20 +448,47 @@
     $('next-city').setAttribute('aria-label',nextLabel);$('next-city').title=nextLabel;
     [...$('stop-list').children].forEach((node,i)=>{const grip=node.querySelector('.stop-grip');if(step===i+1)grip.setAttribute('aria-current','step');else grip.removeAttribute('aria-current');});
   }
-  function animateView(target,{overview=false}={}){
+  // van Wijk & Nuij optimal zoom-and-pan: share u of the centre line and width w at path parameter t.
+  function smoothZoom([x0,y0,w0],[x1,y1,w1],rho=Math.SQRT2){
+    const d=Math.hypot(x1-x0,y1-y0),r2=rho*rho;
+    if(d<1e-6*Math.max(w0,w1)){const S=Math.log(w1/w0)/rho;return {S,peak:Math.max(w0,w1),at:t=>[t,w0*Math.exp(rho*t*S)]};}
+    const r0=-Math.asinh((w1*w1-w0*w0+r2*r2*d*d)/(2*w0*r2*d)),r1=-Math.asinh((w1*w1-w0*w0-r2*r2*d*d)/(2*w1*r2*d)),S=(r1-r0)/rho,c=Math.cosh(r0),s=Math.sinh(r0);
+    return {S,peak:r0<0&&r1>0?w0*c:Math.max(w0,w1),at:t=>{const a=rho*t*S+r0;return [w0/(r2*d)*(c*Math.tanh(a)-s),w0*c/Math.cosh(a)];}};
+  }
+  function zoomPath(from,to){
+    // Measure in screen pixels so both axes share one scale despite the stretched sheet.
+    const {width,height}=map.getBoundingClientRect(),size=Math.max(1,width,height),ax=width/WORLD_W,ay=height/WORLD_H;
+    const point=f=>[(f.x+f.w/2)*ax,(f.y+f.h/2)*ay,size*f.w/WORLD_W],a=point(from),b=point(to);
+    let curve=smoothZoom(a,b);const length=Math.abs(curve.S);
+    // A long hop between close views would back out past the whole world; flatten the arc instead.
+    if(curve.peak>size){let low=.05,high=Math.SQRT2;for(let i=0;i<20;i++){const mid=(low+high)/2;if(smoothZoom(a,b,mid).peak>size)high=mid;else low=mid;}curve=smoothZoom(a,b,low);}
+    // Interpolate each frame's share of the free margin, so no frame is clamped against the sheet's edge.
+    const share=(f,key,span)=>span>1e-3?f[key]/span:null,fx=[share(from,'x',WORLD_W-from.w),share(to,'x',WORLD_W-to.w)],fy=[share(from,'y',WORLD_H-from.h),share(to,'y',WORLD_H-to.h)];
+    for(const f of [fx,fy]){f[0]??=f[1]??.5;f[1]??=f[0];}
+    return {length,duration:Math.max(600,Math.min(1600,420+length*560)),at:t=>{
+      const [u,s]=curve.at(t),w=Math.min(WORLD_W,WORLD_W*s/size),h=w*WORLD_H/WORLD_W;
+      return {x:(fx[0]+u*(fx[1]-fx[0]))*(WORLD_W-w),y:(fy[0]+u*(fy[1]-fy[0]))*(WORLD_H-h),w,h};
+    }};
+  }
+  function showWorld(){progress=null;activeLeg=null;activeStopId=null;traceZoom=null;updateActiveStop();}
+  function animateView(target,{overview=false,hold=0}={}){
     stopAnimation();cancelAnimationFrame(viewFrame);viewFrame=0;
-    const finish=()=>{stopAnimation();view={...target};if(overview){progress=null;activeLeg=null;activeStopId=null;traceZoom=null;updateActiveStop();}paintView();};
-    if(matchMedia('(prefers-reduced-motion: reduce)').matches){finish();return;}
-    const start={...view},began=performance.now(),hold=overview?320:0,duration=overview?950:650;
-    if(overview){setPlayState(true);playback={phase:'overview'};}
+    const finish=()=>{stopAnimation();view={...target};if(overview)showWorld();paintView();};
+    const path=zoomPath(constrainView(view),target);
+    if(matchMedia('(prefers-reduced-motion: reduce)').matches||path.length<1e-4){finish();return;}
+    // Arrow keys during an overview move finish it instantly.
+    if(overview)playback={phase:'overview'};
+    const began=performance.now();
     const tick=now=>{
-      const amount=Math.max(0,Math.min(1,(now-began-hold)/duration)),blend=RedlineTrace.ease(amount);
-      view=Object.fromEntries(['x','y','w','h'].map(key=>[key,start[key]+(target[key]-start[key])*blend]));paintView();
+      const amount=Math.max(0,Math.min(1,(now-began-hold)/path.duration));
+      view=path.at(RedlineTrace.ease(amount));paintView();
       if(amount===1){finish();return;}animation=requestAnimationFrame(tick);
     };
     animation=requestAnimationFrame(tick);
   }
-  function returnToWorld(){animateView({...baseView},{overview:true});}
+  function returnToWorld(){animateView({...baseView},{overview:true,hold:320});if(playback)setPlayState(true);}
+  // Enter, Home, and the globe: the complete route, with the camera easing back to the world.
+  function showOverview(){stopAnimation();showWorld();paintProgress();animateView({...baseView},{overview:true});}
   function jumpToCity(index){
     if(!stops[index])return;
     stopAnimation();traceZoom=null;progress=index;activeLeg=null;reachedCity();paintProgress();
@@ -457,7 +496,7 @@
   }
   function goToStep(step){
     step=Math.max(0,Math.min(stops.length,step));
-    if(!step){stopAnimation();traceZoom=null;progress=null;activeLeg=null;activeStopId=null;updateActiveStop();view={...baseView};paintView();return;}
+    if(!step){stopAnimation();showWorld();view={...baseView};paintView();return;}
     const to=step-1;
     if(progress===null)progress=0;
     runTo(to);
@@ -478,16 +517,28 @@
     }
     if(progress===null&&direction<0){if(lines.length)finishLeg(lines.length-1,1);else goToStep(1);return;}
     const step=progress===null?0:(direction>0?Math.floor(progress+1e-7)+1:Math.ceil(progress-1e-7)+1);
-    goToStep(direction>0&&step>=stops.length?0:step+direction);
+    const next=direction>0&&step>=stops.length?0:step+direction;
+    if(next<=0)showOverview();else goToStep(next);
   }
   $('previous-city').addEventListener('click',()=>stepTrip(-1));
   $('next-city').addEventListener('click',()=>stepTrip(1));
   function collapseStops(collapsed){
     $('route-dock').classList.toggle('stops-collapsed',collapsed);$('route-stops-panel').hidden=collapsed;
     $('toggle-stops').setAttribute('aria-expanded',String(!collapsed));$('toggle-stops').setAttribute('aria-label',collapsed?'Show cities':'Collapse cities');$('toggle-stops').title=collapsed?'Show cities':'Collapse cities';
-    try{localStorage.setItem('redline-cities-collapsed',String(collapsed));}catch{}scheduleView();reframeTrace();
+    try{localStorage.setItem('redline-cities-collapsed',String(collapsed));}catch{}scheduleView();
+    // An animated dock reframes the camera once its height settles (or soon after, without transitions).
+    clearTimeout(dockTimer);
+    if($('route-dock').classList.contains('dock-motion')&&!matchMedia('(prefers-reduced-motion: reduce)').matches)dockTimer=setTimeout(settleDock,450);else reframeTrace();
   }
-  $('toggle-stops').addEventListener('click',()=>collapseStops(!$('route-stops-panel').hidden));
+  // While the dock resizes, labels keep clear of it frame by frame.
+  const stopsPanel=$('route-stops-panel');let dockTimer=0,dockMovingUntil=0;
+  const dockSize=event=>event.target===stopsPanel&&event.propertyName==='grid-template-rows';
+  const followDock=()=>{if(performance.now()>dockMovingUntil)return;if(!animation)scheduleView();requestAnimationFrame(followDock);};
+  function settleDock(){clearTimeout(dockTimer);dockTimer=0;dockMovingUntil=0;scheduleView();reframeTrace();}
+  stopsPanel.addEventListener('transitionrun',event=>{if(!dockSize(event))return;const idle=performance.now()>dockMovingUntil;dockMovingUntil=performance.now()+600;if(idle)followDock();});
+  stopsPanel.addEventListener('transitionend',event=>{if(dockSize(event)&&dockTimer)settleDock();});
+  // Only the user's toggle animates; the saved state is restored at once.
+  $('toggle-stops').addEventListener('click',()=>{$('route-dock').classList.add('dock-motion');collapseStops(!stopsPanel.hidden);});
   try{collapseStops(localStorage.getItem('redline-cities-collapsed')==='true');}catch{}
   function setMapOnly(hidden){
     document.body.classList.toggle('map-only',hidden);
@@ -502,19 +553,24 @@
     if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"]')||document.querySelector('dialog[open]'))return;
     if(event.key==='Escape'&&document.body.classList.contains('map-only')){event.preventDefault();setMapOnly(false);return;}
     if(event.key.toLowerCase()==='h'){event.preventDefault();setMapOnly(!document.body.classList.contains('map-only'));return;}
-    if(event.key===' '||event.key==='Enter'){
+    // Space starts or resumes the trace, and holding it doubles the speed.
+    if(event.key===' '){
       if(event.target.closest?.('button')&&event.target.id!=='play')return;
-      event.preventDefault();if(!heldKeys.has(event.key))heldKeys.set(event.key,performance.now());
+      event.preventDefault();spaceSince??=performance.now();
       if(!event.repeat)startTrace();return;
+    }
+    if(event.key==='Enter'){
+      if(event.target.closest?.('button,a,[role=button]'))return;
+      event.preventDefault();if(!event.repeat)showOverview();return;
     }
     if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home'].includes(event.key)){
       event.preventDefault();if(event.repeat)return;
-      if(event.key==='Home')goToStep(0);else stepTrip(['ArrowRight','ArrowDown'].includes(event.key)?1:-1);
+      if(event.key==='Home')showOverview();else stepTrip(['ArrowRight','ArrowDown'].includes(event.key)?1:-1);
     }
   });
-  document.addEventListener('keyup',event=>heldKeys.delete(event.key));
-  window.addEventListener('blur',()=>heldKeys.clear());
-  document.addEventListener('visibilitychange',()=>{if(document.hidden){heldKeys.clear();lastTick=null;}});
+  document.addEventListener('keyup',event=>{if(event.key===' ')spaceSince=null;});
+  window.addEventListener('blur',()=>{spaceSince=null;});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){spaceSince=null;lastTick=null;}});
   const fragment=document.createDocumentFragment();
   for(const d of window.WORLD_PATHS)fragment.append(svg('path',{d}));$('land').append(fragment);
   for(const polygon of window.ANTARCTICA_POLYGONS)$('antarctica').append(svg('path'));
@@ -524,7 +580,6 @@
     showControls:()=>setMapOnly(false),
     closeSearch,
     focusStop:id=>{const index=stops.findIndex(p=>p.id===id);if(index>=0)jumpToCity(index);return index>=0;},
-    setPhotoCounts:counts=>{photoCounts.clear();for(const [id,count] of Object.entries(counts))photoCounts.set(id,count);[...$('route-stops').children].forEach((group,i)=>stops[i]&&paintBadge(group,stops[i].id));scheduleView();},
     setInsets:({right=0}={})=>{if(right===insetRight)return;insetRight=right;scheduleView();reframeTrace();},
     getStops:()=>stops.map(p=>({...p})),
     setStops:(items,{preserveView=false}={})=>{stops=items.map(p=>({...p,id:p.id||crypto.randomUUID()}));if(!preserveView)drawRoute();persist();},

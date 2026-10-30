@@ -1,17 +1,24 @@
 (() => {
   'use strict';
-  const $=id=>document.getElementById(id),app=window.RedlineApp;
+  const $=id=>document.getElementById(id),app=window.RedlineApp,SVG='http://www.w3.org/2000/svg';
   let current=null,photos=[],pending=[],busy=false,dirty=false,suppress=false,resumePhotos=false,cityIndex=null,exifReady=null,photoPanelRequest=0,photosRequested=false;
-  let galleryFilter='',galleryItems=[],importing=false,photoMode='',dragDepth=0,selecting=false,thumbQueue=Promise.resolve();
-  const chosen=new Set(),thumbJobs=new Set();
+  let activeCity='',galleryItems=[],importing=false,photoMode='',dragDepth=0,selecting=false,thumbQueue=Promise.resolve();
+  let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0;
+  const chosen=new Set(),thumbJobs=new Set(),openedCovers=new Set(),lastPages=new Map();
   const photoLabel=count=>`${count} photo${count===1?'':'s'}`;
   const plural=(count,word)=>`${count} ${word}${count===1?'':'s'}`;
   const fingerprint=()=>JSON.stringify(app.getStops());
   const routeContent=route=>JSON.stringify(route.map(({name,country='',admin1='',latitude,longitude})=>({name,country,admin1,latitude,longitude})));
+  const reduced=()=>!!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const canAnimate=el=>typeof el?.animate==='function'&&'finished' in (window.Animation?.prototype||{})&&!reduced();
+  // A turn already under way counts as arrived, so quick presses add up.
+  const shownPage=()=>turning?.target??albumPage;
+  const twoPage=()=>innerWidth>=900;
+  const stopNumber=index=>String(index+1).padStart(2,'0');
+  const hash=text=>{let h=7;for(const c of String(text))h=(h*31+c.charCodeAt(0))|0;return Math.abs(h);};
   const icons={
     pin:'<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 17s5-4.6 5-8.6a5 5 0 0 0-10 0c0 4 5 8.6 5 8.6z"/><circle cx="10" cy="8.4" r="1.8"/></svg>',
-    pencil:'<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 15.5h2.6l8.2-8.2-2.6-2.6-8.2 8.2zM11.4 6l2.6 2.6"/></svg>',
-    trash:'<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6h11M8 6V4.2h4V6M6.2 6l.7 10h6.2l.7-10M8.6 8.6v5M11.4 8.6v5"/></svg>',
+    more:'<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="5" cy="10" r="1.3"/><circle cx="10" cy="10" r="1.3"/><circle cx="15" cy="10" r="1.3"/></svg>',
     postcard:'<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5.5h14v9H3zM10.5 8h4M10.5 10.5h4M5.5 8h3"/></svg>',
     check:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 8.4 2.6 2.6L12 5.6"/></svg>',
     photos:'<svg viewBox="0 0 56 56" aria-hidden="true"><path d="M11 14 8 44l33 3 1-6M16 9h32v32H16zM16 32l9-10 7 7 5-5 11 12"/><circle cx="37" cy="18" r="3"/></svg>'
@@ -25,73 +32,133 @@
     $('photo-count').textContent=photos.length?String(photos.length):'';
     $('save-trip').disabled=busy;$('new-trip').disabled=busy;$('choose-photos').disabled=busy;$('trips-button').disabled=busy;
     $('export-trip').disabled=busy||!current;$('backup-trips').disabled=busy;$('import-trips').disabled=busy;
-    document.querySelectorAll('#photo-gallery button,#photo-review button,#photo-review input,#photo-review select,#gallery-filter button,#gallery-actions button,#gallery-actions select,#trip-list button,#trip-list input').forEach(el=>el.disabled=busy);
+    document.querySelectorAll('#photo-gallery button,#album-pages button,#photo-review button,#photo-review input,#photo-review select,#gallery-filter button,#gallery-actions button,#gallery-actions select,#trip-list button,#trip-list input').forEach(el=>el.disabled=busy);
     $('cancel-photo-import').disabled=busy;$('select-photos').disabled=busy;
-    $('trip-name-form').querySelector('button').disabled=busy;
-    $('trip-state').textContent=current?(dirty?'Unsaved changes to this trip':'All changes saved'):app.getStops().length?'This route isn’t saved yet':'';
-    $('trip-name-form').querySelector('button').textContent=current?'Save':'Save trip';
-    updateBulkSelection();updateUploadButton();updateChosen();renderPhotoMode();
+    updateCurrentTrip();updateBulkSelection();updateUploadButton();updateChosen();renderPhotoMode();
   }
-  function message(id,text,error=false){const el=$(id);el.replaceChildren();el.textContent=text||'';el.classList.toggle('error',error);}
+  const messageTimers={};
+  // Album notes fade away on their own; errors stay until something else is said.
+  function message(id,text,error=false){
+    const el=$(id);el.replaceChildren();el.textContent=text||'';el.classList.toggle('error',error);clearTimeout(messageTimers[id]);
+    if(id==='photo-message'&&text&&!error&&!/…$/.test(text))messageTimers[id]=setTimeout(()=>{if(el.textContent===text)el.textContent='';},4200);
+  }
   function showError(id,error){message(id,error.message||'Please try again.',true);}
   const api=(path,options={})=>window.RedlineStorage.api(path,options);
 
-  // One popup at a time: the Trips menu sits on the route dock; Photos is a drawer.
-  function layoutDrawer(){
-    const panel=$('photo-panel'),dock=$('route-dock'),zoom=document.querySelector('.zoom-controls'),open=!panel.hidden;
-    let inset=0,covered=false;dock.style.removeProperty('left');dock.style.removeProperty('width');zoom.style.removeProperty('right');
-    if(open){
-      const box=panel.getBoundingClientRect(),free=box.left-24;inset=Math.max(0,innerWidth-box.left);
-      if(innerWidth>650&&free>=520){dock.style.left=`${free/2+12}px`;dock.style.width=`${Math.min(640,free-48)}px`;zoom.style.right=`${inset+24}px`;}else covered=true;
+  // A small parchment map of a route, drawn from the map's own land shapes.
+  function routeMap(points,{pad=46,aspect=2}={}){
+    const svg=document.createElementNS(SVG,'svg'),node=(tag,attrs)=>{const el=document.createElementNS(SVG,tag);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);return el;};
+    svg.setAttribute('class','route-map');svg.setAttribute('aria-hidden','true');svg.setAttribute('preserveAspectRatio','xMidYMid slice');
+    const L=window.RedlineLayout,G=window.RedlineGeo;
+    let box={x:0,y:0,w:1440,h:720},d='';
+    if(L&&G&&points.length){
+      const xs=[],ys=[];
+      points.forEach((point,i)=>{const [x,y]=L.project(point);xs.push(x);ys.push(y);if(i)d+=L.route(G.geoInterpolate(points[i-1],point));});
+      let w=Math.max(Math.max(...xs)-Math.min(...xs),150)+pad*2,h=Math.max(Math.max(...ys)-Math.min(...ys),75)+pad*2;
+      if(w/h<aspect)w=h*aspect;else h=w/aspect;
+      if(w<1440)box={x:(Math.max(...xs)+Math.min(...xs))/2-w/2,y:(Math.max(...ys)+Math.min(...ys))/2-h/2,w,h};
     }
-    document.body.classList.toggle('drawer-open',open);document.body.classList.toggle('dock-covered',covered);
-    dock.inert=covered||document.body.classList.contains('map-only');app.setInsets?.({right:open&&!covered?inset:0});
+    svg.setAttribute('viewBox',`${box.x.toFixed(1)} ${box.y.toFixed(1)} ${box.w.toFixed(1)} ${box.h.toFixed(1)}`);
+    svg.append(node('rect',{x:-1440,y:-720,width:4320,height:2160,class:'route-map-sea'}),node('rect',{x:-1440,y:-720,width:4320,height:2160,fill:'url(#grid)',opacity:'.6'}),node('use',{href:'#land',class:'route-map-land'}));
+    if(d)svg.append(node('path',{d,class:'route-map-line'}));
+    const r=Math.max(2.2,box.w/150);
+    if(L)points.forEach(point=>{const [x,y]=L.project(point);svg.append(node('circle',{cx:x,cy:y,r,class:'route-map-stop'}));});
+    return svg;
   }
-  function fitTripMenu(){const dock=$('route-dock').getBoundingClientRect();$('trip-panel').style.maxHeight=`${Math.max(220,dock.top-20)}px`;}
-  function closePanel(id){
-    $(id).hidden=true;
-    if(id==='photo-panel'){photosRequested=false;photoPanelRequest++;dragDepth=0;$('photo-drop-hint').hidden=true;$('photos-button').setAttribute('aria-expanded','false');setSelecting(false);layoutDrawer();}
-    else $('trips-button').setAttribute('aria-expanded','false');
+
+  // Trips and Photos are modal sheets; only one is open, and Escape or a click outside closes it.
+  const triggers={'trip-panel':'trips-button','photo-panel':'photos-button'};
+  function closePanel(id,{focus=false}={}){
+    const panel=$(id);if(panel.open)panel.close();
+    $(triggers[id]).setAttribute('aria-expanded','false');
+    if(id==='photo-panel'){photosRequested=false;photoPanelRequest++;dragDepth=0;$('photo-drop-hint').hidden=true;setSelecting(false);if(current)lastPages.set(current.id,shownPage());}
+    else closeTripMenus();
+    if(focus)$(triggers[id]).focus({preventScroll:true});
+    document.body.classList.toggle('sheet-open',Object.keys(triggers).some(key=>$(key).open));
   }
   function openPanel(id){
-    for(const other of ['trip-panel','photo-panel'])if(other!==id&&!$(other).hidden)closePanel(other);
-    app.closeSearch?.();$(id).hidden=false;
-    if(id==='photo-panel'){$('photos-button').setAttribute('aria-expanded','true');layoutDrawer();$('photo-panel').focus({preventScroll:true});}
-    else {$('trips-button').setAttribute('aria-expanded','true');fitTripMenu();}
+    for(const other of Object.keys(triggers))if(other!==id&&$(other).open)closePanel(other);
+    app.closeSearch?.();if(!$(id).open)$(id).showModal();$(triggers[id]).setAttribute('aria-expanded','true');document.body.classList.add('sheet-open');
+  }
+  for(const id of Object.keys(triggers)){
+    const panel=$(id);
+    panel.addEventListener('close',()=>{if($(triggers[id]).getAttribute('aria-expanded')==='true')closePanel(id);});
+    panel.addEventListener('cancel',event=>{event.preventDefault();if(id==='photo-panel'&&selecting){setSelecting(false);return;}closePanel(id,{focus:true});});
+    let pressed=null;panel.addEventListener('pointerdown',event=>{pressed=event.target;});
+    panel.addEventListener('click',event=>{
+      // Only a press and release on the backdrop closes; a drag that ends there does not.
+      const started=pressed;pressed=null;if(started!==event.target)return;
+      if(event.target.classList?.contains('album-stage')){closePanel(id,{focus:true});return;}
+      if(event.target!==panel)return;
+      const box=panel.getBoundingClientRect(),outside=event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom;
+      if(outside||id==='photo-panel')closePanel(id,{focus:true});
+    });
   }
   function discardPending(){pending.forEach(p=>{URL.revokeObjectURL(p.url);if(p.thumbUrl)URL.revokeObjectURL(p.thumbUrl);});pending=[];renderReview();}
   function canSwitch(){return !(dirty||pending.length)||confirm('Discard unsaved changes and switch trips?');}
 
+  // ---------- Trips ----------
   function tripDate(value){const date=new Date(value);if(!Number.isFinite(date.getTime()))return '';return date.toLocaleDateString(undefined,{month:'short',day:'numeric',...(date.getFullYear()===new Date().getFullYear()?{}:{year:'numeric'})});}
-  function iconButton(className,label,icon){const button=document.createElement('button');button.type='button';button.className=`icon-button ${className}`;button.title=label;button.setAttribute('aria-label',label);button.innerHTML=icon;button.disabled=busy;return button;}
-  // Rebuilding the list keeps keyboard focus on the same trip, or on the menu itself.
+  function updateCurrentTrip(){
+    const stops=app.getStops();
+    $('current-trip-label').textContent=current?'This trip':'This route';
+    $('trip-state').textContent=current?(dirty?'Unsaved changes':'All changes saved'):stops.length?`${plural(stops.length,'stop')} · not saved yet`:'Add a destination to begin';
+    $('trip-state').classList.toggle('unsaved',!current||dirty);
+    const button=$('trip-name-form').querySelector('button'),renamed=!!current&&$('trip-name').value.trim()!==current.title,settled=!!current&&!dirty&&!renamed;
+    button.textContent=!current?'Save trip':dirty?'Save changes':renamed?'Rename':'Saved';
+    button.classList.toggle('quiet',settled);button.disabled=busy||settled;
+  }
+  $('trip-name').addEventListener('input',()=>updateCurrentTrip());
+  function drawCurrentMap(){$('current-trip-map').replaceChildren(routeMap(app.getStops().map(stop=>[stop.longitude,stop.latitude])));}
+  function closeTripMenus(except=null){document.querySelectorAll('#trip-list .trip-menu').forEach(menu=>{if(menu===except)return;menu.hidden=true;menu.previousElementSibling?.setAttribute('aria-expanded','false');});}
+  function tripCard(trip,index){
+    const item=document.createElement('li'),map=document.createElement('div'),body=document.createElement('div'),open=document.createElement('button'),name=document.createElement('span'),detail=document.createElement('span');
+    item.className='trip-card saved-trip';item.dataset.tripId=trip.id;item.style.setProperty('--i',String(Math.min(index,12)));item.classList.toggle('active',trip.id===current?.id);
+    map.className='trip-map';map.append(routeMap(trip.points||[]));
+    if(trip.coverUrl){const cover=document.createElement('img');cover.className='trip-cover';cover.src=trip.coverUrl;cover.alt='';cover.loading='lazy';cover.style.setProperty('--tilt',`${(hash(trip.id)%7-3)*1.1}deg`);map.append(cover);}
+    open.type='button';open.className='trip-open';open.disabled=busy;name.className='trip-name';name.textContent=trip.title;open.append(name);
+    if(trip.id===current?.id){open.setAttribute('aria-current','true');const badge=document.createElement('span');badge.className='trip-current';badge.textContent='Open now';body.append(badge);}
+    detail.className='trip-meta';detail.textContent=[plural(trip.stopCount??0,'stop'),trip.photoCount?photoLabel(trip.photoCount):'',tripDate(trip.updatedAt)].filter(Boolean).join(' · ');
+    body.className='trip-card-body';body.prepend(open);body.append(detail);
+    open.addEventListener('click',()=>trip.id===current?.id?closePanel('trip-panel',{focus:true}):loadTrip(trip.id));
+    const more=document.createElement('button'),menu=document.createElement('div');
+    more.type='button';more.className='icon-button trip-more';more.innerHTML=icons.more;more.title='More';more.setAttribute('aria-label',`More for ${trip.title}`);more.setAttribute('aria-haspopup','menu');more.setAttribute('aria-expanded','false');more.disabled=busy;
+    menu.className='trip-menu';menu.setAttribute('role','menu');menu.hidden=true;
+    const entry=(className,label,action)=>{const button=document.createElement('button');button.type='button';button.className=className;button.setAttribute('role','menuitem');button.textContent=label;button.disabled=busy;button.addEventListener('click',()=>{closeTripMenus();more.focus({preventScroll:true});action();});menu.append(button);};
+    entry('trip-rename','Rename',()=>startRename(item,trip));entry('trip-export','Export',()=>exportTrips(false,trip.id));entry('trip-delete','Delete…',()=>deleteTrip(trip));
+    more.addEventListener('click',()=>{const show=menu.hidden;closeTripMenus(menu);menu.hidden=!show;more.setAttribute('aria-expanded',String(show));if(show)menu.querySelector('button')?.focus({preventScroll:true});});
+    menu.addEventListener('keydown',event=>{
+      const items=[...menu.querySelectorAll('button')],at=items.indexOf(document.activeElement);
+      if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeTripMenus();more.focus({preventScroll:true});}
+      else if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();items[(at+(event.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();}
+      else if(event.key==='Tab')closeTripMenus();
+    });
+    item.append(map,body,more,menu);return item;
+  }
+  function renderTripCards(focus=null){
+    const list=$('trip-list'),query=$('trip-search').value.trim().toLowerCase(),shown=tripCache.filter(trip=>!query||trip.title.toLowerCase().includes(query));
+    list.replaceChildren(...shown.map(tripCard));
+    if(!tripCache.length||!shown.length){const empty=document.createElement('li');empty.className='trip-empty';empty.textContent=tripCache.length?'No saved trip has that name.':'No saved trips yet. Name this route above to keep it.';list.append(empty);}
+    if(focus&&$('trip-panel').open){
+      const row=[...list.querySelectorAll('.trip-card')].find(el=>el.dataset.tripId===focus.id);
+      (row?.querySelector(focus.part||'.trip-open')||list.querySelector('.trip-open')||$('trip-name')).focus({preventScroll:true});
+    }
+  }
+  // Rebuilding the list keeps keyboard focus on the same trip, or on the sheet itself.
   async function listTrips(focus=null){
     try{
-      const {trips}=await api('/trips'),list=$('trip-list');list.replaceChildren();
-      for(const trip of trips){
-        const item=document.createElement('li'),open=document.createElement('button'),name=document.createElement('span'),detail=document.createElement('span');
-        item.className='saved-trip';item.dataset.tripId=trip.id;item.classList.toggle('active',trip.id===current?.id);
-        open.type='button';open.className='trip-open';open.disabled=busy;name.className='trip-name';name.textContent=trip.title;detail.className='trip-meta';
-        detail.textContent=[plural(trip.stopCount??0,'stop'),trip.photoCount?photoLabel(trip.photoCount):'',tripDate(trip.updatedAt)].filter(Boolean).join(' · ');
-        if(trip.id===current?.id)open.setAttribute('aria-current','true');
-        open.append(name,detail);open.addEventListener('click',()=>trip.id===current?.id?closePanel('trip-panel'):loadTrip(trip.id));
-        const rename=iconButton('trip-rename',`Rename ${trip.title}`,icons.pencil),remove=iconButton('trip-delete',`Delete ${trip.title}`,icons.trash);
-        rename.addEventListener('click',()=>startRename(item,trip));remove.addEventListener('click',()=>deleteTrip(trip));
-        item.append(open,rename,remove);list.append(item);
-      }
-      if(!trips.length){const empty=document.createElement('li');empty.className='trip-empty';empty.textContent='No saved trips yet. Name this route above to keep it.';list.append(empty);}
-      if(focus&&!$('trip-panel').hidden){
-        const row=[...list.querySelectorAll('.saved-trip')].find(el=>el.dataset.tripId===focus.id);
-        (row?.querySelector(focus.part||'.trip-open')||list.querySelector('.trip-open')||$('trip-panel')).focus({preventScroll:true});
-      }
+      const {trips}=await api('/trips');tripCache=trips;
+      $('trips-summary').textContent=trips.length?`${plural(trips.length,'trip')} saved in this browser`:'Nothing saved yet';
+      $('trip-search-label').hidden=trips.length<7;if(trips.length<7)$('trip-search').value='';renderTripCards(focus);
     }catch(error){showError('trip-message',error);}
   }
+  $('trip-search').addEventListener('input',()=>renderTripCards());
   function startRename(item,trip){
-    const form=document.createElement('form'),input=document.createElement('input'),save=document.createElement('button'),cancel=document.createElement('button');
+    const body=item.querySelector('.trip-card-body'),form=document.createElement('form'),input=document.createElement('input'),save=document.createElement('button'),cancel=document.createElement('button');
     form.className='trip-rename-form';input.value=trip.title;input.maxLength=80;input.required=true;input.setAttribute('aria-label','Trip name');
     save.type='submit';save.textContent='Rename';cancel.type='button';cancel.className='text-button';cancel.textContent='Cancel';
-    form.append(input,save,cancel);item.replaceChildren(form);input.focus();input.select();
-    const back=()=>listTrips({id:trip.id,part:'.trip-rename'});
+    form.append(input,save,cancel);body.replaceChildren(form);item.classList.add('renaming');input.focus();input.select();
+    const back=()=>renderTripCards({id:trip.id,part:'.trip-more'});
     cancel.addEventListener('click',back);
     input.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();back();}});
     form.addEventListener('submit',async event=>{event.preventDefault();await renameTrip(trip,input.value);});
@@ -102,19 +169,19 @@
       // The open trip is checked against the revision this tab last saw, so a rename
       // never hides another tab's newer route behind an "All changes saved" state.
       const open=current?.id===trip.id,result=await api(`/trips/${trip.id}/title`,{method:'PUT',body:JSON.stringify({title,revision:open?current.revision:trip.revision})});
-      if(open&&current?.id===trip.id){current={...current,title:result.trip.title,revision:result.trip.revision};remember();if(!$('trip-name').matches(':focus'))$('trip-name').value=current.title;}
+      if(open&&current?.id===trip.id){current={...current,title:result.trip.title,revision:result.trip.revision};remember();if(document.activeElement!==$('trip-name'))$('trip-name').value=current.title;}
       message('trip-message','Trip renamed.');
     }catch(error){showError('trip-message',error);}finally{busy=false;update();await listTrips({id:trip.id});}
   }
   async function deleteTrip(trip){
     if(busy)return;
     const extra=trip.photoCount?` and its ${photoLabel(trip.photoCount)} and postcards`:'';
-    if(!confirm(`Delete “${trip.title}”${extra}? This can’t be undone. Use Export trip first if you might want it later.`))return;
+    if(!confirm(`Delete “${trip.title}”${extra}? This can’t be undone. Use Export first if you might want it later.`))return;
     busy=true;update();
     try{
       await api(`/trips/${trip.id}`,{method:'DELETE'});
       if(current?.id===trip.id){
-        photoPanelRequest++;discardPending();photos.forEach(p=>window.RedlinePostcards.forget(p.id));photos=[];current=null;galleryFilter='';
+        photoPanelRequest++;discardPending();photos.forEach(p=>window.RedlinePostcards.forget(p.id));photos=[];current=null;activeCity='';
         dirty=app.getStops().length>0;remember();renderGallery();$('trip-name').value='';
       }
       message('trip-message',`Deleted “${trip.title}”.`);
@@ -123,7 +190,7 @@
   async function loadTrip(id){
     if(busy||!canSwitch())return;
     busy=true;update();
-    try{const data=await api(`/trips/${id}`);photoPanelRequest++;discardPending();galleryFilter='';setSelecting(false);suppress=true;app.setStops(data.trip.stops);suppress=false;current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};photos=data.photos;dirty=false;remember();renderGallery();closePanel('trip-panel');message('trip-message','');}
+    try{const data=await api(`/trips/${id}`);photoPanelRequest++;discardPending();activeCity='';setSelecting(false);suppress=true;app.setStops(data.trip.stops);suppress=false;current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};photos=data.photos;dirty=false;albumPage=lastPages.get(id)||0;remember();renderGallery();closePanel('trip-panel');message('trip-message','');}
     catch(error){showError('trip-message',error);}finally{suppress=false;busy=false;update();}
   }
   async function saveCurrent(title){
@@ -137,67 +204,73 @@
     current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:JSON.stringify(data.trip.stops)};dirty=fingerprint()!==current.hash;remember();update();return data.trip;
   }
   function openTrips(note=''){
-    openPanel('trip-panel');$('trip-name').value=current?.title||'';message('trip-message',note);listTrips();
-    if(!current)$('trip-name').focus();else $('trip-panel').focus({preventScroll:true});
+    openPanel('trip-panel');$('trip-name').value=current?.title||'';$('trip-search').value='';message('trip-message',note);drawCurrentMap();updateCurrentTrip();listTrips();
+    if(!current||note)$('trip-name').focus();else $('trip-panel').querySelector('.close-panel').focus({preventScroll:true});
   }
   // Opening the album never commits route edits; saving or moving photos does that first.
   function requireTrip(){
     if(!current){resumePhotos=true;openTrips('Name and save this trip to add photos.');return false;}
     return true;
   }
-  $('trips-button').addEventListener('click',()=>{if(!$('trip-panel').hidden){closePanel('trip-panel');return;}resumePhotos=false;openTrips();});
+  $('trips-button').addEventListener('click',()=>{if($('trip-panel').open){closePanel('trip-panel');return;}resumePhotos=false;openTrips();});
   $('save-trip').addEventListener('click',async()=>{
     if(!current){openTrips();return;}
     busy=true;update();try{await saveCurrent();$('save-trip').textContent='Saved';setTimeout(()=>$('save-trip').textContent='Save',1300);}catch(error){openTrips();showError('trip-message',error);}finally{busy=false;update();}
   });
   $('trip-name-form').addEventListener('submit',async event=>{
     event.preventDefault();if(busy)return;busy=true;update();
-    try{await saveCurrent($('trip-name').value);message('trip-message','');closePanel('trip-panel');if(resumePhotos){resumePhotos=false;showPhotos();}}
+    try{
+      const renaming=current&&!dirty&&$('trip-name').value.trim()!==current.title;
+      await saveCurrent($('trip-name').value);message('trip-message',renaming?'Trip renamed.':'');
+      if(resumePhotos){resumePhotos=false;closePanel('trip-panel');showPhotos();}else{drawCurrentMap();await listTrips();}
+    }
     catch(error){showError('trip-message',error);}finally{busy=false;update();}
   });
-  $('new-trip').addEventListener('click',()=>{if(!canSwitch())return;discardPending();setSelecting(false);current=null;photos=[];galleryFilter='';suppress=true;app.setStops([]);suppress=false;dirty=false;remember();update();renderGallery();closePanel('trip-panel');$('destination').focus();});
-  document.querySelectorAll('[data-close]').forEach(button=>button.addEventListener('click',()=>{closePanel(button.dataset.close);$(button.dataset.close==='photo-panel'?'photos-button':'trips-button').focus({preventScroll:true});}));
-  // The Trips menu closes when you work elsewhere, like any other menu.
-  document.addEventListener('pointerdown',event=>{
-    if($('trip-panel').hidden||document.querySelector('dialog[open]'))return;
-    if(!event.target.closest?.('#trip-panel,#trips-button,#save-trip,#photos-button'))closePanel('trip-panel');
-  },true);
-  $('destination').addEventListener('focus',()=>{if(!$('trip-panel').hidden)closePanel('trip-panel');});
-  window.addEventListener('resize',()=>{if(!$('photo-panel').hidden)layoutDrawer();if(!$('trip-panel').hidden)fitTripMenu();});
-  window.addEventListener('redline:routechange',()=>{if(suppress)return;dirty=current?fingerprint()!==current.hash:app.getStops().length>0;update();if(!$('photo-panel').hidden){renderReview();renderGallery();}else updatePhotoCounts();});
+  $('new-trip').addEventListener('click',()=>{if(!canSwitch())return;discardPending();setSelecting(false);current=null;photos=[];activeCity='';albumPage=0;suppress=true;app.setStops([]);suppress=false;dirty=false;remember();update();renderGallery();closePanel('trip-panel');$('destination').focus();});
+  document.querySelectorAll('[data-close]').forEach(button=>button.addEventListener('click',()=>closePanel(button.dataset.close,{focus:true})));
+  document.addEventListener('pointerdown',event=>{if(!event.target.closest?.('.trip-menu,.trip-more'))closeTripMenus();},true);
+  window.addEventListener('resize',()=>{if(!$('photo-panel').open||resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;if(view==='album')renderAlbum();});});
+  window.addEventListener('redline:routechange',()=>{if(suppress)return;dirty=current?fingerprint()!==current.hash:app.getStops().length>0;update();if($('trip-panel').open)drawCurrentMap();if($('photo-panel').open){renderReview();renderGallery();}});
   window.addEventListener('beforeunload',event=>{if(pending.length||dirty){event.preventDefault();event.returnValue='';}});
-  async function showPhotos(filter){
+
+  // ---------- Photos ----------
+  async function showPhotos(city){
     if(busy)return;
-    if(filter!==undefined){galleryFilter=filter;setSelecting(false);}
-    if(!$('photo-panel').hidden){renderGallery();$('photo-scroll').scrollTop=0;return;}
+    if(city!==undefined){activeCity=city;setSelecting(false);}
+    if($('photo-panel').open){renderGallery();if(city)goToCity(city);return;}
     if(photosRequested)return;
     photosRequested=true;const version=++photoPanelRequest;
     try{
       if(!requireTrip()||version!==photoPanelRequest)return;
+      const firstVisit=!openedCovers.has(current.id);albumPage=lastPages.get(current.id)||0;
       openPanel('photo-panel');renderGallery();renderReview();message('photo-message','');
+      if(view==='album'&&firstVisit&&!city&&!pending.length){openedCovers.add(current.id);openCover();}
       const tripId=current.id,data=await api(`/trips/${tripId}`);if(version!==photoPanelRequest||current?.id!==tripId)return;
-      photos=data.photos;renderGallery();update();
+      photos=data.photos;if(!turning)renderGallery();update();if(city)goToCity(city);
     }catch(error){if(version===photoPanelRequest){openPanel('photo-panel');showError('photo-message',error);}}
     finally{if(version===photoPanelRequest)photosRequested=false;}
   }
-  $('photos-button').addEventListener('click',()=>{if(photosRequested||!$('photo-panel').hidden){closePanel('photo-panel');return;}showPhotos();});
-  window.addEventListener('redline:openphotos',event=>{if(document.body.classList.contains('map-only'))app.showControls();showPhotos(event.detail?.stopId||'');});
+  $('photos-button').addEventListener('click',()=>{if(photosRequested||$('photo-panel').open){closePanel('photo-panel');return;}showPhotos();});
   document.addEventListener('keydown',async event=>{
-    if(event.key==='Escape'&&!event.defaultPrevented&&!document.querySelector('dialog[open]')){
-      if(!$('trip-panel').hidden){event.preventDefault();closePanel('trip-panel');$('trips-button').focus({preventScroll:true});return;}
-      if(!$('photo-panel').hidden){
-        event.preventDefault();
-        if(selecting){setSelecting(false);$('select-photos').focus({preventScroll:true});return;}
-        closePanel('photo-panel');$('photos-button').focus({preventScroll:true});return;
-      }
+    const viewer=$('photo-viewer').open,info=$('info-dialog').open;
+    if(event.key==='Escape'&&!event.defaultPrevented&&!viewer&&!info){
+      if($('trip-panel').open){event.preventDefault();closePanel('trip-panel',{focus:true});return;}
+      if($('photo-panel').open){event.preventDefault();if(selecting){setSelecting(false);$('select-photos').focus({preventScroll:true});return;}closePanel('photo-panel',{focus:true});return;}
     }
     if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"]'))return;
+    // The album turns like a book from the keyboard.
+    if($('photo-panel').open&&!viewer&&mode()==='album'){
+      const step=twoPage()?2:1,turns={ArrowRight:step,PageDown:step,ArrowLeft:-step,PageUp:-step};
+      if(event.key in turns){event.preventDefault();turnTo(shownPage()+turns[event.key]);return;}
+      if(event.key==='Home'||event.key==='End'){event.preventDefault();turnTo(event.key==='Home'?0:pages.length-1);return;}
+    }
     const key=event.key.toLowerCase(),button={t:'trips-button',s:'save-trip',p:'photos-button'}[key];
-    if(!button)return;
-    if($('photo-viewer').open){if(key==='p'){event.preventDefault();if(!event.repeat){await window.RedlinePostcards.close();if(!$('photo-viewer').open)closePanel('photo-panel');}}return;}
-    if(document.querySelector('dialog[open]'))return;
+    if(!button||info)return;
+    if(viewer){if(key==='p'){event.preventDefault();if(!event.repeat){await window.RedlinePostcards.close();if(!$('photo-viewer').open)closePanel('photo-panel',{focus:true});}}return;}
     event.preventDefault();if(event.repeat)return;
     if(document.body.classList.contains('map-only'))window.RedlineApp.showControls();
+    if(key==='p'&&$('photo-panel').open){closePanel('photo-panel',{focus:true});return;}
+    if(key==='t'&&$('trip-panel').open){closePanel('trip-panel',{focus:true});return;}
     $(button).click();
   });
 
@@ -276,53 +349,63 @@
   $('photo-panel').addEventListener('dragover',event=>{if(!fileDrag(event))return;event.preventDefault();event.dataTransfer.dropEffect=busy?'none':'copy';});
   $('photo-panel').addEventListener('dragleave',event=>{if(!fileDrag(event))return;dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)$('photo-drop-hint').hidden=true;});
   $('photo-panel').addEventListener('drop',event=>{if(!fileDrag(event))return;event.preventDefault();dragDepth=0;$('photo-drop-hint').hidden=true;importPhotos([...event.dataTransfer.files]);});
-  // Dragging photos over a saved trip opens its gallery; a drop anywhere never replaces the app.
-  document.addEventListener('dragenter',event=>{if(fileDrag(event)&&$('photo-panel').hidden&&current&&!busy&&!document.querySelector('dialog[open]'))showPhotos();});
+  // Dragging photos over a saved trip opens its album; a drop anywhere never replaces the app.
+  document.addEventListener('dragenter',event=>{if(fileDrag(event)&&!$('photo-panel').open&&current&&!busy&&!document.querySelector('dialog[open]'))showPhotos();});
   document.addEventListener('dragover',event=>{if(!fileDrag(event))return;event.preventDefault();if(!event.target.closest?.('#photo-panel'))event.dataTransfer.dropEffect=current&&!busy?'copy':'none';});
   document.addEventListener('drop',event=>{
     if(!fileDrag(event))return;event.preventDefault();dragDepth=0;$('photo-drop-hint').hidden=true;
-    if(event.target.closest?.('#photo-panel')||document.querySelector('dialog[open]'))return;
+    if(event.target.closest?.('#photo-panel')||$('photo-viewer').open)return;
     const files=[...event.dataTransfer.files];
     if(!current){openTrips('Name and save this trip to add photos.');resumePhotos=true;return;}
-    if(!$('photo-panel').hidden)importPhotos(files);else showPhotos().then(()=>importPhotos(files));
+    if($('photo-panel').open)importPhotos(files);else showPhotos().then(()=>importPhotos(files));
   });
   $('cancel-photo-import').addEventListener('click',()=>{
     if(busy||!pending.length)return;
     if(confirm(`Discard ${photoLabel(pending.length)} from this import?`)){discardPending();message('photo-message','');$('choose-photos').focus({preventScroll:true});}
   });
+  const mode=()=>pending.length||importing?'review':view;
   function renderPhotoMode(){
-    const reviewing=!!pending.length||importing,mode=reviewing?'review':'gallery';
-    if(mode!==photoMode){$('photo-scroll').scrollTop=0;photoMode=mode;}
+    const current_=mode(),reviewing=current_==='review';
+    if(current_!==photoMode){$('photo-scroll').scrollTop=0;photoMode=current_;}
+    $('album-book').dataset.mode=current_;
     $('photos-heading').textContent=reviewing?'Add photos':'Photos';
     $('photo-trip-name').textContent=current?.title||'';
-    $('gallery-count').hidden=reviewing||!photos.length;
+    $('gallery-count').textContent=photoLabel(photos.length);$('gallery-count').hidden=reviewing||!photos.length;
     $('choose-photos').querySelector('span').textContent=pending.length?'Add more':'Add photos';
-    $('photo-gallery').hidden=reviewing;
-    $('gallery-toolbar').hidden=reviewing||!photos.length||selecting;
-    $('gallery-actions').hidden=reviewing||!selecting;
-    $('photo-review').hidden=!reviewing;
+    $('album-pages').hidden=current_!=='album';$('album-sheet').hidden=current_==='album';$('album-foot').classList.toggle('away',current_!=='album');
+    $('photo-gallery').hidden=current_!=='sheet';$('photo-review').hidden=!reviewing;
     $('photo-review').setAttribute('aria-busy',String(importing));
-    $('photo-bulk').hidden=!pending.length;
-    $('photo-import-actions').hidden=!pending.length;
+    $('gallery-toolbar').hidden=current_!=='sheet'||!photos.length||selecting;
+    $('gallery-actions').hidden=current_!=='sheet'||!selecting;
+    $('photo-bulk').hidden=!pending.length;$('photo-import-actions').hidden=!pending.length;
+    $('album-view').setAttribute('aria-pressed',String(view==='album'));$('sheet-view').setAttribute('aria-pressed',String(view==='sheet'));
+    $('album-view').disabled=$('sheet-view').disabled=reviewing;$('album-modes').classList.toggle('away',reviewing);
+    $('gallery-filter').classList.toggle('away',reviewing||!photos.length);
     $('photo-panel').classList.toggle('selecting',selecting&&!reviewing);
   }
+  function setView(next){
+    if(view===next)return;view=next;setSelecting(false);renderGallery();
+    if(next==='sheet'&&activeCity)requestAnimationFrame(()=>goToCity(activeCity,{instant:true}));
+  }
+  $('album-view').addEventListener('click',()=>setView('album'));
+  $('sheet-view').addEventListener('click',()=>setView('sheet'));
   function cityOptions(select,emptyLabel){
     select.replaceChildren(new Option(emptyLabel,''));
-    app.getStops().forEach((stop,i)=>select.add(new Option(`${String(i+1).padStart(2,'0')} · ${stop.name}${stop.country?', '+stop.country:''}`,stop.id)));
+    app.getStops().forEach((stop,i)=>select.add(new Option(`${stopNumber(i)} · ${stop.name}${stop.country?', '+stop.country:''}`,stop.id)));
   }
-  const clampRatio=value=>Math.min(2.4,Math.max(.5,value));
-  function setRatio(tile,item){tile.style.setProperty('--ratio',(item.width&&item.height?clampRatio(item.width/item.height):4/3).toFixed(3));}
+  const clampRatio=value=>Math.min(2.4,Math.max(.45,value));
+  function setRatio(el,item){el.style.setProperty('--ratio',(item.width&&item.height?clampRatio(item.width/item.height):4/3).toFixed(3));}
   function previewButton(item,open,{saved=false}={}){
     const button=document.createElement('button'),image=document.createElement('img');button.type='button';button.className='photo-image';
     image.src=item.thumbUrl||item.url;image.alt='';image.loading='lazy';image.decoding='async';image.draggable=false;
     image.addEventListener('load',()=>{
       button.classList.add('loaded');
-      if(!item.width&&image.naturalWidth){item.width=image.naturalWidth;item.height=image.naturalHeight;const tile=button.closest('.photo-tile');if(tile)setRatio(tile,item);}
+      if(!item.width&&image.naturalWidth){item.width=image.naturalWidth;item.height=image.naturalHeight;const holder=button.closest('[data-photo-id]');if(holder)setRatio(holder,item);}
       if(saved&&!item.thumbUrl)backfillThumb(item,image);
     },{once:true});
-    // Re-rendered tiles of already-decoded photos appear at once instead of fading in again.
+    // Re-rendered images that are already decoded appear at once instead of fading in again.
     if(image.complete&&image.naturalWidth)button.classList.add('loaded');
-    button.setAttribute('aria-label',item.city?.name?`Open photo in ${item.city.name}`:`Expand ${item.name||'photo'}`);button.append(image);button.addEventListener('click',open);return button;
+    button.setAttribute('aria-label',item.city?.name?`Open photo in ${item.city.name}`:`Expand ${item.name||'photo'}`);button.append(image);button.addEventListener('click',event=>open(event,button));return button;
   }
   function removeButton(label,remove){
     const button=document.createElement('button');button.type='button';button.className='remove-photo';button.innerHTML='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg>';button.title=label;button.setAttribute('aria-label',label);button.disabled=busy;button.addEventListener('click',remove);return button;
@@ -331,11 +414,11 @@
     const container=$('photo-review');container.replaceChildren();const stops=app.getStops();
     pending.forEach((entry,index)=>{
       const row=document.createElement('div'),tools=document.createElement('div'),select=document.createElement('select'),pick=document.createElement('label'),checkbox=document.createElement('input'),mark=document.createElement('span');
-      row.className='photo-tile review-photo';row.dataset.pendingId=entry.id;tools.className='photo-tile-tools';pick.className='photo-pick';checkbox.type='checkbox';checkbox.checked=entry.checked;checkbox.disabled=busy;checkbox.setAttribute('aria-label',`Select ${entry.name||`photo ${index+1}`}`);mark.className='photo-check';mark.innerHTML=icons.check;pick.append(checkbox,mark);
+      row.className='photo-tile review-photo';row.dataset.pendingId=entry.id;row.style.setProperty('--tilt',`${(hash(entry.id)%7-3)*.6}deg`);tools.className='photo-tile-tools';pick.className='photo-pick';checkbox.type='checkbox';checkbox.checked=entry.checked;checkbox.disabled=busy;checkbox.setAttribute('aria-label',`Select ${entry.name||`photo ${index+1}`}`);mark.className='photo-check';mark.innerHTML=icons.check;pick.append(checkbox,mark);
       checkbox.addEventListener('change',()=>{entry.checked=checkbox.checked;updateBulkSelection();});
-      const image=previewButton(entry,()=>{
+      const image=previewButton(entry,(event,button)=>{
         const collection=pending.map(p=>({...p,city:p.selected==='match'?p.candidate:app.getStops().find(s=>s.id===p.selected)}));
-        window.RedlinePostcards.open(collection.find(p=>p.id===entry.id),null,collection);
+        window.RedlinePostcards.open(collection.find(p=>p.id===entry.id),null,collection,null,button);
       });image.disabled=busy;
       cityOptions(select,'Choose city…');select.setAttribute('aria-label',`City for ${entry.name||`photo ${index+1}`}`);
       if(entry.candidate&&!entry.candidate.existing)select.add(new Option(`${entry.candidate.name} (from GPS, new stop)`,'match'));
@@ -361,7 +444,7 @@
     const value=$('bulk-photo-city').value;if(!value||busy)return;
     const candidate=value.startsWith('gps:')?pending.find(p=>p.id===value.slice(4))?.candidate:null;
     for(const entry of pending.filter(p=>p.checked)){if(candidate){entry.candidate={...candidate};entry.selected='match';}else entry.selected=value;}
-    renderReview();$('bulk-photo-city').focus({preventScroll:true});
+    renderReview();
   });
   function updateUploadButton(){
     const ready=pending.filter(p=>p.selected).length,unassigned=pending.length-ready;
@@ -371,6 +454,7 @@
   }
   $('upload-photos').addEventListener('click',async()=>{
     if(busy)return;const ready=pending.filter(p=>p.selected);if(!ready.length)return;busy=true;photoPanelRequest++;photosRequested=false;update();renderReview();
+    let firstSaved=null;
     try{
       for(const entry of ready){if(entry.selected==='match'){const stop=app.addCity(entry.candidate);entry.selected=stop.id;}}
       if(dirty)await saveCurrent();
@@ -378,15 +462,20 @@
         const entry=ready[i];message('photo-message',`Saving ${i+1} of ${ready.length}…`);setProgress(i,ready.length);
         const form=new FormData();form.append('photo',entry.blob,'photo.jpg');form.append('stopId',entry.selected);
         if(entry.thumb)form.append('thumb',entry.thumb,'thumb.jpg');if(entry.width&&entry.height){form.append('width',String(entry.width));form.append('height',String(entry.height));}
-        const {photo}=await api(`/trips/${current.id}/photos`,{method:'POST',body:form});photos.push(photo);pending=pending.filter(p=>p.id!==entry.id);URL.revokeObjectURL(entry.url);if(entry.thumbUrl)URL.revokeObjectURL(entry.thumbUrl);
+        const {photo}=await api(`/trips/${current.id}/photos`,{method:'POST',body:form});photos.push(photo);firstSaved??=photo;pending=pending.filter(p=>p.id!==entry.id);URL.revokeObjectURL(entry.url);if(entry.thumbUrl)URL.revokeObjectURL(entry.thumbUrl);
       }
-      if(!pending.length)galleryFilter='';
-      message('photo-message',pending.length?'Choose a city for the remaining photos.':`${photoLabel(ready.length)} saved.`);renderGallery();
-    }catch(error){showError('photo-message',error);}finally{busy=false;setProgress(0,0);update();renderReview();renderGallery();if(!pending.length)$('choose-photos').focus({preventScroll:true});}
+      message('photo-message',pending.length?'Choose a city for the remaining photos.':`${photoLabel(ready.length)} saved.`);
+    }catch(error){showError('photo-message',error);}finally{
+      busy=false;setProgress(0,0);update();renderReview();renderGallery();
+      // Land on the page where the new photos were mounted.
+      if(!pending.length&&firstSaved&&view==='album')turnTo(pageOfPhoto(firstSaved.id),{instant:true});
+      if(!pending.length)$('choose-photos').focus({preventScroll:true});
+    }
   });
 
-  // Saved photos: browse, select, move between cities, and delete.
+  // Saved photos: grouped by city in route order.
   const hasPostcard=photo=>Object.values(photo.postcard||{}).some(value=>typeof value==='string'&&value.trim());
+  const postcardLine=photo=>(photo.postcard?.message||'').trim().split('\n')[0].slice(0,90);
   function viewerActions(){
     return {
       cities:()=>app.getStops(),
@@ -394,68 +483,223 @@
       remove:photo=>deletePhotos([photo.id],{ask:false})
     };
   }
-  function galleryGrid(items){
-    const grid=document.createElement('div');grid.className='photo-grid';
-    items.forEach(photo=>{
-      const tile=document.createElement('div');tile.className='photo-tile';tile.dataset.photoId=photo.id;setRatio(tile,photo);
-      const position=galleryItems.indexOf(photo)+1,place=photo.city?.name||'this trip';
-      const button=previewButton(photo,()=>{if(selecting){toggleChosen(photo.id);return;}window.RedlinePostcards.open(photo,api,galleryItems,viewerActions());},{saved:true});
-      button.setAttribute('aria-label',`${selecting?'Select':'Open'} photo ${position} in ${place}`);
-      if(selecting){button.setAttribute('aria-pressed',String(chosen.has(photo.id)));const mark=document.createElement('span');mark.className='photo-check';mark.innerHTML=icons.check;tile.append(mark);}
-      tile.classList.toggle('chosen',chosen.has(photo.id));
-      if(hasPostcard(photo)){const card=document.createElement('span');card.className='postcard-badge';card.title='Postcard written';card.innerHTML=icons.postcard;tile.append(card);}
-      tile.prepend(button);grid.append(tile);
-    });
-    return grid;
-  }
   function photoGroups(){
     const groups=new Map(),stops=app.getStops(),order=new Map(stops.map((stop,index)=>[stop.id,index]));
     for(const photo of photos){const key=photo.stopId||'unplaced';if(!groups.has(key))groups.set(key,{id:key,name:photo.city?.name||'Other photos',country:photo.city?.country||'',stop:order.get(key),items:[]});groups.get(key).items.push(photo);}
     return [...groups.values()].sort((a,b)=>(a.stop??Infinity)-(b.stop??Infinity)||a.name.localeCompare(b.name));
   }
-  function updatePhotoCounts(){const counts={};for(const photo of photos)if(photo.stopId)counts[photo.stopId]=(counts[photo.stopId]||0)+1;app.setPhotoCounts?.(counts);}
-  function chip(id,label,count,stop){
-    const button=document.createElement('button');button.type='button';button.className='gallery-chip';button.dataset.filter=id;button.setAttribute('aria-pressed',String(galleryFilter===id));button.disabled=busy;
-    if(stop!==undefined){const number=document.createElement('span');number.className='chip-stop';number.textContent=String(stop+1).padStart(2,'0');button.append(number);}
-    const name=document.createElement('span'),total=document.createElement('span');name.textContent=label;total.className='chip-count';total.textContent=String(count);button.append(name,total);
-    button.addEventListener('click',()=>{galleryFilter=id;renderGallery();$('photo-scroll').scrollTop=0;[...$('gallery-filter').children].find(el=>el.dataset.filter===id)?.focus({preventScroll:true});});
-    return button;
+  function openPhoto(photo,group,origin){window.RedlinePostcards.open(photo,api,group.items,viewerActions(),origin);}
+  function mapButton(group){
+    const show=document.createElement('button');show.type='button';show.className='icon-button gallery-map-button';show.innerHTML=icons.pin;show.title=`Show ${group.name} on the map`;show.setAttribute('aria-label',`Show ${group.name} on the map`);show.disabled=busy;
+    show.addEventListener('click',()=>{closePanel('photo-panel');app.focusStop?.(group.id);});return show;
   }
   function renderGallery(){
-    const container=$('photo-gallery');container.replaceChildren();
-    const sorted=photoGroups();
-    if(!sorted.some(group=>group.id===galleryFilter))galleryFilter='';
-    const filter=$('gallery-filter');filter.replaceChildren(chip('','All',photos.length));
-    for(const group of sorted)filter.append(chip(group.id,group.name,group.items.length,group.stop));
-    filter.hidden=sorted.length<2;
-    const visible=sorted.filter(group=>!galleryFilter||group.id===galleryFilter);galleryItems=visible.flatMap(group=>group.items);
+    const groups=photoGroups();
+    if(activeCity&&!groups.some(group=>group.id===activeCity))activeCity='';
+    galleryItems=groups.flatMap(group=>group.items);
     for(const id of [...chosen])if(!photos.some(photo=>photo.id===id))chosen.delete(id);
-    $('gallery-count').textContent=photoLabel(galleryItems.length);
+    renderTabs(groups);
+    if(view==='album')renderAlbum();else renderSheet(groups);
+    if(selecting)cityOptions($('move-photos'),'Move to…');
+    updateChosen();renderPhotoMode();
+  }
+  // City dividers stick out of the album's edge, like the tabs in a real one.
+  function renderTabs(groups){
+    const nav=$('gallery-filter');
+    nav.replaceChildren(...groups.map((group,i)=>{
+      const tab=document.createElement('button');tab.type='button';tab.className='album-tab gallery-chip';tab.dataset.filter=group.id;tab.style.setProperty('--tab',String(i%6));tab.disabled=busy;
+      if(group.stop!==undefined){const number=document.createElement('span');number.className='chip-stop';number.textContent=stopNumber(group.stop);tab.append(number);}
+      const name=document.createElement('span'),count=document.createElement('span');name.className='tab-name';name.textContent=group.name;count.className='chip-count';count.textContent=String(group.items.length);tab.append(name,count);
+      tab.title=`${group.name} · ${photoLabel(group.items.length)}`;tab.addEventListener('click',()=>goToCity(group.id));
+      return tab;
+    }));
+    markTab();
+  }
+  function markTab(){[...$('gallery-filter').children].forEach(tab=>{const on=tab.dataset.filter===activeCity;tab.setAttribute('aria-pressed',String(on));if(on)tab.setAttribute('aria-current','true');else tab.removeAttribute('aria-current');});}
+  function goToCity(id,{instant=false}={}){
+    activeCity=id;markTab();
+    if(view==='album'){const index=pages.findIndex(page=>page.type==='city'&&page.first&&page.group.id===id);if(index>=0)turnTo(index,{instant});return;}
+    const section=[...$('photo-gallery').querySelectorAll('.gallery-city')].find(el=>el.dataset.stopId===id);
+    section?.scrollIntoView({behavior:instant||reduced()?'auto':'smooth',block:'start'});
+  }
+
+  // ---------- The album ----------
+  function albumPages(){
+    const list=[{type:'inside'},{type:'title'}];
+    for(const group of photoGroups()){let rest=group.items,first=true;while(first||rest.length){const room=first?3:4;list.push({type:'city',group,items:rest.slice(0,room),first,from:group.items.length-rest.length});rest=rest.slice(room);first=false;}}
+    if(!photos.length)list.push({type:'empty'});
+    return list;
+  }
+  const firstPage=()=>twoPage()?0:1;
+  function clampPage(index){const last=Math.max(firstPage(),pages.length-1);index=Math.max(firstPage(),Math.min(index,last));return twoPage()?index-index%2:index;}
+  function pageOfPhoto(id){pages=albumPages();return pages.findIndex(page=>page.type==='city'&&page.items.some(photo=>photo.id===id));}
+  function shade(kind='turn'){const el=document.createElement('span');el.className=`page-shade ${kind}`;el.setAttribute('aria-hidden','true');return el;}
+  function folio(el,index){if(index<2)return;const number=document.createElement('span');number.className='folio';number.textContent=String(index-1);el.append(number);}
+  function printElement(photo,group,position){
+    const figure=document.createElement('figure'),frame=document.createElement('div'),corners=document.createElement('span');
+    figure.className='print';figure.dataset.photoId=photo.id;setRatio(figure,photo);
+    figure.style.setProperty('--tilt',`${((hash(photo.id)%9)-4)*.42}deg`);
+    frame.className='print-frame';corners.className='print-corners';corners.setAttribute('aria-hidden','true');
+    const button=previewButton(photo,(event,origin)=>{if(Date.now()<suppressClick)return;openPhoto(photo,group,origin);},{saved:true});button.classList.add('print-photo');
+    button.setAttribute('aria-label',`Open photo ${position+1} of ${group.items.length} in ${group.name}`);
+    frame.append(button,corners);figure.append(frame);
+    const note=postcardLine(photo);
+    if(note){const caption=document.createElement('figcaption');caption.textContent=note;figure.append(caption);}
+    else if(hasPostcard(photo)){const caption=document.createElement('figcaption');caption.className='postcard-mark';caption.innerHTML=icons.postcard;caption.append(' postcard');figure.append(caption);}
+    return figure;
+  }
+  function pageElement(page,index,side){
+    const el=document.createElement('section');el.className=`album-page ${side}`;el.dataset.page=String(index);
+    if(!page){el.classList.add('blank');return el;}
+    el.classList.add(`page-${page.type}`);
+    if(page.type==='inside'){
+      el.innerHTML='<div class="bookplate"><span class="bookplate-rule"></span><p class="bookplate-label">A Redline album</p><p class="bookplate-title"></p><span class="bookplate-rule"></span></div>';
+      el.querySelector('.bookplate-title').textContent=current?.title||'Travels';
+    }else if(page.type==='title'){
+      const stops=app.getStops(),block=document.createElement('div');block.className='title-block';
+      block.innerHTML='<p class="eyebrow">Our travels</p><h3 class="album-name"></h3><p class="title-meta"></p><div class="title-map"></div><p class="title-route"></p>';
+      block.querySelector('.album-name').textContent=current?.title||'Photos';
+      block.querySelector('.title-meta').textContent=[plural(stops.length,'stop'),photoLabel(photos.length)].join(' · ');
+      block.querySelector('.title-map').append(routeMap(stops.map(stop=>[stop.longitude,stop.latitude]),{aspect:1.6}));
+      const names=stops.map(stop=>stop.name);block.querySelector('.title-route').textContent=(names.length>8?[...names.slice(0,4),'…',...names.slice(-3)]:names).join(' → ');
+      el.append(block);
+    }else if(page.type==='empty'){
+      const empty=document.createElement('div'),art=document.createElement('div'),label=document.createElement('p'),hint=document.createElement('p'),add=document.createElement('button');empty.className='photo-empty';
+      art.className='photo-empty-art';art.innerHTML=icons.photos;label.textContent='No photos yet';hint.className='photo-empty-hint';hint.textContent='Drop photos onto the album or add them from your device. Photos with location data find their city on your route.';
+      add.type='button';add.className='small-button';add.textContent='Add photos';add.disabled=busy;add.addEventListener('click',()=>$('choose-photos').click());empty.append(art,label,hint,add);el.append(empty);
+    }else{
+      const {group}=page,head=document.createElement('header');head.className='page-head';
+      if(page.first){
+        const number=document.createElement('span'),title=document.createElement('h3'),detail=document.createElement('p');
+        number.className='page-stop';number.textContent=group.stop!==undefined?`Stop ${stopNumber(group.stop)}`:'Elsewhere';
+        title.className='city-name';title.textContent=group.name;detail.className='page-country';detail.textContent=[group.country,photoLabel(group.items.length)].filter(Boolean).join(' · ');
+        head.append(number,title,detail);if(group.stop!==undefined)head.append(mapButton(group));
+      }else{head.classList.add('continued');head.textContent=`${group.name}, continued`;}
+      const prints=document.createElement('div'),count=page.items.length;
+      prints.className=`prints n-${count}`;
+      if(count===2&&page.items.every(photo=>photo.width&&photo.width<photo.height))prints.classList.add('side-by-side');
+      page.items.forEach((photo,i)=>prints.append(printElement(photo,group,page.from+i)));
+      el.append(head,prints);
+    }
+    folio(el,index);
+    if(side!=='single'||index>firstPage()||index<pages.length-1){
+      const corner=document.createElement('button');corner.type='button';corner.className='page-corner';corner.tabIndex=-1;corner.setAttribute('aria-hidden','true');
+      corner.addEventListener('click',()=>turnTo(shownPage()+(side==='left'?-1:1)*(twoPage()?2:1)));el.append(corner);
+    }
+    return el;
+  }
+  function spread(index){return twoPage()?[pageElement(pages[index],index,'left'),pageElement(pages[index+1],index+1,'right')]:[pageElement(pages[index],index,'single')];}
+  function renderAlbum(){
+    if(turning){const token=turning;turning=null;token.animations.forEach(animation=>animation.cancel());albumPage=token.target;}
+    pages=albumPages();albumPage=clampPage(albumPage);
+    const root=$('album-pages');root.classList.toggle('single',!twoPage());root.replaceChildren(...spread(albumPage));
+    updateAlbumNav();
+  }
+  function cityAt(index){return pages[index]?.type==='city'?pages[index].group:pages[index+1]?.type==='city'&&twoPage()?pages[index+1].group:null;}
+  function updateAlbumNav(){
+    const two=twoPage(),last=clampPage(pages.length-1),city=cityAt(albumPage);
+    $('album-previous').disabled=albumPage<=firstPage();$('album-next').disabled=albumPage>=last;
+    const shown=two?[albumPage,albumPage+1].filter(i=>i>=2&&i<pages.length):[albumPage].filter(i=>i>=2);
+    const where=albumPage<2&&(!two||albumPage===0)?'Title page':city?city.name:'';
+    $('album-position').textContent=[where,shown.length?`${shown.length>1?'pages':'page'} ${shown.map(i=>i-1).join('–')} of ${Math.max(0,pages.length-2)}`:''].filter(Boolean).join(' · ');
+    const scrub=$('album-scrub');scrub.min=String(firstPage());scrub.max=String(last);scrub.step=String(two?2:1);scrub.value=String(albumPage);scrub.disabled=last<=firstPage();
+    // Keep the chosen tab when its city shares this spread; otherwise follow the pages.
+    const onSpread=id=>[albumPage,two?albumPage+1:albumPage].some(i=>pages[i]?.type==='city'&&pages[i].group.id===id);
+    if(city&&!onSpread(activeCity)){activeCity=city.id;}markTab();
+    $('album-book').classList.toggle('at-start',albumPage<=firstPage());$('album-book').classList.toggle('at-end',albumPage>=last);
+  }
+  function preload(index){for(const page of [pages[index],pages[index+1]])for(const photo of page?.items||[]){const image=new Image();image.decoding='async';image.src=photo.thumbUrl||photo.url;}}
+  // A page turns over its spine: the leaf carries the old page on its front and the next on its back.
+  async function turnTo(target,{instant=false}={}){
+    if(!pages.length)pages=albumPages();
+    if(turning){const token=turning;turning=null;token.animations.forEach(animation=>animation.cancel());albumPage=token.target;}
+    target=clampPage(target);
+    if(target===albumPage){renderAlbum();return;}
+    const from=albumPage,forward=target>from,root=$('album-pages');
+    if(instant||!canAnimate(root)||!$('photo-panel').open){albumPage=target;renderAlbum();preload(target+(forward?2:-2));return;}
+    const token={target,animations:[]};turning=token;
+    if(twoPage()){
+      const left=forward?from:target,right=forward?target+1:from+1,frontIndex=forward?from+1:from,backIndex=forward?target:target+1;
+      const under=[pageElement(pages[left],left,'left'),pageElement(pages[right],right,'right')];
+      const leaf=document.createElement('div'),front=pageElement(pages[frontIndex],frontIndex,forward?'right':'left'),back=pageElement(pages[backIndex],backIndex,forward?'left':'right');
+      leaf.className=`album-leaf ${forward?'turn-forward':'turn-back'}`;front.classList.add('leaf-face','leaf-front');back.classList.add('leaf-face','leaf-back');
+      const frontShade=shade(),backShade=shade(),cast=shade('cast');front.append(frontShade);back.append(backShade);under[forward?1:0].append(cast);
+      leaf.append(front,back);root.replaceChildren(...under,leaf);
+      const distance=Math.abs(target-from)/2,timing={duration:Math.min(1100,760+distance*30),easing:'cubic-bezier(.645,.045,.355,1)',fill:'forwards'};
+      token.animations.push(
+        leaf.animate([{transform:'rotateY(0deg)'},{transform:`rotateY(${forward?-180:180}deg)`}],timing),
+        frontShade.animate([{opacity:0},{opacity:.42,offset:.5},{opacity:.42}],timing),
+        backShade.animate([{opacity:.42},{opacity:.42,offset:.5},{opacity:0}],timing),
+        cast.animate([{opacity:.55},{opacity:0}],timing));
+    }else{
+      const below=pageElement(pages[forward?target:from],forward?target:from,'single'),above=pageElement(pages[forward?from:target],forward?from:target,'single');
+      above.classList.add('single-leaf');root.replaceChildren(below,above);
+      const out=[{transform:'perspective(1600px) rotateY(0deg)',opacity:1},{transform:'perspective(1600px) rotateY(-82deg)',opacity:.2}];
+      token.animations.push(above.animate(forward?out:[...out].reverse(),{duration:560,easing:'cubic-bezier(.45,.05,.25,1)',fill:'forwards'}));
+    }
+    await Promise.all(token.animations.map(animation=>animation.finished)).catch(()=>{});
+    if(turning!==token)return;turning=null;albumPage=target;renderGallery();preload(target+(forward?2:-2));
+  }
+  // The first visit opens the cover like a real album.
+  function openCover(){
+    const root=$('album-pages');
+    if(!twoPage()||!canAnimate(root)||albumPage!==0)return;
+    const leaf=document.createElement('div'),front=document.createElement('section'),back=pageElement(pages[0],0,'left');
+    leaf.className='album-leaf turn-forward cover-leaf';front.className='album-page right leaf-face leaf-front album-cover';back.classList.add('leaf-face','leaf-back');
+    front.innerHTML='<div class="cover-plate"><span class="cover-rule"></span><p class="cover-kicker">Travel album</p><p class="cover-title"></p><span class="cover-rule"></span></div>';
+    front.querySelector('.cover-title').textContent=current?.title||'Photos';
+    leaf.append(front,back);root.append(leaf);
+    const token={target:0,animations:[]};turning=token;
+    const timing={duration:1150,delay:180,easing:'cubic-bezier(.6,.04,.28,1)',fill:'both'};
+    token.animations.push(leaf.animate([{transform:'rotateY(0deg)'},{transform:'rotateY(-180deg)'}],timing));
+    const left=root.querySelector('.album-page.left');if(left)token.animations.push(left.animate([{opacity:0},{opacity:0,offset:.48},{opacity:1,offset:.52},{opacity:1}],timing));
+    Promise.all(token.animations.map(animation=>animation.finished)).catch(()=>{}).then(()=>{if(turning===token){turning=null;renderGallery();}});
+  }
+  $('album-previous').addEventListener('click',()=>turnTo(shownPage()-(twoPage()?2:1)));
+  $('album-next').addEventListener('click',()=>turnTo(shownPage()+(twoPage()?2:1)));
+  $('album-scrub').addEventListener('input',()=>turnTo(Number($('album-scrub').value),{instant:true}));
+  let swipe=null,suppressClick=0;
+  $('album-pages').addEventListener('pointerdown',event=>{swipe=event.pointerType==='touch'?{x:event.clientX,y:event.clientY,id:event.pointerId}:null;});
+  $('album-pages').addEventListener('pointerup',event=>{
+    if(!swipe||swipe.id!==event.pointerId)return;const dx=event.clientX-swipe.x,dy=event.clientY-swipe.y;swipe=null;
+    if(Math.abs(dx)<50||Math.abs(dx)<Math.abs(dy)*1.4)return;
+    suppressClick=Date.now()+400;turnTo(shownPage()+(dx<0?1:-1)*(twoPage()?2:1));
+  });
+
+  // "All photos": a contact sheet, where photos are selected, moved, and deleted.
+  function renderSheet(groups){
+    const container=$('photo-gallery');container.replaceChildren();
     if(!photos.length){
       const empty=document.createElement('div'),art=document.createElement('div'),label=document.createElement('p'),hint=document.createElement('p'),add=document.createElement('button');empty.className='photo-empty';
-      art.innerHTML=icons.photos;art.className='photo-empty-art';label.textContent='No photos yet';hint.className='photo-empty-hint';hint.textContent='Drop photos here or add them from your device. Photos with location data are matched to the nearest city on your route.';
+      art.innerHTML=icons.photos;art.className='photo-empty-art';label.textContent='No photos yet';hint.className='photo-empty-hint';hint.textContent='Drop photos here or add them from your device. Photos with location data find their city on your route.';
       add.type='button';add.className='small-button';add.textContent='Add photos';add.disabled=busy;add.addEventListener('click',()=>$('choose-photos').click());empty.append(art,label,hint,add);container.append(empty);
     }
-    for(const group of visible){
-      const section=document.createElement('section'),top=document.createElement('div'),place=document.createElement('div'),heading=document.createElement('h3'),count=document.createElement('span');
+    let frame=0;
+    for(const group of groups){
+      const section=document.createElement('section'),top=document.createElement('div'),place=document.createElement('div'),heading=document.createElement('h3'),count=document.createElement('span'),grid=document.createElement('div');
       section.className='gallery-city';section.dataset.stopId=group.id;top.className='gallery-city-heading';heading.textContent=group.name;count.className='gallery-city-count';count.textContent=photoLabel(group.items.length);
-      if(group.stop!==undefined){const number=document.createElement('span');number.className='gallery-stop-number';number.textContent=String(group.stop+1).padStart(2,'0');top.append(number);}
+      if(group.stop!==undefined){const number=document.createElement('span');number.className='gallery-stop-number';number.textContent=stopNumber(group.stop);top.append(number);}
       place.className='gallery-city-place';place.append(heading);
       if(group.country){const detail=document.createElement('p');detail.className='gallery-city-country';detail.textContent=group.country;place.append(detail);}
-      top.append(place,count);
-      if(group.stop!==undefined){
-        const show=iconButton('gallery-map-button',`Show ${group.name} on the map`,icons.pin);
-        show.addEventListener('click',()=>{if(document.body.classList.contains('dock-covered'))closePanel('photo-panel');app.focusStop?.(group.id);});top.append(show);
-      }
-      section.append(top,galleryGrid(group.items));container.append(section);
+      top.append(place,count);if(group.stop!==undefined)top.append(mapButton(group));
+      grid.className='photo-grid';
+      group.items.forEach((photo,i)=>{
+        const tile=document.createElement('div'),number=document.createElement('span');tile.className='photo-tile';tile.dataset.photoId=photo.id;
+        const button=previewButton(photo,(event,origin)=>{if(selecting){toggleChosen(photo.id);return;}openPhoto(photo,group,origin);},{saved:true});
+        button.setAttribute('aria-label',`${selecting?'Select':'Open'} photo ${i+1} in ${group.name}`);
+        if(selecting){button.setAttribute('aria-pressed',String(chosen.has(photo.id)));const mark=document.createElement('span');mark.className='photo-check';mark.innerHTML=icons.check;tile.append(mark);}
+        if(hasPostcard(photo)){const card=document.createElement('span');card.className='postcard-badge';card.title='Postcard written';card.innerHTML=icons.postcard;tile.append(card);}
+        number.className='frame-number';number.textContent=String(++frame).padStart(2,'0');number.setAttribute('aria-hidden','true');
+        tile.prepend(button);tile.append(number);grid.append(tile);
+      });
+      section.append(top,grid);container.append(section);
     }
-    if(selecting)cityOptions($('move-photos'),'Move to…');
-    updatePhotoCounts();updateChosen();renderPhotoMode();
   }
   function setSelecting(value){
     if(selecting===value)return;selecting=value;chosen.clear();
     $('select-photos').setAttribute('aria-pressed',String(value));
-    if(!$('photo-panel').hidden)renderGallery();else renderPhotoMode();
+    if(value&&view!=='sheet'){view='sheet';}
+    if($('photo-panel').open)renderGallery();else renderPhotoMode();
   }
   function toggleChosen(id){if(chosen.has(id))chosen.delete(id);else chosen.add(id);updateChosen();}
   function updateChosen(){
@@ -504,21 +748,23 @@
       const data=await api(`/trips/${cached.id}`);if(current!==cached)return;
       if(photoVersion===photoPanelRequest)photos=data.photos;
       if(!dirty&&fingerprint()===initial){suppress=true;app.setStops(data.trip.stops);suppress=false;current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};remember();}
-      renderGallery();update();
+      if($('photo-panel').open)renderGallery();update();
     }catch(error){if(current!==cached)return;if(error.status===404){current=null;photos=[];remember();update();}else{openTrips();showError('trip-message',error);}}
     finally{suppress=false;}
   }
   function downloadBackup(blob,name){
     const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;link.hidden=true;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
   }
-  async function exportTrips(all){
+  async function exportTrips(all,tripId=current?.id){
     if(busy)return;busy=true;update();
     try{
-      if(dirty){if(!current)throw Error('Name and save this trip before exporting.');await saveCurrent();}
-      if(pending.length)throw Error('Save the pending photos before exporting.');
-      const blob=await window.RedlineStorage.exportArchive(all?null:current?.id);
-      const name=all?'Redline-backup':(current?.title||'Redline-trip').replace(/[^a-zA-Z0-9_-]+/g,'-');
-      downloadBackup(blob,`${name}.redline`);message('trip-message','Backup downloaded. Keep it somewhere private.');
+      const own=!all&&tripId===current?.id;
+      if(own&&dirty){if(!current)throw Error('Name and save this trip before exporting.');await saveCurrent();}
+      if(own&&pending.length)throw Error('Save the pending photos before exporting.');
+      if(!all&&!tripId)throw Error('Name and save this trip before exporting.');
+      const blob=await window.RedlineStorage.exportArchive(all?null:tripId);
+      const title=all?'Redline-backup':(tripCache.find(trip=>trip.id===tripId)?.title||current?.title||'Redline-trip');
+      downloadBackup(blob,`${title.replace(/[^a-zA-Z0-9_-]+/g,'-')}.redline`);message('trip-message','Backup downloaded. Keep it somewhere private.');
     }catch(error){showError('trip-message',error);}finally{busy=false;update();}
   }
   $('export-trip').addEventListener('click',()=>exportTrips(false));
