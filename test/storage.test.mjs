@@ -1,0 +1,100 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {readFileSync} from 'node:fs';
+import {IDBFactory, IDBObjectStore} from 'fake-indexeddb';
+
+const jpeg=readFileSync(new URL('./fixtures/gps.jpg',import.meta.url));
+const paris={id:'city-paris-01',name:'Paris',country:'France',latitude:48.8566,longitude:2.3522};
+const card={message:'Bonjour!\nA good day.',recipient:'A friend',address:'A street',sender:'Marcus'};
+function library(indexedDB=new IDBFactory()) {
+  const window={indexedDB},context={window,indexedDB,Blob,URL,crypto,TextEncoder,TextDecoder,Uint8Array,DataView,FormData,navigator:{storage:{persist:async()=>true}}};
+  vm.createContext(context);
+  for(const name of ['jpeg','archive','storage'])vm.runInContext(readFileSync(new URL(`../public/${name}.js`,import.meta.url),'utf8'),context);
+  return {store:window.RedlineStorage,archive:window.RedlineArchive,indexedDB};
+}
+const create=async store=>(await store.api('/trips',{method:'POST',body:JSON.stringify({title:'Europe',stops:[paris]})})).trip;
+async function upload(store,trip,bytes=jpeg) {
+  const form=new FormData();form.append('photo',new Blob([bytes],{type:'image/jpeg'}),'private-camera-name.jpg');form.append('stopId',paris.id);
+  return (await store.api(`/trips/${trip.id}/photos`,{method:'POST',body:form})).photo;
+}
+const plain=value=>JSON.parse(JSON.stringify(value));
+
+test('trips survive reopening and simultaneous tabs cannot overwrite newer edits',async()=>{
+  const {store,indexedDB}=library(),trip=await create(store),second=library(indexedDB).store;
+  assert.equal((await second.api('/trips')).trips[0].title,'Europe');
+  const writes=await Promise.allSettled([store,second].map((s,i)=>s.api(`/trips/${trip.id}`,{method:'PUT',body:JSON.stringify({...trip,title:`Trip ${i}`})})));
+  assert.equal(writes.filter(r=>r.status==='fulfilled').length,1);
+  assert.equal(writes.find(r=>r.status==='rejected').reason.status,409);
+  assert.equal((await second.api(`/trips/${trip.id}`)).trip.revision,2);
+});
+
+test('photos and postcard notes persist, with metadata removed and revisions checked',async()=>{
+  const {store,indexedDB}=library(),trip=await create(store),photo=await upload(store,trip);
+  const clean=Buffer.from(await (await fetch(photo.url)).arrayBuffer());
+  assert.ok(clean.length<jpeg.length);assert.equal(clean.includes(Buffer.from('Exif')),false);assert.equal(clean.includes(Buffer.from('TEST CAMERA')),false);
+  const saved=await store.api(`/photos/${photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:card,revision:1})});
+  assert.equal(saved.revision,2);
+  await assert.rejects(store.api(`/photos/${photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:card,revision:1})}),e=>e.status===409);
+  const reopened=await library(indexedDB).store.api(`/trips/${trip.id}`);
+  assert.deepEqual(plain(reopened.photos[0].postcard),card);
+  assert.equal(reopened.photos[0].postcardRevision,2);
+  assert.equal((await store.api('/trips')).trips[0].photoCount,1);
+});
+
+test('binary backup restores routes, image bytes and postcards on a different device without overwriting trips',async()=>{
+  const source=library().store,trip=await create(source),photo=await upload(source,trip);
+  await source.api(`/photos/${photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:card,revision:1})});
+  const backup=await source.exportArchive(),target=library().store,existing=await create(target);
+  const result=await target.importArchive(backup);
+  assert.deepEqual(plain(result),{tripCount:1,photoCount:1});
+  const list=(await target.api('/trips')).trips;assert.equal(list.length,2);
+  const restored=await target.api(`/trips/${list.find(t=>t.id!==existing.id).id}`);
+  assert.notEqual(restored.trip.id,trip.id);assert.deepEqual(plain(restored.trip.stops),plain(trip.stops));
+  assert.equal(restored.trip.createdAt,trip.createdAt);assert.equal(restored.photos[0].createdAt,photo.createdAt);
+  assert.deepEqual(plain(restored.photos[0].postcard),card);
+  assert.deepEqual(new Uint8Array(await (await fetch(restored.photos[0].url)).arrayBuffer()),new Uint8Array(await (await fetch(photo.url)).arrayBuffer()));
+  assert.equal((await target.api(`/trips/${existing.id}`)).photos.length,0);
+  await target.importArchive(backup);assert.equal((await target.api('/trips')).trips.length,3);
+});
+
+test('invalid or truncated imports make no partial changes',async()=>{
+  const {store,archive}=library(),trip=await create(store);
+  const valid={trip,photos:[{photo:{stopId:paris.id,city:paris,postcard:card},blob:new Blob([jpeg])}]};
+  const invalid={trip:{...trip,title:'Bad'},photos:[{photo:{stopId:paris.id,city:paris},blob:new Blob(['not a jpeg'])}]};
+  const before=(await store.api('/trips')).trips.length;
+  await assert.rejects(store.importArchive(archive.pack([valid,invalid])));
+  assert.equal((await store.api('/trips')).trips.length,before);
+  const backup=archive.pack([valid]);
+  await assert.rejects(store.importArchive(backup.slice(0,-1)));
+  await assert.rejects(store.importArchive(new Blob([backup,'extra'])));
+  await assert.rejects(store.importArchive(new Blob(['wrong format'])));
+  await assert.rejects(store.importArchive(archive.pack([{...valid,trip:{...trip,stops:[{...paris,latitude:999}]}}])));
+  assert.equal((await store.api('/trips')).trips.length,before);
+});
+
+test('a storage failure rolls back the whole import and reports that nothing was saved',async()=>{
+  const {store,archive}=library();await create(store);
+  const backup=archive.pack([{trip:{title:'Import',stops:[paris]},photos:[{photo:{stopId:paris.id,city:paris},blob:new Blob([jpeg])}]}]);
+  const original=IDBObjectStore.prototype.add;
+  IDBObjectStore.prototype.add=function(...args){if(this.name==='photos')throw new DOMException('Quota full','QuotaExceededError');return original.apply(this,args);};
+  try { await assert.rejects(store.importArchive(backup),e=>e.status===507); }
+  finally { IDBObjectStore.prototype.add=original; }
+  assert.equal((await store.api('/trips')).trips.length,1);
+});
+
+test('trip validation and photo assignment prevent corrupt saves',async()=>{
+  const {store}=library(),trip=await create(store);
+  await assert.rejects(store.api('/trips',{method:'POST',body:JSON.stringify({title:'Bad',stops:[paris,paris]})}));
+  await assert.rejects(upload(store,trip,new Uint8Array([1,2,3])));
+  await assert.rejects(store.api('/trips/not-a-trip'));
+  assert.equal((await store.api(`/trips/${trip.id}`)).photos.length,0);
+  assert.equal((await store.api('/trips')).trips.length,1);
+});
+
+test('static assets and storage have no ChatGPT or root-path API dependency',()=>{
+  const html=readFileSync(new URL('../map.html',import.meta.url),'utf8');
+  for(const match of html.matchAll(/(?:src|href)="([^"]+)"/g))if(!match[1].startsWith('https:'))assert.ok(!match[1].startsWith('/'));
+  const trips=readFileSync(new URL('../public/trips.js',import.meta.url),'utf8');
+  assert.ok(!trips.includes('/api'));assert.ok(!trips.includes('signin-with-chatgpt'));assert.ok(trips.includes("fetch('photo-cities.json')"));
+});

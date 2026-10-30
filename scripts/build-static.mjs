@@ -1,0 +1,10 @@
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+const root=new URL('../',import.meta.url),out=new URL('dist/',root);
+await rm(out,{recursive:true,force:true});
+await mkdir(out,{recursive:true});
+await cp(new URL('public/',root),out,{recursive:true});
+const html=await readFile(new URL('map.html',root),'utf8');
+if (/signin-with-chatgpt|src="\//.test(html)) throw Error('The standalone build must use relative assets and independent storage.');
+await writeFile(new URL('index.html',out),html);
+await writeFile(new URL('.nojekyll',out),'');
+console.log('Built the independent website in dist/.');
