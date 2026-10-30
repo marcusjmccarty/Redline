@@ -2,9 +2,10 @@ import {execFileSync} from 'node:child_process';
 import {mkdtemp,cp,rm,readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
 
 // Uses a disposable checkout; the source checkout and its branch are untouched.
-const root=resolve(new URL('../',import.meta.url).pathname);
+const root=resolve(fileURLToPath(new URL('../',import.meta.url)));
 const git=(args,cwd=root)=>execFileSync('git',args,{cwd,encoding:'utf8',stdio:['ignore','pipe','inherit']}).trim();
 const remote=git(['remote','get-url','origin']);
 execFileSync(process.execPath,['--test','test/storage.test.mjs','test/trace.test.mjs'],{cwd:root,stdio:'inherit'});
