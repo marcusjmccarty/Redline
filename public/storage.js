@@ -77,6 +77,11 @@
     const {blob,thumb,tripId,...photo}=record;
     return {...photo,url:urls.get(record.id),thumbUrl:thumbs.get(record.id)||null};
   }
+  function coverUrl(record) {
+    if (record.thumb) { if (!thumbs.has(record.id)) thumbs.set(record.id,URL.createObjectURL(record.thumb)); return thumbs.get(record.id); }
+    if (!urls.has(record.id)) urls.set(record.id,URL.createObjectURL(record.blob));
+    return urls.get(record.id);
+  }
   function forget(id) {
     for (const cache of [urls,thumbs]) { if (cache.has(id)) { URL.revokeObjectURL(cache.get(id)); cache.delete(id); } }
   }
@@ -116,8 +121,15 @@
     if (parts[0]==='trips' && parts.length===1) {
       if (method==='GET') return transaction(['trips','photos'],'readonly',async stores=>{
         const trips=await request(stores.trips.getAll()),photos=await request(stores.photos.getAll());
-        const counts=new Map(); for (const photo of photos) counts.set(photo.tripId,(counts.get(photo.tripId)||0)+1);
-        return {trips:trips.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).map(({stops,...trip})=>({...trip,stopCount:stops.length,photoCount:counts.get(trip.id)||0}))};
+        const counts=new Map(),covers=new Map();
+        for (const photo of photos) {
+          counts.set(photo.tripId,(counts.get(photo.tripId)||0)+1);
+          const cover=covers.get(photo.tripId);
+          if (!cover || photo.createdAt.localeCompare(cover.createdAt)<0) covers.set(photo.tripId,photo);
+        }
+        // Each listed trip carries a light route outline and the first photo, for its card.
+        return {trips:trips.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).map(({stops,...trip})=>({...trip,stopCount:stops.length,photoCount:counts.get(trip.id)||0,
+          points:stops.map(stop=>[Math.round(stop.longitude*100)/100,Math.round(stop.latitude*100)/100]),coverUrl:covers.has(trip.id)?coverUrl(covers.get(trip.id)):null}))};
       });
       if (method==='POST') {
         const data=tripData(body); persist();

@@ -75,3 +75,17 @@ form[aria-busy=true] .add-button{opacity:.45}.route-dock{bottom:24px}.map-instru
 #postcard-back{position:absolute;inset:0;transform:rotateY(180deg);display:flex;flex-direction:column;padding:4%;background:#eee4d1;border:0;color:#625440}
 #photo-viewer.flipped #postcard-error{transform:rotateY(180deg)}
 @media(prefers-reduced-motion:reduce){#photo-viewer{transition:none}}
+/* Route labels step aside quietly; the dock, its city list, and search results ease in and out. */
+.stop-label{transition:opacity .15s ease}.stop-label.label-hidden{opacity:0;pointer-events:none}
+#route-stops-panel{display:grid;grid-template-rows:1fr}#stop-list{min-height:0;align-self:start}
+.dock-motion #route-stops-panel{transition:grid-template-rows .28s cubic-bezier(.3,0,.2,1),opacity .22s ease,display .28s allow-discrete}
+.dock-motion #stop-list,.dock-motion .input-row{transition:margin .28s cubic-bezier(.3,0,.2,1)}
+#route-stops-panel[hidden]{grid-template-rows:0fr;opacity:0}#route-stops-panel[hidden] #stop-list{margin-block:0}
+@starting-style{.dock-motion #route-stops-panel{grid-template-rows:0fr;opacity:0}.dock-motion #route-stops-panel #stop-list{margin-block:0}}
+#toggle-stops svg{transition:transform .28s cubic-bezier(.3,0,.2,1)}#stop-list .stop-grip{transition:color .2s ease}
+.suggestion-panel{transition:opacity .16s ease,translate .16s ease,display .16s allow-discrete}.suggestion-panel[hidden]{opacity:0;translate:0 6px;pointer-events:none}
+@starting-style{.suggestion-panel{opacity:0;translate:0 6px}}
+.dock-heading button,.input-row button,.remove-stop,.zoom-controls button,#suggestions button{transition:color .15s ease,background-color .15s ease,border-color .15s ease,opacity .15s ease,transform .12s ease}
+.dock-heading button:active:not(:disabled),.input-row button:active:not(:disabled),.remove-stop:active{transform:translateY(1px)}.input-row .play-button:active:not(:disabled){transform:scale(.97)}
+.zoom-controls button:active:not(:disabled){background:#e3d5bb80}#suggestions button:active{background:#e2d5bd}
+@media(prefers-reduced-motion:reduce){.stop-label,#route-stops-panel,#stop-list,#stop-list .stop-grip,.input-row,#toggle-stops svg,.suggestion-panel,.dock-heading button,.input-row button,.remove-stop,.zoom-controls button,#suggestions button{transition:none!important}.dock-heading button:active,.input-row button:active,.remove-stop:active{transform:none!important}}
