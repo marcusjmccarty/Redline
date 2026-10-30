@@ -2,7 +2,7 @@
 
 A minimalist travel map inspired by the red routes in Indiana Jones: parchment, city stops, a moving red line, and photos that turn into postcards.
 
-[Open Redline](https://mmccarty-byte.github.io/Redline/)
+[Open Redline](https://marcusjmccarty.github.io/Redline/)
 
 ## Travel
 

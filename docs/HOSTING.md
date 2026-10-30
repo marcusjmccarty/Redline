@@ -1,8 +1,8 @@
 # Hosting Redline independently
 
-Live website: https://mmccarty-byte.github.io/Redline/
+Live website: https://marcusjmccarty.github.io/Redline/
 
-Source: https://github.com/mmccarty-byte/Redline
+Source: https://github.com/marcusjmccarty/Redline
 
 ## GitHub Pages
 
@@ -10,7 +10,7 @@ The public repository uses GitHub Pages, available on GitHub Free. No ChatGPT su
 
 For a fork, enable **Settings → Pages → Source: Deploy from a branch**, choose **gh-pages**, and select **/(root)**. Publish the first build with `npm run publish:site`. The command runs tests and builds, then pushes the generated assets using a disposable checkout; it never force-pushes or changes the source branch. Commit and push source changes to `main` before publishing.
 
-The available GitHub token cannot write custom workflows. Inactive examples live in `docs/workflows/` for a future migration to Actions publishing. Current publication uses no custom workflow or stored deployment secret.
+The prior publication token could not write custom workflows. Inactive examples live in `docs/workflows/` for a future migration to Actions publishing. The branch-based publication setup uses no custom workflow or stored deployment secret. The publishing script verifies the repository owner and authenticated account and refuses publication outside `marcusjmccarty/Redline`.
 
 ## Data
 
