@@ -3,8 +3,8 @@
   const $=id=>document.getElementById(id),app=window.RedlineApp,SVG='http://www.w3.org/2000/svg';
   let current=null,photos=[],pending=[],busy=false,dirty=false,suppress=false,resumePhotos=false,cityIndex=null,exifReady=null,photoPanelRequest=0,photosRequested=false;
   let activeCity='',galleryItems=[],importing=false,photoMode='',dragDepth=0,selecting=false,thumbQueue=Promise.resolve();
-  let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0,anchor=null,drawn=null,reopen=null;
-  const chosen=new Set(),thumbJobs=new Set(),openedCovers=new Set(),lastPages=new Map();
+  let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0,anchor=null,drawn=null,reopen=null,albumMotion=null;
+  const chosen=new Set(),thumbJobs=new Set(),lastPages=new Map();
   const photoLabel=count=>`${count} photo${count===1?'':'s'}`;
   const plural=(count,word)=>`${count} ${word}${count===1?'':'s'}`;
   const fingerprint=()=>JSON.stringify(app.getStops());
@@ -67,24 +67,56 @@
     return svg;
   }
 
-  // The logbook opens inside the voyage planner; the album is a modal book. Only one is open at a time.
+  // The logbook is a sheet beside the map; the album is a modal book. Only one is open at a time.
   const triggers={'trip-panel':'trips-button','photo-panel':'photos-button'};
   const isOpen=id=>id==='trip-panel'?!$(id).hidden:$(id).open;
   // Closing returns focus to where the panel was opened from: the keyboard's place, or the map after a click,
   // a shortcut on the map, or a close by pointer, so Return then sets sail instead of reopening the panel.
   const openedFrom={};let clickOpened=false;
+  function restorePanelFocus(id,focus){
+    if(!focus)return;
+    const back=focus==='map'?$('map'):openedFrom[id];
+    (back?.isConnected&&back!==document.body&&!back.closest('[hidden],[inert]')?back:$(triggers[id])).focus({preventScroll:true});
+  }
+  function finishAlbumClose(focus){
+    $('photos-button').setAttribute('aria-expanded','false');
+    if($('photo-panel').open)$('photo-panel').close();
+    albumMotion=null;photosRequested=false;dragDepth=0;$('photo-drop-hint').hidden=true;
+    setSelecting(false);renderPhotoMode();document.body.classList.remove('sheet-open');
+    if(!focus&&!$('trip-panel').hidden)$('trip-panel').focus({preventScroll:true});
+    else restorePanelFocus('photo-panel',focus);
+  }
   function closePanel(id,{focus=false}={}){
-    const panel=$(id);
-    if(id==='trip-panel'){panel.hidden=true;closeTripMenus();}
-    else{if(panel.open)panel.close();photosRequested=false;photoPanelRequest++;dragDepth=0;$('photo-drop-hint').hidden=true;setSelecting(false);if(current&&drawn?.trip===current.id)lastPages.set(current.id,placeAt(shownPage(),drawn.two));document.body.classList.remove('sheet-open');}
-    $(triggers[id]).setAttribute('aria-expanded','false');
-    if(focus){const back=focus==='map'?$('map'):openedFrom[id];(back?.isConnected&&back!==document.body&&!back.closest('[hidden],[inert]')?back:$(triggers[id])).focus({preventScroll:true});}
+    if(id==='trip-panel'){
+      $(id).hidden=true;closeTripMenus();app.refreshLayout?.();
+      $(triggers[id]).setAttribute('aria-expanded','false');restorePanelFocus(id,focus);return;
+    }
+    if(albumMotion?.phase==='closing')return;
+    // Bookmark before folding the cover, including an interrupted opening or page turn.
+    const place=albumMotion?.place||(drawn?.trip===current?.id?placeAt(shownPage(),drawn.two):null);
+    if(current&&place)lastPages.set(current.id,place);
+    photoPanelRequest++;
+    if(!$(id).open||!canAnimate($('album-pages'))){
+      if(turning){const token=turning;turning=null;token.animations.forEach(a=>a.cancel());}
+      finishAlbumClose(focus);return;
+    }
+    const token={phase:'closing',place};albumMotion=token;
+    // The same pages and cover fold shut in both Album and All Photos.
+    renderGallery();
+    (async()=>{
+      await turnTo(0);
+      if(albumMotion!==token)return;
+      const book=$('album-book'),fade=book.animate([{opacity:1,transform:'translateY(0) scale(1)'},{opacity:0,transform:'translateY(24px) scale(.96)'}],{duration:220,easing:'ease-in',fill:'forwards'});
+      await fade.finished.catch(()=>{});
+      if(albumMotion===token)finishAlbumClose(focus);
+      fade.cancel();
+    })();
   }
   function openPanel(id){
     if(!isOpen(id)){const at=document.activeElement;openedFrom[id]=clickOpened||!at||at===document.body?$('map'):at;}
     for(const other of Object.keys(triggers))if(other!==id&&isOpen(other))closePanel(other);
     app.closeSearch?.();$(triggers[id]).setAttribute('aria-expanded','true');
-    if(id==='trip-panel'){$(id).hidden=false;return;}
+    if(id==='trip-panel'){$(id).hidden=false;app.refreshLayout?.();return;}
     if(!$(id).open)$(id).showModal();document.body.classList.add('sheet-open');
   }
   // The logbook folds away when you work elsewhere: on the map, or in the planner's search, ports and travel controls.
@@ -111,8 +143,8 @@
   function tripDate(value){const date=new Date(value);if(!Number.isFinite(date.getTime()))return '';return date.toLocaleDateString(undefined,{month:'short',day:'numeric',...(date.getFullYear()===new Date().getFullYear()?{}:{year:'numeric'})});}
   function updateCurrentTrip(){
     const stops=app.getStops();
-    $('current-trip-label').textContent=current?'This voyage':'An unsaved course';
-    $('trip-state').textContent=current?(dirty?'Unsaved changes':'All changes saved'):stops.length?`${plural(stops.length,'port')} · not saved yet`:'Chart a port of call to begin';
+    $('current-trip-label').textContent=current?'Trip':'New trip';
+    $('trip-state').textContent=current?(dirty?'Unsaved changes':'All changes saved'):stops.length?`${plural(stops.length,'stop')} · not saved yet`:'Add a destination to begin';
     $('trip-state').classList.toggle('unsaved',!current||dirty);
     const button=$('trip-name-form').querySelector('button'),renamed=!!current&&$('trip-name').value.trim()!==current.title,settled=!!current&&!dirty&&!renamed;
     button.textContent=!current?'Save':dirty?'Save changes':renamed?'Rename':'Saved';
@@ -139,7 +171,7 @@
     if(trip.coverUrl){const cover=document.createElement('img');cover.className='trip-cover';cover.src=trip.coverUrl;cover.alt='';cover.loading='lazy';cover.style.setProperty('--tilt',`${(hash(trip.id)%7-3)*1.1}deg`);map.append(cover);}
     open.type='button';open.className='trip-open';open.disabled=busy;name.className='trip-name';name.textContent=trip.title;open.append(name);
     if(trip.id===current?.id){open.setAttribute('aria-current','true');const badge=document.createElement('span');badge.className='trip-current';badge.textContent='Open now';body.append(badge);}
-    detail.className='trip-meta';detail.textContent=[plural(trip.stopCount??0,'port'),trip.photoCount?photoLabel(trip.photoCount):'',tripDate(trip.updatedAt)].filter(Boolean).join(' · ');
+    detail.className='trip-meta';detail.textContent=[plural(trip.stopCount??0,'stop'),trip.photoCount?photoLabel(trip.photoCount):'',tripDate(trip.updatedAt)].filter(Boolean).join(' · ');
     body.className='trip-card-body';body.prepend(open);body.append(detail);
     open.addEventListener('click',event=>trip.id===current?.id?closePanel('trip-panel',{focus:event.detail?'map':true}):loadTrip(trip.id,{keyboard:!event.detail}));
     const more=document.createElement('button'),menu=document.createElement('div');
@@ -159,7 +191,7 @@
   function renderTripCards(focus=null){
     const list=$('trip-list'),query=$('trip-search').value.trim().toLowerCase(),shown=tripCache.filter(trip=>!query||trip.title.toLowerCase().includes(query));
     list.replaceChildren(...shown.map(tripCard));
-    if(!tripCache.length||!shown.length){const empty=document.createElement('li');empty.className='trip-empty';empty.textContent=tripCache.length?'No voyage by that name.':'No voyages kept yet. Name this course above to keep it.';list.append(empty);}
+    if(!tripCache.length||!shown.length){const empty=document.createElement('li');empty.className='trip-empty';empty.textContent=tripCache.length?'No trip by that name.':'No saved trips yet. Name this trip above to save it.';list.append(empty);}
     if(focus&&isOpen('trip-panel')){
       const row=[...list.querySelectorAll('.trip-card')].find(el=>el.dataset.tripId===focus.id);
       (row?.querySelector(focus.part||'.trip-open')||list.querySelector('.trip-open')||$('trip-name')).focus({preventScroll:true});
@@ -169,7 +201,7 @@
   async function listTrips(focus=null){
     try{
       const {trips}=await api('/trips');tripCache=trips;
-      $('trips-summary').textContent=trips.length?`${plural(trips.length,'voyage')} kept in this browser`:'No voyages kept yet';
+      $('trips-summary').textContent=trips.length?`${plural(trips.length,'trip')} kept in this browser`:'No saved trips yet';
       $('trip-search-label').hidden=trips.length<7;if(trips.length<7)$('trip-search').value='';renderTripCards(focus);
     }catch(error){showError('trip-message',error);}
   }
@@ -234,6 +266,7 @@
   // An already open logbook keeps what is being typed into it.
   function openTrips(note=''){
     const wasOpen=isOpen('trip-panel');openPanel('trip-panel');
+    if($('route-stops-panel').hidden)$('toggle-stops').click();
     if(!wasOpen){$('trip-name').value=current?.title||'';$('trip-search').value='';drawCurrentMap();listTrips();}
     message('trip-message',note);updateCurrentTrip();
     if(!current||note){$('trip-name').focus({preventScroll:true});revealInLogbook($('trip-name-form'));if(note)revealInLogbook($('trip-message'));}else $('trip-panel').focus({preventScroll:true});
@@ -247,7 +280,7 @@
   $('save-trip').addEventListener('click',async()=>{
     if(!current){if(isOpen('trip-panel')&&$('trip-name').value.trim())$('trip-name-form').requestSubmit();else openTrips();return;}
     const focus=listFocus();let saved=false;busy=true;update();
-    try{await saveCurrent();saved=true;$('save-trip').textContent='Saved';setTimeout(()=>$('save-trip').textContent='Save',1300);}catch(error){openTrips();showError('trip-message',error);}finally{busy=false;update();if(saved)await refreshLogbook(focus);}
+    try{await saveCurrent();saved=true;$('save-trip-label').textContent='Saved';setTimeout(()=>$('save-trip-label').textContent='Save',1300);}catch(error){openTrips();showError('trip-message',error);}finally{busy=false;update();if(saved)await refreshLogbook(focus);}
   });
   $('trip-name-form').addEventListener('submit',async event=>{
     event.preventDefault();if(busy)return;
@@ -264,26 +297,34 @@
   $('new-trip').addEventListener('click',()=>{if(!canSwitch())return;discardPending();setSelecting(false);current=null;photos=[];activeCity='';albumPage=0;suppress=true;app.setStops([]);suppress=false;dirty=false;remember();update();renderGallery();closePanel('trip-panel');$('destination').focus();});
   document.querySelectorAll('[data-close]').forEach(button=>button.addEventListener('click',event=>closePanel(button.dataset.close,{focus:event.detail?'map':true})));
   document.addEventListener('pointerdown',event=>{if(!event.target.closest?.('.trip-menu,.trip-more'))closeTripMenus();},true);
-  window.addEventListener('resize',()=>{if(!$('photo-panel').open||resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;if(view!=='album')return;const had=$('album-pages').contains(document.activeElement)||!!turning?.had;renderAlbum();keepAlbumFocus(had);});});
+  window.addEventListener('resize',()=>{if(!$('photo-panel').open||resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;if(view!=='album'||albumMotion)return;const had=$('album-pages').contains(document.activeElement)||!!turning?.had;renderAlbum();keepAlbumFocus(had);});});
   window.addEventListener('redline:routechange',()=>{if(suppress)return;dirty=current?fingerprint()!==current.hash:app.getStops().length>0;update();if(isOpen('trip-panel'))drawCurrentMap();if($('photo-panel').open){renderReview();renderGallery();}});
   window.addEventListener('beforeunload',event=>{if(pending.length||dirty){event.preventDefault();event.returnValue='';}});
 
   // ---------- Photos ----------
   async function showPhotos(city){
-    if(busy)return;
+    if(busy||albumMotion?.phase==='closing')return;
     if(city!==undefined){activeCity=city;setSelecting(false);}
-    if($('photo-panel').open){renderGallery();if(city)goToCity(city);return;}
+    if($('photo-panel').open){if(!albumMotion){renderGallery();if(city)goToCity(city);}return;}
     if(photosRequested)return;
     photosRequested=true;const version=++photoPanelRequest;
     try{
       if(!requireTrip()||version!==photoPanelRequest)return;
-      const firstVisit=!openedCovers.has(current.id);reopen=lastPages.get(current.id)||null;albumPage=reopen?.index??0;
-      openPanel('photo-panel');renderGallery();renderReview();message('photo-message','');
-      // The first visit shows the closed album for a moment, then opens its cover.
-      if(firstVisit&&!city){openedCovers.add(current.id);if(albumPage===0)setTimeout(()=>{if($('photo-panel').open&&view==='album'&&!pending.length&&shownPage()===0)turnTo(step());},650);}
-      const tripId=current.id,data=await api(`/trips/${tripId}`);if(version!==photoPanelRequest||current?.id!==tripId)return;
-      photos=data.photos;if(!turning)renderGallery();update();if(city)goToCity(city);
-    }catch(error){if(version===photoPanelRequest){openPanel('photo-panel');showError('photo-message',error);}}
+      const tripId=current.id,place=lastPages.get(tripId)||{type:'title',index:step()};
+      const token={phase:'opening',place};albumMotion=token;
+      reopen=null;albumPage=0;openPanel('photo-panel');renderGallery();renderReview();message('photo-message','');
+      const data=await api(`/trips/${tripId}`);
+      if(version!==photoPanelRequest||current?.id!==tripId||albumMotion!==token)return;
+      photos=data.photos;renderGallery();update();
+      const cityPage=city?pages.findIndex(page=>page.type==='city'&&page.first&&page.group.id===city):-1;
+      const target=clampPage(cityPage>=0?cityPage:pageAt(place));
+      token.place=placeAt(target,twoPage());
+      // Every visit starts at the cover and opens straight to the reader's bookmark.
+      await turnTo(target);
+      if(version!==photoPanelRequest||albumMotion!==token)return;
+      albumMotion=null;renderGallery();
+      if(view==='sheet'&&city)goToCity(city,{instant:true});
+    }catch(error){if(version===photoPanelRequest){albumMotion=null;openPanel('photo-panel');renderGallery();showError('photo-message',error);}}
     finally{if(version===photoPanelRequest)photosRequested=false;}
   }
   $('photos-button').addEventListener('click',event=>{if(photosRequested||$('photo-panel').open){closePanel('photo-panel');return;}clickOpened=event.detail>0;showPhotos();clickOpened=false;});
@@ -294,6 +335,8 @@
       if($('photo-panel').open){event.preventDefault();if(selecting){setSelecting(false);$('select-photos').focus({preventScroll:true});return;}closePanel('photo-panel',{focus:true});return;}
     }
     if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"]'))return;
+    // Keep keyboard turns from racing a cover that is opening or closing.
+    if(albumMotion&&['ArrowRight','ArrowLeft','PageDown','PageUp','Home','End'].includes(event.key)){event.preventDefault();return;}
     // The album turns like a book from the keyboard.
     if($('photo-panel').open&&!viewer&&mode()==='album'){
       const turns={ArrowRight:step(),PageDown:step(),ArrowLeft:-step(),PageUp:-step()};
@@ -399,9 +442,12 @@
     if(busy||!pending.length)return;
     if(confirm(`Discard ${photoLabel(pending.length)} from this import?`)){discardPending();message('photo-message','');$('choose-photos').focus({preventScroll:true});}
   });
-  const mode=()=>pending.length||importing?'review':view;
+  const mode=()=>albumMotion?'album':pending.length||importing?'review':view;
   function renderPhotoMode(){
-    const current_=mode(),reviewing=current_==='review';
+    const current_=mode(),reviewing=current_==='review',moving=!!albumMotion;
+    $('photo-panel').dataset.motion=albumMotion?.phase||'';
+    $('album-book').inert=moving;$('album-modes').inert=moving;
+    $('choose-photos').disabled=busy||moving;
     if(current_!==photoMode){$('photo-scroll').scrollTop=0;photoMode=current_;}
     $('album-book').dataset.mode=current_;
     $('photos-heading').textContent=reviewing?'Add photos':'Photos';
@@ -409,7 +455,7 @@
     $('gallery-count').textContent=photoLabel(photos.length);$('gallery-count').hidden=reviewing||!photos.length;
     $('choose-photos').querySelector('span').textContent=pending.length?'Add more':'Add photos';
     // Controls that fade away also leave the tab order, so they can't turn a hidden album.
-    $('album-pages').hidden=current_!=='album';$('album-sheet').hidden=current_==='album';$('album-foot').classList.toggle('away',current_!=='album');$('album-foot').inert=current_!=='album';
+    $('album-pages').hidden=current_!=='album';$('album-sheet').hidden=current_==='album';$('album-foot').classList.toggle('away',current_!=='album');$('album-foot').inert=current_!=='album'||moving;
     $('photo-gallery').hidden=current_!=='sheet';$('photo-review').hidden=!reviewing;
     $('photo-review').setAttribute('aria-busy',String(importing));
     $('gallery-toolbar').hidden=current_!=='sheet'||!photos.length||selecting;
@@ -536,7 +582,7 @@
     galleryItems=groups.flatMap(group=>group.items);
     for(const id of [...chosen])if(!photos.some(photo=>photo.id===id))chosen.delete(id);
     renderTabs(groups);
-    if(view==='album')renderAlbum();else renderSheet(groups);
+    if(mode()==='album')renderAlbum();else renderSheet(groups);
     if(selecting)cityOptions($('move-photos'),'Move to…');
     updateChosen();renderPhotoMode();
   }
@@ -615,7 +661,7 @@
       :'<div class="cover-plate"><svg class="cover-emblem" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" stroke-width=".9"/><circle cx="20" cy="20" r="13.5" fill="none" stroke="currentColor" stroke-width=".5" stroke-dasharray="1 2"/><path d="M20 4 22.4 17.6 36 20 22.4 22.4 20 36 17.6 22.4 4 20 17.6 17.6Z" fill="currentColor"/></svg><p class="cover-kicker">A travel album</p><p class="cover-title"></p><span class="cover-rule"></span><p class="cover-meta"></p></div>';
     if(!back){
       el.querySelector('.cover-title').textContent=current?.title||'Photos';
-      const stops=app.getStops();el.querySelector('.cover-meta').textContent=[plural(stops.length,'port'),photoLabel(photos.length)].join(' · ');
+      const stops=app.getStops();el.querySelector('.cover-meta').textContent=[plural(stops.length,'stop'),photoLabel(photos.length)].join(' · ');
     }
   }
   function pageElement(page,index,side){
@@ -624,18 +670,18 @@
     el.classList.add(`page-${page.type}`);
     if(page.type==='cover'||page.type==='back')coverFace(el,page.type==='back');
     else if(page.type==='inside'){
-      if(!page.end){el.innerHTML='<div class="bookplate"><span class="bookplate-rule"></span><p class="bookplate-label">This album belongs to the voyage</p><p class="bookplate-title"></p><span class="bookplate-rule"></span></div>';el.querySelector('.bookplate-title').textContent=current?.title||'Travels';}
+      if(!page.end){el.innerHTML='<div class="bookplate"><span class="bookplate-rule"></span><p class="bookplate-label">This album belongs to the trip</p><p class="bookplate-title"></p><span class="bookplate-rule"></span></div>';el.querySelector('.bookplate-title').textContent=current?.title||'Travels';}
     }else if(page.type==='title'){
       const stops=app.getStops(),block=document.createElement('div');block.className='title-block';
       block.innerHTML='<p class="eyebrow">Our travels</p><h3 class="album-name"></h3><p class="title-meta"></p><div class="title-map"></div><p class="title-route"></p>';
       block.querySelector('.album-name').textContent=current?.title||'Photos';
-      block.querySelector('.title-meta').textContent=[plural(stops.length,'port'),photoLabel(photos.length)].join(' · ');
+      block.querySelector('.title-meta').textContent=[plural(stops.length,'stop'),photoLabel(photos.length)].join(' · ');
       block.querySelector('.title-map').append(routeMap(stops.map(stop=>[stop.longitude,stop.latitude]),{aspect:1.6}));
       const names=stops.map(stop=>stop.name);block.querySelector('.title-route').textContent=(names.length>8?[...names.slice(0,4),'…',...names.slice(-3)]:names).join(' → ');
       el.append(block);
     }else if(page.type==='contents'){
       const block=document.createElement('div'),list=document.createElement('ol');block.className='contents';
-      block.innerHTML=`<p class="eyebrow">Contents</p><h3 class="contents-title">${page.continued?'Ports of call, continued':'Ports of call'}</h3>`;list.className='contents-list';
+      block.innerHTML=`<p class="eyebrow">Contents</p><h3 class="contents-title">${page.continued?'Places, continued':'Places'}</h3>`;list.className='contents-list';
       for(const group of page.groups){
         const at=pages.findIndex(other=>other.type==='city'&&other.first&&other.group===group),item=document.createElement('li'),button=document.createElement('button');
         button.type='button';button.disabled=busy;
@@ -654,7 +700,7 @@
       const {group}=page,head=document.createElement('header');head.className='page-head';
       if(page.first){
         const number=document.createElement('span'),title=document.createElement('h3'),detail=document.createElement('p');
-        number.className='page-stop';number.textContent=group.stop!==undefined?`Port ${stopNumber(group.stop)}`:'Elsewhere';
+        number.className='page-stop';number.textContent=group.stop!==undefined?`Stop ${stopNumber(group.stop)}`:'Elsewhere';
         title.className='city-name';title.textContent=group.name;detail.className='page-country';detail.textContent=[group.country,photoLabel(group.items.length)].filter(Boolean).join(' · ');
         head.append(number,title,detail);if(group.stop!==undefined)head.append(mapButton(group));
       }else{head.classList.add('continued');head.textContent=`${group.name}, continued`;}

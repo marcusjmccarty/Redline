@@ -62,7 +62,7 @@
     lines.forEach((path,i)=>{path._amount=null;path.setAttribute('d',geometry[i].path);});
   }
   function setPlayState(value) {
-    running=value;$('play-label').textContent=value?'Pause':'Set sail';$('route-dock').classList.toggle('sailing',value);
+    running=value;$('play-label').textContent=value?'Pause':'Trace route';$('route-dock').classList.toggle('sailing',value);
     $('play-icon').firstElementChild.setAttribute('d',value?'M4.5 3.5h2.5v9H4.5zM9 3.5h2.5v9H9z':'m5 3 8 5-8 5z');
   }
   function stopAnimation() {
@@ -364,7 +364,7 @@
     // Read every overlay box before writing, so a frame forces at most one layout.
     const local=(el,pad)=>{const r=el.getBoundingClientRect();return {x:r.left-bounds.left-pad,y:r.top-bounds.top-pad,w:r.width+pad*2,h:r.height+pad*2};};
     const controls=!document.body.classList.contains('map-only'),dock=controls?local($('route-dock'),8):null,obstacles=[];
-    if(controls){obstacles.push({x:dock.x+4,y:dock.y+4,w:dock.w-8,h:dock.h-8});if(zoomControls)obstacles.push(local(zoomControls,4));}
+    if(controls){obstacles.push({x:dock.x+4,y:dock.y+4,w:dock.w-8,h:dock.h-8});if(zoomControls)obstacles.push(local(zoomControls,4));if(!$('trip-panel').hidden)obstacles.push(local($('trip-panel'),8));}
     paintAntarctica(matrix,bounds);
     zoomLevel=baseView.w/view.w;
     $('zoom-in').disabled=zoomLevel>=MAX_ZOOM-.001;$('zoom-out').disabled=zoomLevel<=1.001;
@@ -374,7 +374,7 @@
       label.setAttribute('x','0');label.setAttribute('y','0');
       label.setAttribute('transform',`translate(${label.dataset.mapX} ${label.dataset.mapY}) scale(${1/matrix.a} ${1/matrix.d}) rotate(${label.dataset.mapRotation})`);
     }
-    if(dock)occupied.push(dock);
+    if(dock)occupied.push(...obstacles);
     renderLabels(matrix,bounds,occupied);paintProgress();
   }
   function paintStops(matrix,bounds,obstacles){
@@ -448,9 +448,9 @@
     const step=activeStopId?stops.findIndex(p=>p.id===activeStopId)+1:0;
     map.dataset.tripStep=String(Math.max(0,step));
     $('previous-city').disabled=stops.length===0;$('next-city').disabled=stops.length===0;
-    const previousLabel=step===0&&stops.length?'Last port':step===1?'Whole voyage':'Previous port';
+    const previousLabel=step===0&&stops.length?'Last city':step===1?'Whole trip':'Previous city';
     $('previous-city').setAttribute('aria-label',previousLabel);$('previous-city').title=previousLabel;
-    const nextLabel=step===stops.length&&stops.length?'Whole voyage':'Next port';
+    const nextLabel=step===stops.length&&stops.length?'Whole trip':'Next city';
     $('next-city').setAttribute('aria-label',nextLabel);$('next-city').title=nextLabel;
     [...$('stop-list').children].forEach((node,i)=>{const grip=node.querySelector('.stop-grip');if(step===i+1)grip.setAttribute('aria-current','step');else grip.removeAttribute('aria-current');});
   }
@@ -544,7 +544,7 @@
   for(const id of ['previous-city','next-city','zoom-in','zoom-out','reset-view','toggle-stops'])$(id).addEventListener('click',event=>{if(event.detail)map.focus({preventScroll:true});});
   function collapseStops(collapsed){
     $('route-dock').classList.toggle('stops-collapsed',collapsed);$('route-stops-panel').hidden=collapsed;
-    $('toggle-stops').setAttribute('aria-expanded',String(!collapsed));$('toggle-stops').setAttribute('aria-label',collapsed?'Show ports':'Collapse ports');$('toggle-stops').title=collapsed?'Show ports':'Collapse ports';
+    $('toggle-stops').setAttribute('aria-expanded',String(!collapsed));$('toggle-stops').setAttribute('aria-label',collapsed?'Show stops':'Collapse stops');$('toggle-stops').title=collapsed?'Show stops':'Collapse stops';
     try{localStorage.setItem('redline-cities-collapsed',String(collapsed));}catch{}scheduleView();
     // An animated dock reframes the camera once its height settles (or soon after, without transitions).
     clearTimeout(dockTimer);
@@ -566,7 +566,7 @@
   try{collapseStops(localStorage.getItem('redline-cities-collapsed')==='true');}catch{}
   function setMapOnly(hidden){
     document.body.classList.toggle('map-only',hidden);
-    document.querySelectorAll('.route-dock,.zoom-controls').forEach(el=>{el.inert=hidden;});
+    document.querySelectorAll('.route-dock,.zoom-controls,#trip-panel').forEach(el=>{el.inert=hidden;});
     if(hidden){closeSearch();map.focus({preventScroll:true});}scheduleView();reframeTrace();
   }
   $('info-button').addEventListener('click',()=>$('info-dialog').showModal());
@@ -602,6 +602,7 @@
   window.RedlineApp={
     showControls:()=>setMapOnly(false),
     closeSearch,
+    refreshLayout:scheduleView,
     focusStop:id=>{const index=stops.findIndex(p=>p.id===id);if(index>=0){jumpToCity(index);map.focus({preventScroll:true});}return index>=0;},
     getStops:()=>stops.map(p=>({...p})),
     setStops:(items,{preserveView=false}={})=>{stops=items.map(p=>({...p,id:p.id||crypto.randomUUID()}));if(!preserveView)drawRoute();persist();},
@@ -610,6 +611,7 @@
   };
   new ResizeObserver(resizeMap).observe(map);
   // Dock size changes without a fold animation (reduced motion, the logbook's list filling in) still move the labels.
-  new ResizeObserver(()=>{if(!animation)scheduleView();}).observe($('route-dock'));
+  const overlayObserver=new ResizeObserver(()=>{if(!animation)scheduleView();});
+  overlayObserver.observe($('route-dock'));overlayObserver.observe($('trip-panel'));
   drawRoute();resizeMap();
 })();
