@@ -2,6 +2,8 @@
   'use strict';
   const $=id=>document.getElementById(id),app=window.RedlineApp;
   let current=null,photos=[],pending=[],busy=false,dirty=false,suppress=false,resumePhotos=false,cityIndex=null,exifReady=null,photoPanelRequest=0,photosRequested=false;
+  let galleryFilter='',galleryItems=[],importing=false,photoMode='',dragDepth=0;
+  const photoLabel=count=>`${count} photo${count===1?'':'s'}`;
   const fingerprint=()=>JSON.stringify(app.getStops());
   const routeContent=route=>JSON.stringify(route.map(({name,country='',admin1='',latitude,longitude})=>({name,country,admin1,latitude,longitude})));
   try{current=JSON.parse(localStorage.getItem('redline-saved-trip')||'null');}catch{}
@@ -14,13 +16,14 @@
     $('save-trip').disabled=busy;$('new-trip').disabled=busy;$('choose-photos').disabled=busy;$('trips-button').disabled=busy;
     $('export-trip').disabled=busy||!current;$('backup-trips').disabled=busy;$('import-trips').disabled=busy;
     document.querySelectorAll('#photo-gallery select,#photo-gallery button,#photo-review button,#photo-review input,#photo-review select').forEach(el=>el.disabled=busy);
-    updateBulkSelection();
+    $('cancel-photo-import').disabled=busy;$('gallery-city').disabled=busy;
+    updateBulkSelection();updateUploadButton();renderPhotoMode();
   }
   function message(id,text,error=false){const el=$(id);el.replaceChildren();el.textContent=text||'';el.classList.toggle('error',error);}
   function showError(id,error){message(id,error.message||'Please try again.',true);}
   const api=(path,options={})=>window.RedlineStorage.api(path,options);
-  function closePanel(id){$(id).hidden=true;if(id==='photo-panel'){photosRequested=false;photoPanelRequest++;}}
-  function openPanel(id){if(id!=='photo-panel')closePanel('photo-panel');$('trip-panel').hidden=id!=='trip-panel';$('photo-panel').hidden=id!=='photo-panel';$(id).hidden=false;}
+  function closePanel(id){$(id).hidden=true;if(id==='photo-panel'){photosRequested=false;photoPanelRequest++;dragDepth=0;$('photo-drop-hint').hidden=true;$('photos-button').setAttribute('aria-expanded','false');}}
+  function openPanel(id){if(id!=='photo-panel')closePanel('photo-panel');$('trip-panel').hidden=id!=='trip-panel';$('photo-panel').hidden=id!=='photo-panel';$(id).hidden=false;if(id==='photo-panel'){$('photos-button').setAttribute('aria-expanded','true');$('photo-panel').querySelector('.close-panel').focus({preventScroll:true});}}
   function discardPending(){pending.forEach(p=>URL.revokeObjectURL(p.url));pending=[];renderReview();}
   function canSwitch(){return !(dirty||pending.length)||confirm('Discard unsaved changes and switch trips?');}
   async function listTrips(){
@@ -33,7 +36,7 @@
   async function loadTrip(id){
     if(busy||!canSwitch())return;
     busy=true;update();
-    try{const data=await api(`/trips/${id}`);discardPending();suppress=true;app.setStops(data.trip.stops);suppress=false;current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};photos=data.photos;dirty=false;remember();renderGallery();closePanel('trip-panel');message('trip-message','');}
+    try{const data=await api(`/trips/${id}`);photoPanelRequest++;discardPending();galleryFilter='';suppress=true;app.setStops(data.trip.stops);suppress=false;current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};photos=data.photos;dirty=false;remember();renderGallery();closePanel('trip-panel');message('trip-message','');}
     catch(error){showError('trip-message',error);}finally{suppress=false;busy=false;update();}
   }
   async function saveCurrent(title){
@@ -60,8 +63,8 @@
     try{await saveCurrent($('trip-name').value);message('trip-message','');closePanel('trip-panel');if(resumePhotos){resumePhotos=false;openPanel('photo-panel');renderGallery();}}
     catch(error){showError('trip-message',error);}finally{busy=false;update();}
   });
-  $('new-trip').addEventListener('click',()=>{if(!canSwitch())return;discardPending();current=null;photos=[];suppress=true;app.setStops([]);suppress=false;dirty=false;remember();update();renderGallery();closePanel('trip-panel');$('destination').focus();});
-  document.querySelectorAll('[data-close]').forEach(button=>button.addEventListener('click',()=>closePanel(button.dataset.close)));
+  $('new-trip').addEventListener('click',()=>{if(!canSwitch())return;discardPending();current=null;photos=[];galleryFilter='';suppress=true;app.setStops([]);suppress=false;dirty=false;remember();update();renderGallery();closePanel('trip-panel');$('destination').focus();});
+  document.querySelectorAll('[data-close]').forEach(button=>button.addEventListener('click',()=>{closePanel(button.dataset.close);$(button.dataset.close==='photo-panel'?'photos-button':'trips-button').focus({preventScroll:true});}));
   window.addEventListener('redline:routechange',()=>{if(suppress)return;dirty=current?fingerprint()!==current.hash:app.getStops().length>0;update();if(!$('photo-panel').hidden){renderReview();renderGallery();}});
   window.addEventListener('beforeunload',event=>{if(pending.length||dirty){event.preventDefault();event.returnValue='';}});
   $('photos-button').addEventListener('click',async()=>{
@@ -70,12 +73,13 @@
     try{
       if(!await ensureSaved()||version!==photoPanelRequest)return;
       openPanel('photo-panel');renderGallery();renderReview();message('photo-message','');
-      const data=await api(`/trips/${current.id}`);if(version!==photoPanelRequest)return;
+      const tripId=current.id,data=await api(`/trips/${tripId}`);if(version!==photoPanelRequest||current?.id!==tripId)return;
       photos=data.photos;renderGallery();update();
     }catch(error){if(version===photoPanelRequest){openPanel('photo-panel');showError('photo-message',error);}}
     finally{if(version===photoPanelRequest)photosRequested=false;}
   });
   document.addEventListener('keydown',async event=>{
+    if(event.key==='Escape'&&!document.querySelector('dialog[open]')&&!$('photo-panel').hidden){event.preventDefault();closePanel('photo-panel');$('photos-button').focus({preventScroll:true});return;}
     if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"]'))return;
     const key=event.key.toLowerCase(),button={t:'trips-button',s:'save-trip',p:'photos-button'}[key];
     if(!button)return;
@@ -114,49 +118,86 @@
   }
   $('choose-photos').addEventListener('click',()=>$('photo-files').click());
   $('photo-files').addEventListener('change',async event=>{
-    const files=[...event.target.files];event.target.value='';if(!files.length)return;
+    const files=[...event.target.files];event.target.value='';await importPhotos(files);
+  });
+  async function importPhotos(files){
+    if(!files.length||busy||!current)return;
     if(files.length+pending.length>30){message('photo-message','Choose up to 30 photos at a time.',true);return;}
-    busy=true;update();let failed=0,lastError='';
+    busy=true;importing=true;photoPanelRequest++;photosRequested=false;update();let failed=0,lastError='';
     try{
-      await loadExif();
+      await loadExif().catch(()=>{});
       for(let i=0;i<files.length;i++){
         message('photo-message',`Reading ${i+1} of ${files.length}…`);
         try{
+          if(!/^image\//.test(files[i].type)&&!(/\.(jpe?g|png|webp|hei[cf]|avif)$/i.test(files[i].name)))throw Error('Choose image files only.');
           let gps=null;try{gps=await exifr.gps(files[i]);}catch{}
           const blob=await cleanImage(files[i]);let candidate=null;try{candidate=await matchCity(gps);}catch{}
-          const entry={id:crypto.randomUUID(),blob,url:URL.createObjectURL(blob),candidate,selected:candidate?(candidate.existing?candidate.id:'match'):'',checked:true};
-          pending.push(entry);
+          const entry={id:crypto.randomUUID(),name:files[i].name,blob,url:URL.createObjectURL(blob),candidate,selected:candidate?(candidate.existing?candidate.id:'match'):'',checked:true};
+          pending.push(entry);renderReview();
         }catch(error){failed++;lastError=error.message;}
       }
       message('photo-message',failed?`${failed} photo${failed===1?'':'s'} could not be read. ${lastError}`:'',failed>0);renderReview();
-    }catch(error){showError('photo-message',error);}finally{busy=false;update();renderReview();}
+    }catch(error){showError('photo-message',error);}finally{busy=false;importing=false;update();renderReview();}
+  }
+  const fileDrag=event=>Array.from(event.dataTransfer?.types||[]).includes('Files');
+  $('photo-panel').addEventListener('dragenter',event=>{if(!fileDrag(event))return;event.preventDefault();dragDepth++;if(!busy)$('photo-drop-hint').hidden=false;});
+  $('photo-panel').addEventListener('dragover',event=>{if(!fileDrag(event))return;event.preventDefault();event.dataTransfer.dropEffect=busy?'none':'copy';});
+  $('photo-panel').addEventListener('dragleave',event=>{if(!fileDrag(event))return;dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)$('photo-drop-hint').hidden=true;});
+  $('photo-panel').addEventListener('drop',event=>{if(!fileDrag(event))return;event.preventDefault();dragDepth=0;$('photo-drop-hint').hidden=true;importPhotos([...event.dataTransfer.files]);});
+  // A missed drop must never replace the app with a local image.
+  for(const type of ['dragover','drop'])document.addEventListener(type,event=>{
+    if($('photo-panel').hidden||!fileDrag(event))return;
+    event.preventDefault();if(type==='drop'){dragDepth=0;$('photo-drop-hint').hidden=true;}
   });
+  $('cancel-photo-import').addEventListener('click',()=>{
+    if(busy||!pending.length)return;
+    if(confirm(`Discard ${photoLabel(pending.length)} from this import?`)){discardPending();message('photo-message','');$('choose-photos').focus({preventScroll:true});}
+  });
+  function renderPhotoMode(){
+    const reviewing=!!pending.length||importing,mode=reviewing?'review':'gallery';
+    if(mode!==photoMode){$('photo-scroll').scrollTop=0;photoMode=mode;}
+    $('photos-heading').textContent=reviewing?'Add photos':'Photos';
+    $('photo-trip-name').textContent=current?.title||'';
+    $('choose-photos').textContent=pending.length?'Add more':'Add photos';
+    $('photo-gallery').hidden=reviewing;
+    $('gallery-toolbar').hidden=reviewing||!photos.length;
+    $('photo-review').hidden=!reviewing;
+    $('photo-review').setAttribute('aria-busy',String(importing));
+    $('photo-bulk').hidden=!pending.length;
+    $('photo-import-actions').hidden=!pending.length;
+  }
   function cityOptions(select,emptyLabel){
     select.replaceChildren(new Option(emptyLabel,''));
     for(const stop of app.getStops())select.add(new Option(`${stop.name}${stop.country?', '+stop.country:''}`,stop.id));
   }
   function previewButton(photo,open){
-    const button=document.createElement('button'),image=document.createElement('img');button.type='button';button.className='photo-image';image.src=photo.url;image.alt=photo.city?.name?`Photo in ${photo.city.name}`:'Photo to add';image.loading='lazy';button.setAttribute('aria-label',photo.city?.name?`Open photo in ${photo.city.name}`:'Expand photo');button.append(image);button.addEventListener('click',open);return button;
+    const button=document.createElement('button'),image=document.createElement('img');button.type='button';button.className='photo-image';image.src=photo.url;image.alt='';image.loading='lazy';image.decoding='async';image.draggable=false;button.setAttribute('aria-label',photo.city?.name?`Open photo in ${photo.city.name}`:`Expand ${photo.name||'photo'}`);button.append(image);button.addEventListener('click',open);return button;
   }
   function removeButton(label,remove){
     const button=document.createElement('button');button.type='button';button.className='remove-photo';button.textContent='×';button.title=label;button.setAttribute('aria-label',label);button.disabled=busy;button.addEventListener('click',remove);return button;
   }
   function renderReview(){
     const container=$('photo-review');container.replaceChildren();const stops=app.getStops();
-    pending.forEach(entry=>{
+    pending.forEach((entry,index)=>{
       const row=document.createElement('div'),tools=document.createElement('div'),select=document.createElement('select'),pick=document.createElement('label'),checkbox=document.createElement('input');
-      row.className='photo-tile review-photo';row.dataset.pendingId=entry.id;tools.className='photo-tile-tools';pick.className='photo-pick';checkbox.type='checkbox';checkbox.checked=entry.checked;checkbox.disabled=busy;checkbox.setAttribute('aria-label','Select photo');pick.append(checkbox);
+      row.className='photo-tile review-photo';row.dataset.pendingId=entry.id;tools.className='photo-tile-tools';pick.className='photo-pick';checkbox.type='checkbox';checkbox.checked=entry.checked;checkbox.disabled=busy;checkbox.setAttribute('aria-label',`Select ${entry.name||`photo ${index+1}`}`);pick.append(checkbox);
       checkbox.addEventListener('change',()=>{entry.checked=checkbox.checked;updateBulkSelection();});
-      const image=previewButton(entry,()=>window.RedlinePostcards.open({...entry,city:entry.selected==='match'?entry.candidate:stops.find(p=>p.id===entry.selected)},null));image.disabled=busy;
-      cityOptions(select,'Choose city…');select.setAttribute('aria-label','City for photo');
+      const image=previewButton(entry,()=>{
+        const collection=pending.map(p=>({...p,city:p.selected==='match'?p.candidate:app.getStops().find(s=>s.id===p.selected)}));
+        window.RedlinePostcards.open(collection.find(p=>p.id===entry.id),null,collection);
+      });image.disabled=busy;
+      cityOptions(select,'Choose city…');select.setAttribute('aria-label',`City for ${entry.name||`photo ${index+1}`}`);
       if(entry.candidate&&!entry.candidate.existing)select.add(new Option(`${entry.candidate.name} (GPS)`,'match'));
-      if(entry.selected!=='match'&&!stops.some(s=>s.id===entry.selected))entry.selected='';select.value=entry.selected;select.disabled=busy;select.addEventListener('change',()=>{entry.selected=select.value;updateUploadButton();});
-      const remove=removeButton('Remove pending photo',()=>{URL.revokeObjectURL(entry.url);pending=pending.filter(p=>p.id!==entry.id);renderReview();});tools.append(select,remove);row.append(image,pick,tools);container.append(row);
+      if(entry.selected!=='match'&&!stops.some(s=>s.id===entry.selected))entry.selected='';select.value=entry.selected;select.disabled=busy;row.classList.toggle('needs-city',!entry.selected);select.addEventListener('change',()=>{entry.selected=select.value;row.classList.toggle('needs-city',!entry.selected);updateUploadButton();});
+      const remove=removeButton(`Remove ${entry.name||`photo ${index+1}`} from import`,()=>{
+        URL.revokeObjectURL(entry.url);pending=pending.filter(p=>p.id!==entry.id);renderReview();
+        (container.children[Math.min(index,pending.length-1)]?.querySelector('.remove-photo')||$('choose-photos')).focus({preventScroll:true});
+      });tools.append(select);row.append(image,pick,remove,tools);container.append(row);
     });
     $('photo-bulk').hidden=!pending.length;
     cityOptions($('bulk-photo-city'),'Assign city…');
     const seen=new Set();for(const entry of pending){const city=entry.candidate;if(city&&!city.existing){const key=`${city.latitude},${city.longitude}`;if(!seen.has(key)){seen.add(key);$('bulk-photo-city').add(new Option(`${city.name} (GPS)`,`gps:${entry.id}`));}}}
-    updateBulkSelection();updateUploadButton();
+    updateBulkSelection();updateUploadButton();renderPhotoMode();
   }
   function updateBulkSelection(){
     const selected=pending.filter(p=>p.checked).length,all=$('select-all-photos');all.checked=selected>0&&selected===pending.length;all.indeterminate=selected>0&&selected<pending.length;all.disabled=busy;
@@ -168,9 +209,14 @@
     const value=$('bulk-photo-city').value;if(!value||busy)return;
     const candidate=value.startsWith('gps:')?pending.find(p=>p.id===value.slice(4))?.candidate:null;
     for(const entry of pending.filter(p=>p.checked)){if(candidate){entry.candidate={...candidate};entry.selected='match';}else entry.selected=value;}
-    renderReview();
+    renderReview();$('bulk-photo-city').focus({preventScroll:true});
   });
-  function updateUploadButton(){const ready=pending.filter(p=>p.selected).length;$('upload-photos').hidden=!pending.length;$('upload-photos').disabled=busy||ready===0;$('upload-photos').textContent=`Save ${ready||''} photo${ready===1?'':'s'}`;}
+  function updateUploadButton(){
+    const ready=pending.filter(p=>p.selected).length,unassigned=pending.length-ready;
+    $('upload-photos').hidden=!pending.length;$('upload-photos').disabled=busy||ready===0;
+    $('upload-photos').textContent=ready?`Save ${photoLabel(ready)}`:'Save photos';
+    $('photo-ready-count').textContent=unassigned?`${unassigned} need${unassigned===1?'s':''} a city`:'';
+  }
   $('upload-photos').addEventListener('click',async()=>{
     if(busy)return;const ready=pending.filter(p=>p.selected);if(!ready.length)return;busy=true;photoPanelRequest++;photosRequested=false;update();renderReview();
     try{
@@ -181,25 +227,45 @@
         const form=new FormData();form.append('photo',entry.blob,'photo.jpg');form.append('stopId',entry.selected);
         const {photo}=await api(`/trips/${current.id}/photos`,{method:'POST',body:form});photos.push(photo);pending=pending.filter(p=>p.id!==entry.id);URL.revokeObjectURL(entry.url);
       }
-      message('photo-message',pending.length?'Choose a city for the remaining photos.':'');renderGallery();
-    }catch(error){showError('photo-message',error);}finally{busy=false;update();renderReview();renderGallery();}
+      if(!pending.length)galleryFilter='';
+      message('photo-message',pending.length?'Choose a city for the remaining photos.':`${photoLabel(ready.length)} saved.`);renderGallery();
+    }catch(error){showError('photo-message',error);}finally{busy=false;update();renderReview();renderGallery();if(!pending.length)$('choose-photos').focus({preventScroll:true});}
   });
   function galleryGrid(items){
     const grid=document.createElement('div');grid.className='photo-grid';
     for(const photo of items){
       const tile=document.createElement('div');tile.className='photo-tile';tile.dataset.photoId=photo.id;
-      tile.append(previewButton(photo,()=>window.RedlinePostcards.open(photo,api)));grid.append(tile);
+      const button=previewButton(photo,()=>window.RedlinePostcards.open(photo,api,galleryItems));
+      button.setAttribute('aria-label',`Open photo ${items.indexOf(photo)+1} in ${photo.city?.name||'this trip'}`);
+      tile.append(button);grid.append(tile);
     }return grid;
   }
   function renderGallery(){
     const container=$('photo-gallery');container.replaceChildren();
-    if(!photos.length){const empty=document.createElement('p');empty.className='photo-empty';empty.textContent='No photos yet.';container.append(empty);return;}
     const groups=new Map();
-    for(const photo of photos){const key=photo.stopId||'';if(!groups.has(key))groups.set(key,{name:photo.city?.name||'No city',items:[]});groups.get(key).items.push(photo);}
-    for(const {name,items} of groups.values()){
-      const section=document.createElement('section'),heading=document.createElement('h3');section.className='gallery-city';heading.textContent=name;section.append(heading,galleryGrid(items));container.append(section);
+    const stops=app.getStops(),order=new Map(stops.map((stop,index)=>[stop.id,index]));
+    for(const photo of photos){const key=photo.stopId||'unplaced';if(!groups.has(key))groups.set(key,{id:key,name:photo.city?.name||'Other photos',country:photo.city?.country||'',items:[]});groups.get(key).items.push(photo);}
+    const sorted=[...groups.values()].sort((a,b)=>(order.get(a.id)??Infinity)-(order.get(b.id)??Infinity)||a.name.localeCompare(b.name));
+    if(!groups.has(galleryFilter))galleryFilter='';
+    const filter=$('gallery-city');filter.replaceChildren(new Option('All cities',''));
+    for(const group of sorted)filter.add(new Option(`${group.name} (${group.items.length})`,group.id));
+    filter.value=galleryFilter;
+    const visible=sorted.filter(group=>!galleryFilter||group.id===galleryFilter);galleryItems=visible.flatMap(group=>group.items);
+    $('gallery-count').textContent=photoLabel(galleryItems.length);
+    if(!photos.length){
+      const empty=document.createElement('div'),label=document.createElement('p'),add=document.createElement('button');empty.className='photo-empty';
+      empty.innerHTML='<svg viewBox="0 0 56 56" aria-hidden="true"><path d="M11 14 8 44l33 3 1-6M16 9h32v32H16zM16 32l9-10 7 7 5-5 11 12"/><circle cx="37" cy="18" r="3"/></svg>';
+      label.textContent='No photos yet';add.type='button';add.className='text-button';add.textContent='Add photos';add.disabled=busy;add.addEventListener('click',()=>$('choose-photos').click());empty.append(label,add);container.append(empty);
     }
+    for(const {name,country,items} of visible){
+      const section=document.createElement('section'),top=document.createElement('div'),place=document.createElement('div'),heading=document.createElement('h3'),count=document.createElement('span');
+      section.className='gallery-city';top.className='gallery-city-heading';heading.textContent=name;count.className='gallery-city-count';count.textContent=String(items.length);count.setAttribute('aria-label',photoLabel(items.length));place.append(heading);
+      if(country){const detail=document.createElement('p');detail.className='gallery-city-country';detail.textContent=country;place.append(detail);}
+      top.append(place,count);section.append(top,galleryGrid(items));container.append(section);
+    }
+    renderPhotoMode();
   }
+  $('gallery-city').addEventListener('change',()=>{galleryFilter=$('gallery-city').value;renderGallery();$('photo-scroll').scrollTop=0;});
   async function restore(){
     if(!current){update();return;}
     const cached=current,initial=fingerprint(),photoVersion=photoPanelRequest;dirty=initial!==cached.hash;
