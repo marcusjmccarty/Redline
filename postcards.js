@@ -1,0 +1,131 @@
+(() => {
+  'use strict';
+  const $=id=>document.getElementById(id),fields=['message','recipient','address','sender'],states=new Map();
+  let active=null,request=null,timer=null,closing=false,printing=false,restoreAfterPrint=false;
+  let shareFile=null,shareGeneration=0,shareTimer=null,sharing=false;
+  const empty=()=>Object.fromEntries(fields.map(key=>[key,'']));
+  const dirty=state=>JSON.stringify(state.value)!==state.saved;
+  function status(){if(active)$('postcard-save-status').textContent=active.promise?'Saving…':'';}
+  async function save(state){
+    if(!state||state.preview)return;
+    if(state.promise){await state.promise;return save(state);}
+    if(!dirty(state))return;
+    const snapshot=JSON.stringify(state.value);
+    state.promise=(async()=>{
+      const result=await request(`/photos/${state.photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:JSON.parse(snapshot),revision:state.revision})});
+      state.revision=result.revision;state.photo.postcardRevision=result.revision;state.saved=snapshot;
+    })();status();
+    try{await state.promise;if(active===state)$('postcard-error').textContent='';}
+    catch(error){if(active===state)$('postcard-error').textContent=error.message;throw error;}
+    finally{state.promise=null;status();}
+    if(dirty(state))return save(state);
+  }
+  function flip(){
+    if(active?.preview)return;
+    const back=!$('photo-viewer').classList.contains('flipped');
+    $('photo-viewer').classList.toggle('flipped',back);
+    $('postcard-front').inert=back;$('postcard-front').setAttribute('aria-hidden',String(back));
+    $('postcard-back').inert=!back;$('postcard-back').setAttribute('aria-hidden',String(!back));
+    $('close-photo-viewer').inert=back;$('close-photo-viewer').setAttribute('aria-hidden',String(back));
+    $('close-postcard').inert=!back;$('close-postcard').setAttribute('aria-hidden',String(!back));
+    if(document.activeElement!==document.body)(back?$('close-postcard'):$('close-photo-viewer')).focus({preventScroll:true});
+  }
+  function open(photo,api){
+    shareGeneration++;shareFile=null;clearTimeout(shareTimer);$('share-postcard').disabled=true;
+    request=api;clearTimeout(timer);
+    const previous=api?states.get(photo.id):null;
+    if(previous&&(dirty(previous)||previous.promise))active=previous;
+    else {const value={...empty(),...photo.postcard};active={photo,value,saved:JSON.stringify(value),revision:photo.postcardRevision||1,promise:null,preview:!api};if(api)states.set(photo.id,active);}
+    const place=photo.city?.name||'';
+    $('postcard-error').textContent='';$('full-photo').src=photo.url;$('full-photo').alt=place?`Photo in ${place}`:'Trip photo';
+    $('photo-caption').textContent=place;$('postcard-place').textContent=place;
+    for(const key of fields)$(`postcard-${key}`).value=active.value[key];
+    $('photo-viewer').classList.remove('flipped');
+    $('close-photo-viewer').inert=false;$('close-photo-viewer').setAttribute('aria-hidden','false');$('close-postcard').inert=true;$('close-postcard').setAttribute('aria-hidden','true');
+    $('postcard-front').inert=false;$('postcard-front').setAttribute('aria-hidden','false');$('postcard-back').inert=true;$('postcard-back').setAttribute('aria-hidden','true');
+    $('print-postcard').disabled=active.preview;
+    status();updateOrientation();$('photo-viewer').showModal();prepareShare();
+  }
+  async function close(){
+    if(closing)return;closing=true;clearTimeout(timer);
+    try{await save(active);$('photo-viewer').close();}catch{if(confirm('Close without saving? Your draft will stay in this tab.'))$('photo-viewer').close();}finally{closing=false;}
+  }
+  fields.forEach(key=>$(`postcard-${key}`).addEventListener('input',()=>{
+    if(!active)return;active.value[key]=$(`postcard-${key}`).value;active.photo.postcard={...active.value};
+    clearTimeout(timer);const state=active;timer=setTimeout(()=>save(state).catch(()=>{}),600);
+    shareGeneration++;shareFile=null;$('share-postcard').disabled=true;clearTimeout(shareTimer);shareTimer=setTimeout(prepareShare,180);
+  }));
+  function updateOrientation(){
+    const photo=$('full-photo');
+    $('postcard-stage').classList.toggle('portrait',photo.naturalHeight>photo.naturalWidth);
+  }
+  $('full-photo').draggable=false;
+  $('full-photo').addEventListener('load',()=>{updateOrientation();prepareShare();});
+  $('close-photo-viewer').addEventListener('click',close);
+  $('close-postcard').addEventListener('click',close);
+  $('photo-viewer').addEventListener('cancel',event=>{event.preventDefault();close();});
+  $('photo-viewer').addEventListener('click',event=>{
+    if(event.target===$('photo-viewer')){
+      const box=$('photo-viewer').getBoundingClientRect();
+      if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom){close();return;}
+    }
+    if(event.detail>1||event.target.closest('input,textarea,button,a,label'))return;
+    flip();
+  });
+  async function prepareShare(){
+    const generation=++shareGeneration,state=active;
+    shareFile=null;$('share-postcard').disabled=true;
+    if(!state||state.preview)return;
+    try{
+      const image=$('full-photo');await image.decode();
+      if(generation!==shareGeneration||active!==state)return;
+      const canvas=RedlinePostcardExport.render(image,state.photo.city?.name||'',state.value);
+      const blob=await new Promise((resolve,reject)=>canvas.toBlob(value=>value?resolve(value):reject(Error('Could not create the postcard image.')),'image/jpeg',.94));
+      if(generation!==shareGeneration||active!==state)return;
+      const name=(state.photo.city?.name||'Travel').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'')||'Travel';
+      shareFile=new File([blob],`${name}-postcard.jpg`,{type:'image/jpeg'});$('share-postcard').disabled=sharing;
+    }catch(error){if(generation===shareGeneration&&$('full-photo').naturalWidth)$('postcard-error').textContent=error.message;}
+  }
+  function downloadPostcard(file){
+    const url=URL.createObjectURL(file),link=document.createElement('a');link.href=url;link.download=file.name;link.hidden=true;($('photo-viewer').open?$('photo-viewer'):document.body).append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+    $('postcard-save-status').textContent='Postcard downloaded.';
+  }
+  async function sharePostcard(){
+    if(!shareFile||sharing)return;
+    const file=shareFile;sharing=true;$('share-postcard').disabled=true;
+    try{
+      // The file is ready before the click, preserving native share activation.
+      if(navigator.share&&navigator.canShare?.({files:[file]}))await navigator.share({files:[file],title:active.photo.city?.name?`Postcard from ${active.photo.city.name}`:'Postcard'});
+      else downloadPostcard(file);
+    }catch(error){if(error.name!=='AbortError')downloadPostcard(file);}
+    finally{sharing=false;$('share-postcard').disabled=!shareFile;}
+  }
+  $('share-postcard').addEventListener('click',sharePostcard);
+  $('print-postcard').addEventListener('click',printPostcard);
+  function printPage(className){const page=document.createElement('section');page.className=`postcard-print-page ${className}`;return page;}
+  async function printPostcard(){
+    if(!active||active.preview||printing)return;printing=true;
+    const state=active;clearTimeout(timer);
+    try{
+      await save(state).catch(()=>{});
+      try{await $('full-photo').decode();}catch{if(!$('full-photo').naturalWidth)throw Error('The photo is still loading. Try printing again.');}
+      $('postcard-print-root')?.remove();
+      const root=document.createElement('div');root.id='postcard-print-root';root.setAttribute('aria-hidden','true');
+      const front=printPage('print-front'),image=document.createElement('img');image.src=state.photo.url;image.alt='';front.append(image);
+      const back=printPage('print-back'),heading=document.createElement('div'),place=document.createElement('span'),stamp=document.createElement('span');heading.className='postcard-heading';place.textContent=state.photo.city?.name||'';stamp.className='postcard-stamp';heading.append(place,stamp);
+      const columns=document.createElement('div'),message=document.createElement('div'),address=document.createElement('div');columns.className='postcard-columns';message.className='print-message';message.textContent=state.value.message;address.className='postcard-address';
+      for(const key of ['recipient','address','sender']){const text=document.createElement('div');text.className=`print-${key}`;text.textContent=state.value[key];address.append(text);}
+      columns.append(message,address);back.append(heading,columns);root.append(front,back);const pageStyle=document.createElement('style');pageStyle.textContent='@media print{@page{size:6in 4in;margin:0}}';root.append(pageStyle);document.body.append(root);
+      await image.decode();
+      for(const block of [message,address]){let size=10;while((block.scrollHeight>block.clientHeight+1||block.scrollWidth>block.clientWidth+1)&&size>6){size-=.25;block.style.fontSize=`${size}pt`;}if(block.scrollHeight>block.clientHeight+1||block.scrollWidth>block.clientWidth+1)throw Error('Shorten the text to fit this postcard.');}
+      restoreAfterPrint=$('photo-viewer').open;$('photo-viewer').close();document.body.classList.add('printing-postcard');window.print();
+    }catch(error){$('postcard-print-root')?.remove();document.body.classList.remove('printing-postcard');if(restoreAfterPrint&&!$('photo-viewer').open)$('photo-viewer').showModal();restoreAfterPrint=false;$('postcard-error').textContent=error.message;}finally{printing=false;}
+  }
+  document.addEventListener('keydown',event=>{
+    if(!$('photo-viewer').open||!(event.ctrlKey||event.metaKey)||event.key.toLowerCase()!=='p')return;
+    event.preventDefault();if(!event.repeat)printPostcard();
+  });
+  window.addEventListener('afterprint',()=>{document.body.classList.remove('printing-postcard');$('postcard-print-root')?.remove();if(restoreAfterPrint&&!$('photo-viewer').open)$('photo-viewer').showModal();restoreAfterPrint=false;});
+  window.addEventListener('beforeunload',event=>{if([...states.values()].some(s=>dirty(s)||s.promise)){event.preventDefault();event.returnValue='';}});
+  window.RedlinePostcards={open,close,forget:id=>{states.delete(id);if(active?.photo.id===id){clearTimeout(timer);active=null;}}};
+})();
