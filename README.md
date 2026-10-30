@@ -26,7 +26,9 @@ Browser storage is not a permanent backup: clearing site data, private browsing,
 
 To move from the original website: sign in there, open **Trips → Back up all**, then use **Trips → Import** on this website. Existing hosted records remain on the original website until you export them; they are not transferred automatically.
 
-Photos are matched to a nearby trip stop or indexed city using GPS metadata, when available. During import, select multiple photos and assign a city together. Saved images are grouped by city. Photos are re-encoded in the browser and their metadata is stripped again before local storage; original filenames and precise photo GPS are not retained.
+The photo gallery is a responsive paper album beside the map, grouped in route order with a city filter. Use **Add photos** or drop image files into the gallery. Import review has larger previews, selection checkboxes, bulk city assignment, and a save bar that stays visible while scrolling. Photos are matched to a nearby trip stop or indexed city using GPS metadata, when available. Unassigned or failed photos stay in review for correction or retry. Cancelling an import does not change saved photos.
+
+Photos are re-encoded in the browser and their metadata is stripped again before local storage; original filenames and precise photo GPS are not retained. Thumbnails load lazily. Import previews and saved photos can be browsed using the viewer arrows, keyboard left/right, or a touch swipe. Browsing follows the current city filter. Postcard edits are saved before navigation; a failed save keeps the current photo and draft open.
 
 Click a photo to expand it, then click once to turn the entire viewer over. Write on the postcard back; edits save automatically. Click the paper to turn it back. Editing fields and pressing buttons do not flip the card.
 
@@ -44,7 +46,7 @@ npm test
 npm run dev
 ```
 
-`npm run build` creates a complete static website in `dist/`; `npm start` builds and serves it locally. The build itself uses only Node built-ins. The sole development dependency, fake-indexeddb, tests the real storage transaction behavior. `node scripts/validate-world.mjs` validates the bundled geography. Tests do not require old Git history, live accounts, or production data.
+`npm run build` creates a complete static website in `dist/`; `npm start` builds and serves it locally. The build itself uses only Node built-ins. Development dependencies fake-indexeddb and jsdom exercise storage transactions and gallery interactions, including failed saves and backup recovery. Browser image decoding and native print/share dialogs are mocked in those tests. `node scripts/validate-world.mjs` validates the bundled geography. Tests do not require old Git history, live accounts, or production data.
 
 The built website is on the `gh-pages` branch, which GitHub Pages publishes automatically. Run `npm run publish:site` after committing a source change; it tests, builds, and updates that branch. Optional GitHub Actions templates are in `docs/workflows/`; they are inactive because the current publication token cannot write workflow files.
 
@@ -53,7 +55,7 @@ The built website is on the `gh-pages` branch, which GitHub Pages publishes auto
 - `map.html`, `public/app.js`, `public/style.css`: interface and interaction.
 - `public/map-layout.js`, `public/world.js`: projection and geography.
 - `public/trace.js`: route geometry, timing, camera framing, and damped zoom.
-- `public/trips.js`: saved trips and photo import.
+- `public/trips.js`, `public/gallery.css`: saved trips, photo gallery, and import review.
 - `public/postcards.js`, `public/postcard-export.js`: editing, print, and share.
 - `public/storage.js`: private IndexedDB library with atomic saves and revision checks.
 - `public/archive.js`: portable binary backups containing routes, postcards, and JPEG blobs.

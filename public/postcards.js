@@ -3,6 +3,7 @@
   const $=id=>document.getElementById(id),fields=['message','recipient','address','sender'],states=new Map();
   let active=null,request=null,timer=null,closing=false,printing=false,restoreAfterPrint=false;
   let shareFile=null,shareGeneration=0,shareTimer=null,sharing=false;
+  let sequence=[],navigating=false,navigationVersion=0,returnFocus=null,swipe=null,suppressClickUntil=0;
   const empty=()=>Object.fromEntries(fields.map(key=>[key,'']));
   const dirty=state=>JSON.stringify(state.value)!==state.saved;
   function status(){if(active)$('postcard-save-status').textContent=active.promise?'Saving…':'';}
@@ -30,7 +31,17 @@
     $('close-postcard').inert=!back;$('close-postcard').setAttribute('aria-hidden',String(!back));
     if(document.activeElement!==document.body)(back?$('close-postcard'):$('close-photo-viewer')).focus({preventScroll:true});
   }
-  function open(photo,api){
+  function updateNavigation(){
+    const index=sequence.findIndex(photo=>photo.id===active?.photo.id);
+    $('photo-navigation').hidden=sequence.length<2;
+    $('photo-position').textContent=`${index+1} / ${sequence.length}`;
+    $('previous-photo').disabled=navigating||index<=0;
+    $('next-photo').disabled=navigating||index<0||index>=sequence.length-1;
+  }
+  function open(photo,api,collection=[photo]){
+    const wasOpen=$('photo-viewer').open;
+    if(!wasOpen)returnFocus=document.activeElement;
+    sequence=collection;
     shareGeneration++;shareFile=null;clearTimeout(shareTimer);$('share-postcard').disabled=true;
     request=api;clearTimeout(timer);
     const previous=api?states.get(photo.id):null;
@@ -40,15 +51,29 @@
     $('postcard-error').textContent='';$('full-photo').src=photo.url;$('full-photo').alt=place?`Photo in ${place}`:'Trip photo';
     $('photo-caption').textContent=place;$('postcard-place').textContent=place;
     for(const key of fields)$(`postcard-${key}`).value=active.value[key];
+    // A new photo starts face up, without playing the previous postcard's reverse flip.
+    $('photo-viewer').classList.add('changing-photo');
     $('photo-viewer').classList.remove('flipped');
+    requestAnimationFrame(()=>requestAnimationFrame(()=>$('photo-viewer').classList.remove('changing-photo')));
     $('close-photo-viewer').inert=false;$('close-photo-viewer').setAttribute('aria-hidden','false');$('close-postcard').inert=true;$('close-postcard').setAttribute('aria-hidden','true');
     $('postcard-front').inert=false;$('postcard-front').setAttribute('aria-hidden','false');$('postcard-back').inert=true;$('postcard-back').setAttribute('aria-hidden','true');
     $('print-postcard').disabled=active.preview;
-    status();updateOrientation();$('photo-viewer').showModal();prepareShare();
+    status();updateOrientation();updateNavigation();if(!wasOpen)$('photo-viewer').showModal();prepareShare();
+  }
+  async function navigate(direction){
+    if(navigating||closing||printing||!$('photo-viewer').open)return;
+    const index=sequence.findIndex(photo=>photo.id===active?.photo.id),photo=sequence[index+direction];
+    if(!photo)return;
+    const version=++navigationVersion; navigating=true;updateNavigation();clearTimeout(timer);
+    try{
+      await save(active);
+      if(version!==navigationVersion||!$('photo-viewer').open)return;
+      open(photo,request,sequence);
+    }catch{}finally{navigating=false;updateNavigation();}
   }
   async function close(){
-    if(closing)return;closing=true;clearTimeout(timer);
-    try{await save(active);$('photo-viewer').close();}catch{if(confirm('Close without saving? Your draft will stay in this tab.'))$('photo-viewer').close();}finally{closing=false;}
+    if(closing)return;closing=true;navigationVersion++;clearTimeout(timer);
+    try{await save(active);$('photo-viewer').close();}catch{if(confirm('Close without saving? Your draft will stay in this tab.'))$('photo-viewer').close();}finally{closing=false;if(!$('photo-viewer').open&&returnFocus?.isConnected)returnFocus.focus({preventScroll:true});}
   }
   fields.forEach(key=>$(`postcard-${key}`).addEventListener('input',()=>{
     if(!active)return;active.value[key]=$(`postcard-${key}`).value;active.photo.postcard={...active.value};
@@ -63,14 +88,32 @@
   $('full-photo').addEventListener('load',()=>{updateOrientation();prepareShare();});
   $('close-photo-viewer').addEventListener('click',close);
   $('close-postcard').addEventListener('click',close);
+  $('previous-photo').addEventListener('click',()=>navigate(-1));
+  $('next-photo').addEventListener('click',()=>navigate(1));
   $('photo-viewer').addEventListener('cancel',event=>{event.preventDefault();close();});
   $('photo-viewer').addEventListener('click',event=>{
+    if(Date.now()<suppressClickUntil)return;
     if(event.target===$('photo-viewer')){
       const box=$('photo-viewer').getBoundingClientRect();
       if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom){close();return;}
     }
     if(event.detail>1||event.target.closest('input,textarea,button,a,label'))return;
     flip();
+  });
+  $('full-photo').addEventListener('pointerdown',event=>{
+    swipe=event.pointerType==='touch'&&!$('photo-viewer').classList.contains('flipped')?{x:event.clientX,y:event.clientY,id:event.pointerId}:null;
+  });
+  $('full-photo').addEventListener('pointerup',event=>{
+    if(!swipe||swipe.id!==event.pointerId)return;
+    const dx=event.clientX-swipe.x,dy=event.clientY-swipe.y;swipe=null;
+    if(Math.abs(dx)<55||Math.abs(dx)<Math.abs(dy)*1.5)return;
+    suppressClickUntil=Date.now()+500;navigate(dx<0?1:-1);
+  });
+  $('full-photo').addEventListener('pointercancel',()=>swipe=null);
+  document.addEventListener('keydown',event=>{
+    if(!$('photo-viewer').open||event.defaultPrevented||event.altKey||event.metaKey||event.ctrlKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"]'))return;
+    if(!['ArrowLeft','ArrowRight'].includes(event.key))return;
+    event.preventDefault();if(!event.repeat)navigate(event.key==='ArrowLeft'?-1:1);
   });
   async function prepareShare(){
     const generation=++shareGeneration,state=active;

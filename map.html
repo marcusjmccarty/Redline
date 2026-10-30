@@ -7,6 +7,7 @@
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="gallery.css">
   <script src="vendor/geo.js" defer></script>
   <script src="map-layout.js" defer></script>
   <script src="world.js" defer></script>
@@ -51,7 +52,7 @@
       <button id="info-button" title="Information" aria-label="Information" aria-haspopup="dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M10 9v5M10 6v.5"/></svg></button>
     </div>
     <section id="route-dock" class="route-dock" aria-label="Plan your route">
-      <div class="dock-heading"><span id="route-caption" hidden></span><div class="trip-actions"><button id="trips-button" aria-keyshortcuts="T" class="text-button">Trips</button><button id="save-trip" aria-keyshortcuts="S" class="text-button">Save</button><button id="photos-button" aria-keyshortcuts="P" class="text-button">Photos <span id="photo-count"></span></button><span id="trip-title"></span></div><div class="dock-tools"><button id="clear" class="text-button">Clear</button><button id="toggle-stops" class="icon-button" aria-label="Collapse cities" title="Collapse cities" aria-controls="route-stops-panel" aria-expanded="true"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4"/></svg></button></div></div>
+      <div class="dock-heading"><span id="route-caption" hidden></span><div class="trip-actions"><button id="trips-button" aria-keyshortcuts="T" class="text-button">Trips</button><button id="save-trip" aria-keyshortcuts="S" class="text-button">Save</button><button id="photos-button" aria-keyshortcuts="P" aria-controls="photo-panel" aria-expanded="false" class="text-button">Photos <span id="photo-count"></span></button><span id="trip-title"></span></div><div class="dock-tools"><button id="clear" class="text-button">Clear</button><button id="toggle-stops" class="icon-button" aria-label="Collapse cities" title="Collapse cities" aria-controls="route-stops-panel" aria-expanded="true"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4"/></svg></button></div></div>
       <div id="route-stops-panel"><ol id="stop-list" aria-label="Destinations in travel order"></ol>
       <p id="empty-hint" hidden></p></div>
       <div class="input-row">
@@ -67,17 +68,28 @@
       <p id="status" class="status" role="status" aria-live="polite"></p>
     </section>
     <aside id="trip-panel" class="library-panel" hidden aria-label="Personal trips"><div class="panel-top"><h2>Trips</h2><button class="close-panel" data-close="trip-panel" aria-label="Close trips">×</button></div><form id="trip-name-form"><input id="trip-name" placeholder="Trip name" maxlength="80" aria-label="Trip name" required><button type="submit">Save trip</button></form><button id="new-trip" class="text-button new-trip">+ New trip</button><div id="trip-list"></div><div class="trip-backups"><button id="export-trip" class="text-button" type="button">Export trip</button><button id="backup-trips" class="text-button" type="button">Back up all</button><button id="import-trips" class="text-button" type="button">Import</button><input id="trip-backup-file" type="file" accept=".redline,application/octet-stream" hidden></div><p class="storage-note">Saved on this device</p><p id="trip-message" class="panel-message" role="status"></p></aside>
-    <aside id="photo-panel" class="library-panel photo-panel" hidden aria-label="Trip photos">
-      <div class="panel-top"><h2>Photos</h2><button class="close-panel" data-close="photo-panel" aria-label="Close photos">×</button></div>
-      <div class="photo-toolbar"><button id="choose-photos" class="small-button">Add photos</button><input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif" multiple hidden></div>
+    <aside id="photo-panel" class="library-panel photo-panel" hidden aria-labelledby="photos-heading">
+      <div class="photo-panel-heading">
+        <div class="photo-heading-text"><h2 id="photos-heading">Photos</h2><p id="photo-trip-name"></p></div>
+        <button id="choose-photos" class="small-button" type="button">Add photos</button>
+        <button class="close-panel" data-close="photo-panel" aria-label="Close photos">×</button>
+        <input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif" multiple hidden>
+      </div>
+      <div id="gallery-toolbar" class="gallery-toolbar" hidden><label for="gallery-city" class="sr-only">Filter photos by city</label><select id="gallery-city"><option value="">All cities</option></select><span id="gallery-count"></span></div>
       <div id="photo-bulk" class="photo-bulk" hidden><label class="photo-select-all"><input id="select-all-photos" type="checkbox"><span id="photo-selection-count">Select all</span></label><select id="bulk-photo-city" aria-label="Assign city to selected photos"><option value="">Assign city…</option></select></div>
-      <div id="photo-review" class="import-list"></div><button id="upload-photos" class="small-button" hidden>Save photos</button><p id="photo-message" class="panel-message" role="status"></p><div id="photo-gallery"></div><p class="search-credit"><a href="https://www.geonames.org/" target="_blank" rel="noreferrer">City data: GeoNames</a></p>
+      <div id="photo-scroll" class="photo-scroll">
+        <div id="photo-review" class="import-list" hidden aria-label="Photos to import"></div>
+        <div id="photo-gallery"></div>
+      </div>
+      <p id="photo-message" class="panel-message" role="status" aria-live="polite"></p>
+      <div id="photo-import-actions" class="photo-import-actions" hidden><button id="cancel-photo-import" class="text-button" type="button">Cancel</button><span id="photo-ready-count"></span><button id="upload-photos" class="small-button" type="button">Save photos</button></div>
+      <div id="photo-drop-hint" aria-hidden="true" hidden>Drop photos to add</div>
     </aside>
     <dialog id="photo-viewer" aria-label="Photo and postcard">
       <button id="close-photo-viewer" class="viewer-close" title="Close" aria-label="Close photo">×</button>
       <button id="close-postcard" class="viewer-close" title="Close" aria-label="Close postcard" aria-hidden="true" inert>×</button><span id="postcard-save-status" class="sr-only" role="status"></span>
       <div id="postcard-stage"><div id="postcard-card">
-        <div id="postcard-front" class="postcard-face"><img id="full-photo" alt="" draggable="false"><p id="photo-caption"></p></div>
+        <div id="postcard-front" class="postcard-face"><img id="full-photo" alt="" draggable="false"><div class="photo-viewer-footer"><p id="photo-caption"></p><nav id="photo-navigation" aria-label="Browse photos" hidden><button id="previous-photo" type="button" aria-label="Previous photo" title="Previous photo (←)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button><span id="photo-position" role="status" aria-live="polite"></span><button id="next-photo" type="button" aria-label="Next photo" title="Next photo (→)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button></nav></div></div>
         <div id="postcard-back" class="postcard-face" aria-hidden="true" inert>
           <div class="postcard-heading"><span id="postcard-place"></span><span class="postcard-stamp" aria-hidden="true"></span></div>
           <div class="postcard-columns"><textarea id="postcard-message" maxlength="1200" placeholder="Message" aria-label="Postcard message"></textarea><div class="postcard-address"><input id="postcard-recipient" maxlength="120" placeholder="To" aria-label="Postcard recipient"><textarea id="postcard-address" maxlength="400" placeholder="Address" aria-label="Postcard address"></textarea><input id="postcard-sender" maxlength="120" placeholder="From" aria-label="Postcard sender"></div></div>
@@ -95,7 +107,7 @@
         <dt>One city at a time</dt><dd>Use the arrows beside Trace or your keyboard’s arrow keys. The camera gently follows the route and settles with both cities in view. Press again during travel to arrive instantly in the same view. The trip loops both ways through the overview: Back from the overview goes to the last city. Home or the globe returns to the overview.</dd>
         <dt>Just the map</dt><dd>Press H to hide the controls. H, Escape, or a double-click on the map brings them back.</dd>
         <dt>Keep your trips</dt><dd>S saves your trip. T opens or closes Trips. Trips, photos, and postcard notes stay in this browser, with no account needed. Use Back up all regularly and Import to restore or move devices. Clearing website data or using private browsing can erase local saves. Backups contain your photos and notes; keep them private.</dd>
-        <dt>Photos</dt><dd>P opens or closes Photos. Select photos and assign a city together, then save. Click a photo to expand it. Location metadata is read to suggest a city and removed from the stored photo.</dd>
+        <dt>Photos</dt><dd>P opens or closes Photos. Add photos or drop them into the gallery. Select photos and assign a city together, then save. Filter by city or browse in route order. Click a photo to expand it; use ← → or swipe to browse. Escape closes the viewer or gallery. Location metadata is read to suggest a city and removed from the stored photo. City locations: <a href="https://www.geonames.org/" target="_blank" rel="noreferrer">GeoNames</a>.</dd>
         <dt>Postcards</dt><dd>Click a photo or the postcard paper to flip it. Write on the back; it saves automatically. Print or Ctrl + P (⌘ + P on Mac) prints both sides. Share sends an image of both sides through your device’s share menu, or downloads it when file sharing is unavailable.</dd>
         <dt>The map</dt><dd>Scroll or use + / − to zoom. Drag to pan when zoomed in. Country, city, and regional detail appears as you zoom.</dd>
       </dl>
