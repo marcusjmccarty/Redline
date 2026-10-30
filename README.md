@@ -14,11 +14,13 @@ Type a city and press Enter. Click a route city to jump to that point in the jou
 - **Scroll or + / −:** zoom with continuous easing. During travel, the chosen zoom persists across legs; the camera follows the tracer and adjusts its visible speed for close views.
 - **Home / globe:** return to the overview.
 - **H:** hide the controls. H, Escape, or a double-click on the map restores them.
-- **T / S / P:** toggle Trips, save the trip, or toggle Photos.
+- **T / S / P:** toggle Trips, save the trip, or toggle Photos. Escape closes whichever menu or panel is open.
 
 The original rectangular world map fills the screen, including New Zealand and the reduced-height Antarctica. Geographic shapes are intentionally stretched to fit. Country names, cities, and regional boundaries appear as you zoom. Geometry and labels are bundled; there are no map-tile requests. City labels are limited to 115 visible items to keep movement responsive.
 
 ## Trips, photos, and postcards
+
+**Trips** opens a menu above the route controls. Name and save the current route, open another saved trip, or use the pencil and bin beside a trip to rename or delete it. Deleting a trip also deletes its photos and postcards, so export it first if you might want it later. The menu closes when you click elsewhere or press Escape.
 
 No ChatGPT account, subscription, server, or sign-in is required. Trips, photos, and postcard notes are saved privately in this browser using IndexedDB. They are not uploaded to GitHub or synced automatically between devices. Use **Trips → Back up all** regularly and **Import** to restore a backup on another device. Export trip saves just the selected trip. Imports add copies and never overwrite existing trips.
 
@@ -26,11 +28,13 @@ Browser storage is not a permanent backup: clearing site data, private browsing,
 
 To move from the original website: sign in there, open **Trips → Back up all**, then use **Trips → Import** on this website. Existing hosted records remain on the original website until you export them; they are not transferred automatically.
 
-The photo gallery is a responsive paper album beside the map, grouped in route order with a city filter. Use **Add photos** or drop image files into the gallery. Import review has larger previews, selection checkboxes, bulk city assignment, and a save bar that stays visible while scrolling. Photos are matched to a nearby trip stop or indexed city using GPS metadata, when available. Unassigned or failed photos stay in review for correction or retry. Cancelling an import does not change saved photos.
+The photo gallery is a paper album that slides in beside the map. On wide screens the route controls move aside so both stay usable; on narrower screens they step out of the way until the album closes. Photos are grouped by city in route order, keep their own proportions, and load from small stored previews. City chips filter the album, the pin beside a city finds it on the map, and the camera badge beside a city on the map opens its photos. **Select** lets you move several photos to another city or delete them in one step.
 
-Photos are re-encoded in the browser and their metadata is stripped again before local storage; original filenames and precise photo GPS are not retained. Thumbnails load lazily. Import previews and saved photos can be browsed using the viewer arrows, keyboard left/right, or a touch swipe. Browsing follows the current city filter. Postcard edits are saved before navigation; a failed save keeps the current photo and draft open.
+Use **Add photos** or drag image files anywhere onto the page. In import review, every new photo starts selected: pick a city for the selection at once, or choose one under each photo. Photos are matched to a nearby trip stop or indexed city using GPS metadata, when available, and marked with a GPS label. Unassigned or failed photos stay in review for correction or retry. Cancelling an import does not change saved photos.
 
-Click a photo to expand it, then click once to turn the entire viewer over. Write on the postcard back; edits save automatically. Click the paper to turn it back. Editing fields and pressing buttons do not flip the card.
+Photos are re-encoded in the browser and their metadata is stripped again before local storage; original filenames and precise photo GPS are not retained. Each photo also stores a small preview and its pixel size; photos saved by earlier versions get theirs the first time the album shows them. Previews are rebuilt rather than included in backups. Import previews and saved photos can be browsed using the viewer arrows, keyboard left/right, or a touch swipe. Browsing follows the current city filter. Postcard edits are saved before navigation; a failed save keeps the current photo and draft open.
+
+Click a photo to expand it. Browse with the arrows, the edges of the photo, keyboard left/right, or a swipe. Change the city under the photo to move it there, or use the bin (or Delete) to remove it. Choose **Postcard**, press F, or click the photo to turn the entire viewer over. Write on the postcard back; edits save automatically. **← Photo**, F, or a click on the paper turns it back. Editing fields and pressing buttons do not flip the card.
 
 **Print** or Ctrl/Command + P prints two 6 × 4 inch pages. **Share** prepares one JPEG containing the photograph and written back, then opens the device's available share menu. If file sharing is unavailable, it downloads the image. The share file contains pixels, not a private photo URL.
 
@@ -55,7 +59,7 @@ The built website is on the `gh-pages` branch, which GitHub Pages publishes auto
 - `map.html`, `public/app.js`, `public/style.css`: interface and interaction.
 - `public/map-layout.js`, `public/world.js`: projection and geography.
 - `public/trace.js`: route geometry, timing, camera framing, and damped zoom.
-- `public/trips.js`, `public/gallery.css`: saved trips, photo gallery, and import review.
+- `public/trips.js`, `public/gallery.css`: the Trips menu, photo album, selection, import review, and viewer styling.
 - `public/postcards.js`, `public/postcard-export.js`: editing, print, and share.
 - `public/storage.js`: private IndexedDB library with atomic saves and revision checks.
 - `public/archive.js`: portable binary backups containing routes, postcards, and JPEG blobs.

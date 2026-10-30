@@ -23,7 +23,9 @@ async function setup(t,{seed=true}={}){
   t.after(()=>{dom.window.close();for(const url of objects)URL.revokeObjectURL(url);});
   w.confirm=()=>true;
   w.fetch=async()=>{throw Error('The gallery must not send personal data to a server.');};
-  w.RedlineApp={getStops:()=>stops,setStops:value=>stops=value,showControls(){},cityDistance:(a,b)=>a.latitude===b.latitude?0:500};
+  const mapCalls={counts:null,focused:null};
+  w.RedlineApp={getStops:()=>stops,setStops:value=>stops=value,showControls(){},closeSearch(){},setInsets(){},cityDistance:(a,b)=>a.latitude===b.latitude?0:500,
+    setPhotoCounts:counts=>mapCalls.counts=counts,focusStop:id=>mapCalls.focused=id,addCity:place=>stops.find(s=>s.latitude===place.latitude)};
   // Image decoding and native dialogs are browser services. Storage and UI handlers run unchanged.
   w.createImageBitmap=async file=>{if(file.name==='broken.jpg')throw Error('Cannot decode');return {width:1600,height:1000,close(){}};};
   w.HTMLCanvasElement.prototype.getContext=()=>({fillRect(){},drawImage(){}});
@@ -54,17 +56,22 @@ async function setup(t,{seed=true}={}){
   };
   const press=(key,target=w.document,extra={})=>target.dispatchEvent(new w.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true,...extra}));
   const click=id=>$(id).dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));
-  return {w,$,api,storage,trip,change,choose,press,click,objects};
+  const tiles=()=>[...$('photo-gallery').querySelectorAll('.photo-image')];
+  const chip=id=>[...$('gallery-filter').children].find(el=>el.dataset.filter===id);
+  return {w,$,api,storage,trip,change,choose,press,click,objects,tiles,chip,mapCalls};
 }
 
 test('gallery follows route order, filters cities, and browses only the visible photos',async t=>{
-  const {w,$,change,press}=await setup(t);
+  const {w,$,press,tiles,chip,mapCalls}=await setup(t);
   assert.deepEqual([...$('photo-gallery').querySelectorAll('h3')].map(el=>el.textContent),['Paris','Madrid']);
+  assert.deepEqual([...$('photo-gallery').querySelectorAll('.gallery-stop-number')].map(el=>el.textContent),['01','02']);
   assert.equal($('gallery-count').textContent,'3 photos');
-  change('gallery-city',paris.id);
-  assert.equal($('gallery-count').textContent,'2 photos');
+  assert.deepEqual({...mapCalls.counts},{[paris.id]:2,[madrid.id]:1},'Map badges show photos per city');
+  assert.deepEqual([...$('gallery-filter').children].map(el=>el.textContent),['All3','01Paris2','02Madrid1']);
+  chip(paris.id).click();
+  assert.equal($('gallery-count').textContent,'2 photos');assert.equal(chip(paris.id).getAttribute('aria-pressed'),'true');
   assert.equal($('photo-gallery').querySelectorAll('.gallery-city').length,1);
-  const opener=$('photo-gallery').querySelector('button');opener.focus();opener.click();
+  const opener=tiles()[0];opener.focus();opener.click();
   assert.equal($('photo-position').textContent,'1 / 2');
   assert.equal($('previous-photo').disabled,true);
   press('ArrowRight');await wait(()=>$('photo-position').textContent==='2 / 2');
@@ -73,11 +80,14 @@ test('gallery follows route order, filters cities, and browses only the visible 
   press('ArrowLeft');await wait(()=>$('photo-position').textContent==='1 / 2');
   await w.RedlinePostcards.close();assert.equal(w.document.activeElement,opener);
   press('Escape');assert.equal($('photo-panel').hidden,true);assert.equal(w.document.activeElement,$('photos-button'));
+  // The pin finds the city on the map; a drawer that covers the map steps aside for it.
+  $('photos-button').click();await wait(()=>!$('photo-panel').hidden);
+  $('photo-gallery').querySelector('.gallery-map-button').click();assert.equal(mapCalls.focused,paris.id);
 });
 
 test('navigation saves postcard edits before moving; failed saves keep the photo and draft open',async t=>{
-  const {w,$,storage,api,trip,press,click}=await setup(t);
-  $('photo-gallery').querySelector('button').click();click('full-photo');
+  const {w,$,storage,api,trip,press,click,tiles}=await setup(t);
+  tiles()[0].click();click('full-photo');
   assert.equal($('photo-viewer').classList.contains('flipped'),true);
   $('postcard-message').value='A memory worth keeping.';$('postcard-message').dispatchEvent(new w.Event('input',{bubbles:true}));
   press('ArrowRight',$('postcard-message'));await tick();assert.equal($('photo-position').textContent,'1 / 3','Editing keys do not navigate');
@@ -95,7 +105,7 @@ test('navigation saves postcard edits before moving; failed saves keep the photo
 
 test('import gallery supports bulk assignment, previews, and saving only assigned photos',async t=>{
   const {w,$,choose,change,api,trip,click}=await setup(t,{seed:false});
-  assert.equal($('photo-gallery').querySelector('.photo-empty p').textContent,'No photos yet');
+  assert.equal($('photo-gallery').querySelector('.photo-empty p').textContent,'No photos yet');assert.equal($('gallery-toolbar').hidden,true);
   choose(['gps-paris.jpg','one.jpg','two.jpg']);
   await wait(()=>$('photo-review').children.length===3&&!$('choose-photos').disabled);
   assert.equal($('photo-gallery').hidden,true);assert.equal($('gallery-toolbar').hidden,true);
@@ -143,7 +153,7 @@ test('file drops, batch limits, and cancelling imports leave saved photos untouc
 });
 
 test('swiping browses without flipping, while a tap still flips the entire postcard',async t=>{
-  const {w,$,click}=await setup(t);$('photo-gallery').querySelector('button').click();
+  const {w,$,click,tiles}=await setup(t);tiles()[0].click();
   for(const [type,x] of [['pointerdown',200],['pointerup',100]]){
     const event=new w.Event(type,{bubbles:true});Object.assign(event,{pointerType:'touch',pointerId:1,clientX:x,clientY:100});$('full-photo').dispatchEvent(event);
   }
@@ -154,10 +164,10 @@ test('swiping browses without flipping, while a tap still flips the entire postc
 });
 
 test('print and share use the browsed photo and preserve the postcard viewer',async t=>{
-  const {w,$,press,click}=await setup(t);let shared=null,printed=0;
+  const {w,$,press,click,tiles}=await setup(t);let shared=null,printed=0;
   Object.defineProperty(w.navigator,'canShare',{value:()=>true});
   Object.defineProperty(w.navigator,'share',{value:async value=>shared=value});
-  $('photo-gallery').querySelector('button').click();press('ArrowRight');await wait(()=>$('photo-position').textContent==='2 / 3');
+  tiles()[0].click();press('ArrowRight');await wait(()=>$('photo-position').textContent==='2 / 3');
   press('ArrowRight');await wait(()=>$('photo-caption').textContent==='Madrid');click('full-photo');
   $('postcard-message').value='An afternoon in Madrid.';$('postcard-message').dispatchEvent(new w.Event('input',{bubbles:true}));
   await wait(()=>!$('share-postcard').disabled);$('share-postcard').click();await wait(()=>shared);
@@ -170,4 +180,116 @@ test('print and share use the browsed photo and preserve the postcard viewer',as
   $('print-postcard').click();await wait(()=>printed===1);w.dispatchEvent(new w.Event('afterprint'));
   assert.equal($('photo-viewer').open,true);assert.equal($('photo-position').textContent,'3 / 3');assert.equal($('photo-viewer').classList.contains('flipped'),true);
   press('p',w.document,{metaKey:true});await wait(()=>printed===2);w.dispatchEvent(new w.Event('afterprint'));
+});
+
+test('select mode moves and deletes several photos atomically',async t=>{
+  const {w,$,api,trip,tiles,change}=await setup(t);
+  $('select-photos').click();
+  assert.equal($('gallery-actions').hidden,false);assert.equal($('gallery-toolbar').hidden,true);
+  assert.equal($('gallery-selection-count').textContent,'Tap photos to select');assert.equal($('delete-photos').disabled,true);
+  tiles()[0].click();tiles()[1].click();
+  assert.equal($('photo-viewer').open,false,'Selecting never opens the viewer');
+  assert.equal($('gallery-selection-count').textContent,'2 selected');assert.equal(tiles()[0].getAttribute('aria-pressed'),'true');
+  change('move-photos',madrid.id);
+  await wait(()=>$('photo-message').textContent==='Moved 2 photos to Madrid.');
+  assert.deepEqual([...$('photo-gallery').querySelectorAll('.gallery-city-count')].map(el=>el.textContent),['3 photos']);
+  assert.equal((await api(`/trips/${trip.id}`)).photos.filter(p=>p.stopId===madrid.id).length,3);
+  $('select-photos').click();$('select-visible').click();assert.equal($('gallery-selection-count').textContent,'3 selected');
+  w.confirm=()=>false;$('delete-photos').click();await tick();assert.equal(tiles().length,3);
+  w.confirm=()=>true;tiles()[2].click();$('delete-photos').click();
+  await wait(()=>$('photo-message').textContent==='2 photos deleted.');
+  assert.equal(tiles().length,1);assert.equal($('photo-count').textContent,'1');
+  assert.equal((await api(`/trips/${trip.id}`)).photos.length,1);
+  w.document.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+  assert.equal($('gallery-actions').hidden,true,'Escape leaves select mode first');assert.equal($('photo-panel').hidden,false);
+});
+
+test('the viewer moves a photo to another city and deletes it, then shows the next photo',async t=>{
+  const {w,$,api,trip,tiles}=await setup(t);
+  tiles()[0].click();
+  assert.equal($('photo-city').hidden,false);assert.equal($('photo-city').value,paris.id);
+  $('photo-city').value=madrid.id;$('photo-city').dispatchEvent(new w.Event('change',{bubbles:true}));
+  await wait(()=>$('photo-caption').textContent==='Madrid');
+  assert.equal((await api(`/trips/${trip.id}`)).photos.filter(p=>p.stopId===madrid.id).length,2);
+  w.confirm=()=>true;$('delete-photo').click();
+  await wait(()=>$('photo-position').textContent==='1 / 2');
+  assert.equal($('photo-viewer').open,true);assert.equal((await api(`/trips/${trip.id}`)).photos.length,2);
+  $('delete-photo').click();await wait(()=>$('photo-navigation').hidden);
+  $('delete-photo').click();await wait(()=>!$('photo-viewer').open);
+  assert.equal((await api(`/trips/${trip.id}`)).photos.length,0);
+  assert.equal($('photo-gallery').querySelector('.photo-empty p').textContent,'No photos yet');
+});
+
+test('the trips menu lists, renames, and deletes trips, and closes like a menu',async t=>{
+  const {w,$,api,trip}=await setup(t);
+  await api('/trips',{method:'POST',body:JSON.stringify({title:'Another time',stops:[madrid]})});
+  $('trips-button').click();
+  assert.equal($('trip-panel').hidden,false);assert.equal($('photo-panel').hidden,true,'Only one panel at a time');
+  assert.equal($('trips-button').getAttribute('aria-expanded'),'true');
+  await wait(()=>$('trip-list').querySelectorAll('.saved-trip').length===2);
+  const row=[...$('trip-list').querySelectorAll('.saved-trip')].find(el=>el.classList.contains('active'));
+  assert.match(row.querySelector('.trip-meta').textContent,/^2 stops · 3 photos · /);
+  row.querySelector('.trip-rename').click();
+  const input=$('trip-list').querySelector('.trip-rename-form input');input.value='Summer in Spain';
+  $('trip-list').querySelector('.trip-rename-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  await wait(()=>$('trip-title').textContent==='Summer in Spain');
+  assert.equal((await api(`/trips/${trip.id}`)).trip.title,'Summer in Spain');
+  w.document.body.dispatchEvent(new w.Event('pointerdown',{bubbles:true}));
+  assert.equal($('trip-panel').hidden,true,'Clicking elsewhere closes the menu');
+  $('trips-button').click();await wait(()=>$('trip-list').querySelectorAll('.trip-delete').length===2);
+  w.confirm=()=>true;[...$('trip-list').querySelectorAll('.saved-trip')].find(el=>el.classList.contains('active')).querySelector('.trip-delete').click();
+  await wait(()=>$('trip-list').querySelectorAll('.saved-trip').length===1);
+  assert.equal($('trip-title').textContent,'');assert.equal($('photo-count').textContent,'');
+  assert.equal((await api('/trips')).trips.length,1);
+  await assert.rejects(api(`/trips/${trip.id}`),e=>e.status===404);
+  w.document.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+  assert.equal($('trip-panel').hidden,true);assert.equal(w.document.activeElement,$('trips-button'));
+  $('photos-button').click();await wait(()=>!$('trip-panel').hidden);
+  await new Promise(resolve=>setTimeout(resolve,50));
+  assert.equal($('trip-message').textContent,'Name and save this trip to add photos.','The prompt is not replaced by the list');
+  assert.equal($('trip-list').querySelectorAll('.saved-trip').length,1);
+});
+
+test('renaming the open trip keeps the stale-tab check, and focus stays in the menu',async t=>{
+  const {w,$,api,trip}=await setup(t);
+  // Another tab saves a newer route while this tab still shows revision 1.
+  await api(`/trips/${trip.id}`,{method:'PUT',body:JSON.stringify({title:trip.title,stops:[paris],revision:1})});
+  $('trips-button').click();await wait(()=>$('trip-list').querySelector('.trip-rename'));
+  $('trip-list').querySelector('.trip-rename').click();
+  const input=$('trip-list').querySelector('.trip-rename-form input');input.value='Renamed';
+  $('trip-list').querySelector('.trip-rename-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  await wait(()=>/another tab/.test($('trip-message').textContent));
+  assert.equal((await api(`/trips/${trip.id}`)).trip.title,'A summer away');
+  assert.equal(JSON.parse(w.localStorage.getItem('redline-saved-trip')).revision,1,'The stale revision is kept, so the next save also refuses to overwrite');
+  await wait(()=>w.document.activeElement?.classList.contains('trip-open'));
+  $('trip-list').querySelector('.trip-rename').click();
+  $('trip-list').querySelector('.trip-rename-form input').dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+  await wait(()=>w.document.activeElement?.classList.contains('trip-rename'));
+  assert.equal($('trip-panel').hidden,false,'Escape in the rename field only cancels the rename');
+});
+
+test('a viewer delete blocks browsing until it finishes, and focus returns to the album',async t=>{
+  const {w,$,storage,api,tiles,press}=await setup(t);
+  let release;const gate=new Promise(resolve=>release=resolve);
+  storage.api=async(path,options)=>{if(options?.method==='DELETE')await gate;return api(path,options);};
+  tiles()[1].click();assert.equal($('photo-position').textContent,'2 / 3');
+  w.confirm=()=>true;$('delete-photo').click();await tick();
+  press('ArrowLeft');await tick();assert.equal($('previous-photo').disabled,true);
+  release();await wait(()=>$('photo-position').textContent==='2 / 2');
+  assert.equal($('photo-caption').textContent,'Madrid','The photo after the deleted one is shown, not the one an early arrow key asked for');
+  await w.RedlinePostcards.close();
+  assert.ok(w.document.activeElement===$('photo-panel')||w.document.activeElement?.classList.contains('photo-image'),'Focus is not lost to the page');
+});
+
+test('select mode follows route edits, and dragging files never saves route edits',async t=>{
+  const {w,$,api,trip}=await setup(t);
+  $('select-photos').click();
+  const rome={id:'city-rome-0001',name:'Rome',country:'Italy',latitude:41.9,longitude:12.5};
+  w.RedlineApp.setStops([paris,madrid,rome]);w.dispatchEvent(new w.Event('redline:routechange'));
+  assert.ok([...$('move-photos').options].some(option=>option.value===rome.id),'A city added during selection can be chosen');
+  $('photo-panel').querySelector('[data-close]').click();
+  const drag=new w.Event('dragenter',{bubbles:true,cancelable:true});Object.defineProperty(drag,'dataTransfer',{value:{types:['Files'],files:[]}});
+  w.document.body.dispatchEvent(drag);await wait(()=>!$('photo-panel').hidden);await tick();
+  assert.equal((await api(`/trips/${trip.id}`)).trip.stops.length,2,'Opening the album for a drag leaves the saved route alone');
+  assert.equal($('save-trip').classList.contains('dirty'),true);
 });

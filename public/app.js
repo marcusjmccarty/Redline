@@ -31,6 +31,9 @@
     city('Kraków','Poland',50.0614,19.9366),city('Reykjavík','Iceland',64.1355,-21.8954)
   ];
   const normalize = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+  // A well-known prefix match beats a hamlet with the exact typed name ("Kyo" → Kyoto).
+  const relevance = q => p => {const name=normalize(p.name);return Math.log10((p.population||0)+10)+(name===q?3:name.startsWith(q)?1.5:0);};
+  const byRelevance = query => {const score=relevance(normalize(query));return (a,b)=>score(b)-score(a);};
   let stops = places.slice(0,3).map(p => ({...p}));
   try {
     const saved = JSON.parse(localStorage.getItem('redline-route-v1'));
@@ -40,7 +43,8 @@
   let animation = 0, running = false, lines = [], searchTimer, controller, searchVersion = 0, results = [], selected = -1;
   let resultsQuery = '', resultsReady = false, addingQuery = '';
   let progress=null,activeLeg=null,geometry=[],playback=null,lastTick=null;
-  let traceZoom=null,idleZoom=null,suppressStopClickUntil=0;
+  let traceZoom=null,idleZoom=null,suppressStopClickUntil=0,insetRight=0;
+  const photoCounts=new Map();
   const heldKeys=new Map();
   const WORLD_W=1440,WORLD_H=720,MAX_ZOOM=(4/3)**9;
   let view={x:0,y:0,w:WORLD_W,h:WORLD_H};
@@ -91,7 +95,11 @@
       const near=stops.slice(0,index).some(p=>{const [px,py]=project(p);return Math.abs(x-px)<95&&Math.abs(y-py)<30;});
       if(near) label.setAttribute('y',y+22);
       if(x>1250){label.setAttribute('x',x-10);label.setAttribute('text-anchor','end');}
-      group.append(dot,label);$('route-stops').append(group);
+      const badge=svg('g',{class:'photo-badge','aria-hidden':'true'}),frame=svg('rect',{x:0,y:0,height:15,rx:2}),camera=svg('path',{d:'M3.5 5.5h1.6l.9-1.3h2.6l.9 1.3h1.6v5.3H3.5z',class:'photo-badge-icon'}),lens=svg('circle',{cx:7.6,cy:8,r:1.5,class:'photo-badge-icon'}),count=svg('text',{x:14,y:11});
+      badge.append(frame,camera,lens,count);
+      badge.addEventListener('pointerdown',event=>event.stopPropagation());
+      badge.addEventListener('click',event=>{event.stopPropagation();window.dispatchEvent(new CustomEvent('redline:openphotos',{detail:{stopId:place.id}}));});
+      group.append(dot,label,badge);$('route-stops').append(group);paintBadge(group,place.id);
       group.setAttribute('role','button');group.setAttribute('aria-label',`Go to ${place.name}, stop ${index+1}`);
       group.addEventListener('pointerdown',event=>event.stopPropagation());
       group.addEventListener('click',()=>jumpToCity(index));
@@ -114,6 +122,12 @@
     $('toggle-stops').disabled=stops.length===0;
     $('status').textContent='';
     scheduleView();
+  }
+  function paintBadge(group,id){
+    const badge=group.querySelector('.photo-badge'),count=photoCounts.get(id)||0;if(!badge)return;
+    badge.style.display=count?'':'none';if(!count)return;
+    const text=String(count);badge.querySelector('text').textContent=text;badge.querySelector('rect').setAttribute('width',String(18+text.length*6));
+    badge.querySelector('title')?.remove();const title=svg('title');title.textContent=`${count} photo${count===1?'':'s'} · open gallery`;badge.prepend(title);
   }
   function moveStop(from,to) {
     if(from===to)return;
@@ -146,7 +160,9 @@
     const bounds=map.getBoundingClientRect(),{width,height}=bounds,padding=Math.min(54,width*.09,height*.08);
     const dock=$('route-dock').getBoundingClientRect();
     const bottom=!document.body.classList.contains('map-only')&&dock.top>bounds.top+height*.25?Math.min(height-padding,dock.top-bounds.top-28):height-padding;
-    return {width,height,left:padding,right:width-padding,top:padding,bottom:Math.max(padding+60,bottom)};
+    // An open photo drawer covers the right side; keep the camera's subject beside it.
+    const right=Math.max(Math.min(width-padding,padding+240),width-padding-insetRight);
+    return {width,height,left:padding,right,top:padding,bottom:Math.max(padding+60,bottom)};
   }
   function cameraFor(leg,direction){
     return RedlineTrace.camera(geometry[leg],cameraSpace(),baseView,project(stops[direction>0?leg+1:leg]),traceZoom);
@@ -225,7 +241,8 @@
     if(stops.length>=100){$('status').textContent='This map holds up to 100 stops. Remove a stop to add another.';closeSearch();return;}
     const previous=stops.at(-1);
     if(previous&&Math.abs(previous.latitude-place.latitude)<.01&&Math.abs(previous.longitude-place.longitude)<.01){$('status').textContent='That is already your last stop.';closeSearch();return;}
-    stops.push({...place,id:place.id||crypto.randomUUID()});input.value='';closeSearch();drawRoute();persist();$('status').textContent='';input.focus();
+    const {name,country='',admin1='',latitude,longitude}=place;
+    stops.push({name,country,admin1,latitude,longitude,id:place.id||crypto.randomUUID()});input.value='';closeSearch();drawRoute();persist();$('status').textContent='';input.focus();
   }
   function showResults(items,message='') {
     results=items;selected=-1;input.removeAttribute('aria-activedescendant');$('suggestions').replaceChildren();
@@ -233,13 +250,14 @@
       const button=document.createElement('button'),name=document.createElement('strong'),detail=document.createElement('small');
       button.type='button';button.id=`result-${index}`;button.setAttribute('role','option');button.setAttribute('aria-selected','false');button.tabIndex=-1;
       name.textContent=place.name;detail.textContent=[place.admin1,place.country].filter(Boolean).join(', ');
-      button.append(name,detail);button.addEventListener('click',()=>addStop(place));$('suggestions').append(button);
+      button.append(name,detail);button.addEventListener('click',()=>addStop(place));button.addEventListener('mousedown',event=>event.preventDefault());$('suggestions').append(button);
     });
     $('search-message').textContent=message;$('suggestion-panel').hidden=false;input.setAttribute('aria-expanded','true');
   }
   function localResults(query) {
-    const q=normalize(query),pool=[...places,...window.MAP_CITIES],seen=new Set();
-    return pool.filter(p=>{const key=`${normalize(p.name)}:${Math.round(p.latitude*10)}:${Math.round(p.longitude*10)}`;if(seen.has(key))return false;seen.add(key);return normalize(p.name).includes(q)||normalize(`${p.name}, ${p.country}`).includes(q);}).sort((a,b)=>Number(normalize(b.name)===q)-Number(normalize(a.name)===q)||(b.population||0)-(a.population||0)).slice(0,7);
+    // Indexed cities come first so duplicates keep their population for ranking.
+    const q=normalize(query),pool=[...window.MAP_CITIES,...places],seen=new Set();
+    return pool.filter(p=>{const key=`${normalize(p.name)}:${Math.round(p.latitude*10)}:${Math.round(p.longitude*10)}`;if(seen.has(key))return false;seen.add(key);return normalize(p.name).includes(q)||normalize(`${p.name}, ${p.country}`).includes(q);}).sort(byRelevance(query)).slice(0,7);
   }
   async function search(query,version,autoAdd=false) {
     controller?.abort();controller=new AbortController();const currentController=controller;
@@ -248,10 +266,10 @@
       const response=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=7&language=en&format=json`,{signal:currentController.signal});
       if(!response.ok)throw new Error('Search unavailable');
       const data=await response.json();if(version!==searchVersion)return;
-      const items=(data.results||[]).filter(p=>Number.isFinite(p.latitude)&&Number.isFinite(p.longitude)).map(p=>city(p.name,p.country||'',p.latitude,p.longitude,p.admin1||''));
+      const items=(data.results||[]).filter(p=>Number.isFinite(p.latitude)&&Number.isFinite(p.longitude)).map(p=>({...city(p.name,p.country||'',p.latitude,p.longitude,p.admin1||''),population:p.population||0}));
       const combined=[...items];
       for(const p of localResults(query))if(!combined.some(i=>Math.abs(i.latitude-p.latitude)<.15&&Math.abs(i.longitude-p.longitude)<.15))combined.push(p);
-      const q=normalize(query);combined.sort((a,b)=>Number(normalize(b.name)===q)-Number(normalize(a.name)===q));
+      combined.sort(byRelevance(query));
       resultsQuery=query;resultsReady=true;addingQuery='';$('destination-form').removeAttribute('aria-busy');
       if(autoAdd&&combined.length){addStop(combined[0]);return;}
       showResults(combined.slice(0,7),combined.length?'':'No places found. Try the city name without a country or region.');
@@ -355,7 +373,9 @@
       group.setAttribute('transform',`translate(${x} ${y}) scale(${1/matrix.a} ${1/matrix.d})`);
       dot.setAttribute('cx','0');dot.setAttribute('cy','0');dot.setAttribute('r','4.5');text.style.fontSize='13px';text.style.strokeWidth='4px';text.style.letterSpacing='.5px';
       text.setAttribute('x','10');text.setAttribute('y','-12');text.setAttribute('text-anchor','start');
-      if((x-view.x)*matrix.a>bounds.width-180){text.setAttribute('x','-10');text.setAttribute('text-anchor','end');}
+      const flipped=(x-view.x)*matrix.a>bounds.width-180,badge=group.querySelector('.photo-badge');
+      if(flipped){text.setAttribute('x','-10');text.setAttribute('text-anchor','end');}
+      if(badge)badge.setAttribute('transform',`translate(${flipped?-9-Number(badge.querySelector('rect').getAttribute('width')||24):9} 3)`);
     });
     for(const label of $('map-labels').children){
       label.setAttribute('x','0');label.setAttribute('y','0');
@@ -502,6 +522,10 @@
   for(const label of $('map-labels').children){label.dataset.mapX=label.getAttribute('x');label.dataset.mapY=label.getAttribute('y');label.dataset.mapRotation=label.getAttribute('transform')?.match(/rotate\(([-\d.]+)/)?.[1]||'0';}
   window.RedlineApp={
     showControls:()=>setMapOnly(false),
+    closeSearch,
+    focusStop:id=>{const index=stops.findIndex(p=>p.id===id);if(index>=0)jumpToCity(index);return index>=0;},
+    setPhotoCounts:counts=>{photoCounts.clear();for(const [id,count] of Object.entries(counts))photoCounts.set(id,count);[...$('route-stops').children].forEach((group,i)=>stops[i]&&paintBadge(group,stops[i].id));scheduleView();},
+    setInsets:({right=0}={})=>{if(right===insetRight)return;insetRight=right;scheduleView();reframeTrace();},
     getStops:()=>stops.map(p=>({...p})),
     setStops:(items,{preserveView=false}={})=>{stops=items.map(p=>({...p,id:p.id||crypto.randomUUID()}));if(!preserveView)drawRoute();persist();},
     addCity:place=>{let existing=stops.find(p=>Math.abs(p.latitude-place.latitude)<.02&&Math.abs(p.longitude-place.longitude)<.02);if(existing)return {...existing};if(stops.length>=100)throw Error('A trip can contain up to 100 stops.');const added={...place,id:crypto.randomUUID()};stops.push(added);drawRoute();persist();return {...added};},

@@ -11,7 +11,7 @@
       trip: {id:trip.id, title:trip.title, stops:trip.stops, createdAt:trip.createdAt},
       photos: photos.map(({photo, blob}) => {
         blobs.push(blob);
-        return {stopId:photo.stopId, city:photo.city, postcard:photo.postcard || {}, createdAt:photo.createdAt, bytes:blob.size};
+        return {stopId:photo.stopId, city:photo.city, postcard:photo.postcard || {}, createdAt:photo.createdAt, width:photo.width, height:photo.height, bytes:blob.size};
       })
     }));
     const manifest = new TextEncoder().encode(JSON.stringify({version:1, trips}));

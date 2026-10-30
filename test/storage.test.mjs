@@ -98,3 +98,50 @@ test('static assets and storage have no ChatGPT or root-path API dependency',()=
   const trips=readFileSync(new URL('../public/trips.js',import.meta.url),'utf8');
   assert.ok(!trips.includes('/api'));assert.ok(!trips.includes('signin-with-chatgpt'));assert.ok(trips.includes("fetch('photo-cities.json')"));
 });
+
+test('photos move and delete atomically within one trip, and deleting a trip removes its photos',async()=>{
+  const {store}=library(),rome={id:'city-rome-0001',name:'Rome',country:'Italy',latitude:41.9,longitude:12.5};
+  const trip=(await store.api('/trips',{method:'POST',body:JSON.stringify({title:'Europe',stops:[paris,rome]})})).trip;
+  const other=await create(store),[a,b]=[await upload(store,trip),await upload(store,trip)],foreign=await upload(store,other);
+  const moved=await store.api(`/trips/${trip.id}/photos`,{method:'PUT',body:JSON.stringify({ids:[a.id,b.id],stopId:rome.id})});
+  assert.deepEqual(plain(moved.photos.map(p=>p.city.name)),['Rome','Rome']);
+  // A photo from another trip makes the whole change fail, with nothing half-applied.
+  await assert.rejects(store.api(`/trips/${trip.id}/photos`,{method:'PUT',body:JSON.stringify({ids:[a.id,foreign.id],stopId:paris.id})}),e=>e.status===409);
+  await assert.rejects(store.api(`/trips/${trip.id}/photos`,{method:'PUT',body:JSON.stringify({ids:[a.id],stopId:'city-nowhere-01'})}));
+  assert.deepEqual(plain((await store.api(`/trips/${trip.id}`)).photos.map(p=>p.stopId)),[rome.id,rome.id]);
+  await assert.rejects(store.api(`/trips/${trip.id}/photos`,{method:'DELETE',body:JSON.stringify({ids:[a.id,foreign.id]})}),e=>e.status===409);
+  assert.equal((await store.api(`/trips/${trip.id}`)).photos.length,2);
+  assert.deepEqual(plain(await store.api(`/trips/${trip.id}/photos`,{method:'DELETE',body:JSON.stringify({ids:[a.id]})})),{deleted:1});
+  assert.equal((await store.api(`/trips/${trip.id}`)).photos.length,1);
+  const listed=(await store.api('/trips')).trips.find(t=>t.id===trip.id);assert.equal(listed.stopCount,2);assert.equal(listed.photoCount,1);
+  assert.deepEqual(plain(await store.api(`/trips/${trip.id}`,{method:'DELETE'})),{deleted:true,photoCount:1});
+  await assert.rejects(store.api(`/trips/${trip.id}`),e=>e.status===404);
+  assert.equal((await store.api(`/trips/${other.id}`)).photos.length,1,'Other trips keep their photos');
+});
+
+test('small previews and photo sizes are stored, cleaned, and carried through backups',async()=>{
+  const {store}=library(),trip=await create(store),form=new FormData();
+  form.append('photo',new Blob([jpeg],{type:'image/jpeg'}));form.append('stopId',paris.id);
+  form.append('thumb',new Blob([jpeg],{type:'image/jpeg'}));form.append('width','1600');form.append('height','1000');
+  const {photo}=await store.api(`/trips/${trip.id}/photos`,{method:'POST',body:form});
+  assert.ok(photo.thumbUrl);assert.notEqual(photo.thumbUrl,photo.url);assert.equal(photo.width,1600);assert.equal(photo.height,1000);
+  const thumb=Buffer.from(await (await fetch(photo.thumbUrl)).arrayBuffer());assert.equal(thumb.includes(Buffer.from('Exif')),false);
+  const plainPhoto=await upload(store,trip);assert.equal(plainPhoto.thumbUrl,null);
+  const later=new FormData();later.append('thumb',new Blob([jpeg],{type:'image/jpeg'}));later.append('width','800');later.append('height','1200');
+  const updated=(await store.api(`/photos/${plainPhoto.id}/thumb`,{method:'PUT',body:later})).photo;
+  assert.ok(updated.thumbUrl);assert.equal(updated.url,plainPhoto.url,'The full photo URL stays valid');assert.equal(updated.height,1200);
+  const bad=new FormData();bad.append('thumb',new Blob(['not a jpeg'],{type:'image/jpeg'}));
+  await assert.rejects(store.api(`/photos/${plainPhoto.id}/thumb`,{method:'PUT',body:bad}));
+  const target=library().store;await target.importArchive(await store.exportArchive());
+  const restored=await target.api(`/trips/${(await target.api('/trips')).trips[0].id}`);
+  assert.deepEqual(plain(restored.photos.map(p=>[p.width,p.height]).sort((a,b)=>b[0]-a[0])),[[1600,1000],[800,1200]]);
+});
+
+test('renaming changes only the title and refuses a stale revision',async()=>{
+  const {store}=library(),trip=await create(store);
+  await assert.rejects(store.api(`/trips/${trip.id}/title`,{method:'PUT',body:JSON.stringify({title:'New',revision:0})}),e=>e.status===409);
+  await assert.rejects(store.api(`/trips/${trip.id}/title`,{method:'PUT',body:JSON.stringify({title:' ',revision:1})}));
+  const renamed=(await store.api(`/trips/${trip.id}/title`,{method:'PUT',body:JSON.stringify({title:'  Paris in spring ',revision:1})})).trip;
+  assert.equal(renamed.title,'Paris in spring');assert.equal(renamed.revision,2);assert.equal(renamed.stops,undefined);
+  const saved=(await store.api(`/trips/${trip.id}`)).trip;assert.deepEqual(plain(saved.stops),plain(trip.stops));assert.equal(saved.revision,2);
+});

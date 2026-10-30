@@ -3,10 +3,10 @@
   const $=id=>document.getElementById(id),fields=['message','recipient','address','sender'],states=new Map();
   let active=null,request=null,timer=null,closing=false,printing=false,restoreAfterPrint=false;
   let shareFile=null,shareGeneration=0,shareTimer=null,sharing=false;
-  let sequence=[],navigating=false,navigationVersion=0,returnFocus=null,swipe=null,suppressClickUntil=0;
+  let sequence=[],navigating=false,navigationVersion=0,returnFocus=null,swipe=null,suppressClickUntil=0,actions=null,changing=false;
   const empty=()=>Object.fromEntries(fields.map(key=>[key,'']));
   const dirty=state=>JSON.stringify(state.value)!==state.saved;
-  function status(){if(active)$('postcard-save-status').textContent=active.promise?'Saving…':'';}
+  function status(){if(!active)return;$('postcard-save-status').textContent=active.promise?'Saving…':'';$('postcard-saved').textContent=active.promise?'Saving…':dirty(active)?'':active.saved!==JSON.stringify(empty())?'Saved':'';}
   async function save(state){
     if(!state||state.preview)return;
     if(state.promise){await state.promise;return save(state);}
@@ -35,13 +35,58 @@
     const index=sequence.findIndex(photo=>photo.id===active?.photo.id);
     $('photo-navigation').hidden=sequence.length<2;
     $('photo-position').textContent=`${index+1} / ${sequence.length}`;
-    $('previous-photo').disabled=navigating||index<=0;
-    $('next-photo').disabled=navigating||index<0||index>=sequence.length-1;
+    $('previous-photo').disabled=navigating||changing||index<=0;
+    $('next-photo').disabled=navigating||changing||index<0||index>=sequence.length-1;
+    $('viewer-previous').hidden=$('previous-photo').disabled;$('viewer-next').hidden=$('next-photo').disabled;
+    // Warm the neighbours so browsing feels instant.
+    for(const near of [sequence[index-1],sequence[index+1]])if(near?.url){const image=new Image();image.decoding='async';image.src=near.url;}
   }
-  function open(photo,api,collection=[photo]){
+  function renderCity(){
+    const select=$('photo-city'),photo=active?.photo,stops=actions&&photo?actions.cities():[];
+    select.hidden=!actions||!photo||!stops.length;$('delete-photo').hidden=!actions;
+    $('photo-viewer').classList.toggle('can-move',!select.hidden);
+    if(select.hidden)return;
+    select.replaceChildren(...stops.map((stop,i)=>new Option(`${String(i+1).padStart(2,'0')} · ${stop.name}`,stop.id)));
+    if(!stops.some(stop=>stop.id===photo.stopId))select.add(new Option(photo.city?.name||'Other photos',photo.stopId||''),0);
+    select.value=photo.stopId||'';select.title=`In ${photo.city?.name||'this trip'} · choose another city to move it`;
+  }
+  async function move(){
+    const state=active,stopId=$('photo-city').value;
+    if(!actions||!state||changing||!stopId||stopId===state.photo.stopId){renderCity();return;}
+    changing=true;$('photo-city').disabled=true;$('postcard-error').textContent='';
+    try{
+      const moved=await actions.move(state.photo,stopId);if(active!==state)return;
+      Object.assign(state.photo,{stopId:moved.stopId,city:moved.city});
+      const place=moved.city?.name||'';$('photo-caption').textContent=place;$('postcard-place').textContent=place;$('full-photo').alt=place?`Photo in ${place}`:'Trip photo';
+      $('postcard-save-status').textContent=`Moved to ${place}.`;prepareShare();
+    }catch(error){if(active===state)$('postcard-error').textContent=error.message;}
+    finally{changing=false;$('photo-city').disabled=false;renderCity();}
+  }
+  async function removeCurrent(){
+    const state=active;if(!actions||!state||changing||navigating)return;
+    if(!confirm('Delete this photo and its postcard? This can’t be undone.'))return;
+    changing=true;clearTimeout(timer);updateNavigation();
+    try{
+      const index=sequence.findIndex(photo=>photo.id===state.photo.id);
+      await actions.remove(state.photo);
+      sequence=sequence.filter(photo=>photo.id!==state.photo.id);
+      // Closing the viewer during the delete keeps it closed.
+      if(!$('photo-viewer').open)return;
+      const next=sequence[Math.min(index,sequence.length-1)];
+      if(next)open(next,request,sequence,actions);else {active=null;$('photo-viewer').close();restoreFocus(state.photo.id);}
+    }catch(error){if(active===state)$('postcard-error').textContent=error.message;}
+    finally{changing=false;updateNavigation();}
+  }
+  // The gallery re-renders after moves and deletes, so fall back to the photo's new tile or the album.
+  function restoreFocus(photoId){
+    const tile=[...document.querySelectorAll('#photo-gallery .photo-tile')].find(el=>el.dataset.photoId===photoId)?.querySelector('.photo-image');
+    const target=returnFocus?.isConnected?returnFocus:tile||($('photo-panel')&&!$('photo-panel').hidden?$('photo-panel'):null);
+    target?.focus({preventScroll:true});
+  }
+  function open(photo,api,collection=[photo],viewerActions=null){
     const wasOpen=$('photo-viewer').open;
     if(!wasOpen)returnFocus=document.activeElement;
-    sequence=collection;
+    sequence=collection;actions=api?viewerActions:null;
     shareGeneration++;shareFile=null;clearTimeout(shareTimer);$('share-postcard').disabled=true;
     request=api;clearTimeout(timer);
     const previous=api?states.get(photo.id):null;
@@ -57,23 +102,25 @@
     requestAnimationFrame(()=>requestAnimationFrame(()=>$('photo-viewer').classList.remove('changing-photo')));
     $('close-photo-viewer').inert=false;$('close-photo-viewer').setAttribute('aria-hidden','false');$('close-postcard').inert=true;$('close-postcard').setAttribute('aria-hidden','true');
     $('postcard-front').inert=false;$('postcard-front').setAttribute('aria-hidden','false');$('postcard-back').inert=true;$('postcard-back').setAttribute('aria-hidden','true');
-    $('print-postcard').disabled=active.preview;
-    status();updateOrientation();updateNavigation();if(!wasOpen)$('photo-viewer').showModal();prepareShare();
+    $('print-postcard').disabled=active.preview;$('flip-postcard').hidden=active.preview;
+    $('photo-viewer').classList.toggle('preview',active.preview);
+    status();updateOrientation();updateNavigation();renderCity();if(!wasOpen)$('photo-viewer').showModal();prepareShare();
   }
   async function navigate(direction){
-    if(navigating||closing||printing||!$('photo-viewer').open)return;
+    if(navigating||changing||closing||printing||!$('photo-viewer').open)return;
     const index=sequence.findIndex(photo=>photo.id===active?.photo.id),photo=sequence[index+direction];
     if(!photo)return;
     const version=++navigationVersion; navigating=true;updateNavigation();clearTimeout(timer);
     try{
       await save(active);
       if(version!==navigationVersion||!$('photo-viewer').open)return;
-      open(photo,request,sequence);
+      open(photo,request,sequence,actions);
     }catch{}finally{navigating=false;updateNavigation();}
   }
   async function close(){
     if(closing)return;closing=true;navigationVersion++;clearTimeout(timer);
-    try{await save(active);$('photo-viewer').close();}catch{if(confirm('Close without saving? Your draft will stay in this tab.'))$('photo-viewer').close();}finally{closing=false;if(!$('photo-viewer').open&&returnFocus?.isConnected)returnFocus.focus({preventScroll:true});}
+    const photoId=active?.photo.id;
+    try{await save(active);$('photo-viewer').close();}catch{if(confirm('Close without saving? Your draft will stay in this tab.'))$('photo-viewer').close();}finally{closing=false;if(!$('photo-viewer').open)restoreFocus(photoId);}
   }
   fields.forEach(key=>$(`postcard-${key}`).addEventListener('input',()=>{
     if(!active)return;active.value[key]=$(`postcard-${key}`).value;active.photo.postcard={...active.value};
@@ -90,6 +137,12 @@
   $('close-postcard').addEventListener('click',close);
   $('previous-photo').addEventListener('click',()=>navigate(-1));
   $('next-photo').addEventListener('click',()=>navigate(1));
+  $('viewer-previous').addEventListener('click',()=>navigate(-1));
+  $('viewer-next').addEventListener('click',()=>navigate(1));
+  $('flip-postcard').addEventListener('click',flip);
+  $('unflip-postcard').addEventListener('click',flip);
+  $('photo-city').addEventListener('change',move);
+  $('delete-photo').addEventListener('click',removeCurrent);
   $('photo-viewer').addEventListener('cancel',event=>{event.preventDefault();close();});
   $('photo-viewer').addEventListener('click',event=>{
     if(Date.now()<suppressClickUntil)return;
@@ -97,7 +150,8 @@
       const box=$('photo-viewer').getBoundingClientRect();
       if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom){close();return;}
     }
-    if(event.detail>1||event.target.closest('input,textarea,button,a,label'))return;
+    // The photo and the postcard paper turn the card; the toolbar and fields never do.
+    if(event.detail>1||event.target.closest('input,textarea,button,a,label,select,.photo-viewer-footer,.postcard-actions'))return;
     flip();
   });
   $('full-photo').addEventListener('pointerdown',event=>{
@@ -112,6 +166,8 @@
   $('full-photo').addEventListener('pointercancel',()=>swipe=null);
   document.addEventListener('keydown',event=>{
     if(!$('photo-viewer').open||event.defaultPrevented||event.altKey||event.metaKey||event.ctrlKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"]'))return;
+    if(event.key.toLowerCase()==='f'&&!active?.preview){event.preventDefault();if(!event.repeat)flip();return;}
+    if((event.key==='Delete'||event.key==='Backspace')&&actions&&!$('photo-viewer').classList.contains('flipped')){event.preventDefault();if(!event.repeat)removeCurrent();return;}
     if(!['ArrowLeft','ArrowRight'].includes(event.key))return;
     event.preventDefault();if(!event.repeat)navigate(event.key==='ArrowLeft'?-1:1);
   });
