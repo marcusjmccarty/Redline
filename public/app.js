@@ -43,7 +43,8 @@
   let animation = 0, running = false, lines = [], searchTimer, controller, searchVersion = 0, results = [], selected = -1;
   let resultsQuery = '', resultsReady = false, addingQuery = '';
   let progress=null,activeLeg=null,geometry=[],playback=null,lastTick=null;
-  let traceZoom=null,idleZoom=null,suppressStopClickUntil=0,insetRight=0,spaceSince=null;
+  let traceZoom=null,idleZoom=null,suppressStopClickUntil=0,focused=null,cityFrame=null;
+  const held=new Map();
   const labelSlots=new Map(),labelWidths=new Map(),zoomControls=document.querySelector('.zoom-controls');
   const WORLD_W=1440,WORLD_H=720,MAX_ZOOM=(4/3)**9;
   let view={x:0,y:0,w:WORLD_W,h:WORLD_H};
@@ -61,13 +62,16 @@
     lines.forEach((path,i)=>{path._amount=null;path.setAttribute('d',geometry[i].path);});
   }
   function setPlayState(value) {
-    running=value;$('play-label').textContent=value?'Stop':'Trace route';
-    $('play-icon').firstElementChild.setAttribute('d',value?'M4 4h8v8H4z':'m5 3 8 5-8 5z');
+    running=value;$('play-label').textContent=value?'Pause':'Set sail';$('route-dock').classList.toggle('sailing',value);
+    $('play-icon').firstElementChild.setAttribute('d',value?'M4.5 3.5h2.5v9H4.5zM9 3.5h2.5v9H9z':'m5 3 8 5-8 5z');
   }
   function stopAnimation() {
     cancelAnimationFrame(animation);animation=0;lastTick=null;playback=null;idleZoom=null;setPlayState(false);
   }
   const stopShown=i=>!(activeLeg?.destination===i&&Math.abs(progress-i)>1e-7)&&(progress===null||i<=progress+1e-7||activeLeg?.origin===i);
+  // A city visited twice (same name, close by: sources differ slightly) is named once, by the active visit or else the first one shown; its dot goes there too.
+  const samePlace=(a,b)=>a===b||Math.abs(a.latitude-b.latitude)<.15&&Math.abs(a.longitude-b.longitude)<.15&&normalize(a.name)===normalize(b.name);
+  function labelOwner(index){const visit=(p,i)=>stopShown(i)&&samePlace(p,stops[index]),active=stops.findIndex((p,i)=>p.id===activeStopId&&visit(p,i)),first=stops.findIndex(visit);return active>=0?active:first>=0?first:index;}
   function paintProgress(){
     lines.forEach((path,i)=>{
       const amount=progress===null?1:Math.max(0,Math.min(1,progress-i));
@@ -85,7 +89,7 @@
     });
   }
   function drawRoute() {
-    stopAnimation();traceZoom=null;progress=null;activeLeg=null;activeStopId=null;$('route-lines').replaceChildren();$('route-stops').replaceChildren();$('stop-list').replaceChildren();lines=[];
+    stopAnimation();traceZoom=null;progress=null;activeLeg=null;activeStopId=null;focused=null;$('route-lines').replaceChildren();$('route-stops').replaceChildren();$('stop-list').replaceChildren();lines=[];
     stops.forEach((place,index)=>{
       if(index) {const path=svg('path',{class:'route-path'});$('route-lines').append(path);lines.push(path);}
       const [x,y]=project(place),group=svg('g',{'data-index':index,transform:`translate(${x} ${y})`}),dot=svg('circle',{cx:0,cy:0,r:4.5,class:'stop-dot'});
@@ -94,15 +98,19 @@
       group.append(dot,label);$('route-stops').append(group);
       group.setAttribute('role','button');group.setAttribute('aria-label',`Go to ${place.name}, stop ${index+1}`);
       group.addEventListener('pointerdown',event=>event.stopPropagation());
-      group.addEventListener('click',()=>jumpToCity(index));
-      group.addEventListener('keydown',event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();event.stopPropagation();jumpToCity(index);}});
+      // A mouse click focuses the city without leaving a keyboard focus ring on its dot, and keys then act on the map.
+      group.addEventListener('mousedown',event=>event.preventDefault());
+      // A pointer goes to the visit that owns the label; assistive technology clicks reach the exact stop it names.
+      group.addEventListener('click',event=>{if(event.detail||document.activeElement?.matches?.('input,textarea'))map.focus({preventScroll:true});jumpToCity(event.detail?labelOwner(index):index);});
+      // Return or Space on the city already in view sets sail from it (holding speeds up, as on the map).
+      group.addEventListener('keydown',event=>{if(!['Enter',' '].includes(event.key))return;event.preventDefault();event.stopPropagation();if(event.repeat)return;if(focused===stops[index].id){held.set(event.key,performance.now());startTrace();}else jumpToCity(index);});
       const li=document.createElement('li'),number=document.createElement('span'),name=document.createElement('span'),remove=document.createElement('button'),grip=document.createElement('button');
       li.dataset.index=String(index);grip.type='button';grip.className='stop-grip';grip.title='Go to city · Drag to reorder';grip.setAttribute('aria-label',`Go to ${place.name}, stop ${index+1}; drag to reorder`);grip.setAttribute('aria-keyshortcuts','Alt+ArrowLeft Alt+ArrowRight');
       number.className='stop-number';number.textContent=String(index+1).padStart(2,'0');name.textContent=place.name;
       remove.className='remove-stop';remove.textContent='×';remove.setAttribute('aria-label',`Remove ${place.name}, stop ${index+1}`);
       remove.addEventListener('click',()=>{stops.splice(index,1);drawRoute();persist();$('status').textContent='';});
       grip.append(number,name);li.append(grip,remove);$('stop-list').append(li);
-      grip.addEventListener('click',event=>{if(event.detail&&performance.now()<suppressStopClickUntil)return;jumpToCity(index);});
+      grip.addEventListener('click',event=>{if(event.detail){if(performance.now()<suppressStopClickUntil)return;map.focus({preventScroll:true});}jumpToCity(index);});
       grip.addEventListener('keydown',event=>{if(!event.altKey||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key))return;event.preventDefault();const to=index+(['ArrowLeft','ArrowUp'].includes(event.key)?-1:1);if(to>=0&&to<stops.length){moveStop(index,to);$('stop-list').children[to].querySelector('.stop-grip').focus();}});
       grip.addEventListener('pointerdown',event=>startStopDrag(event,index,grip));
     });
@@ -110,7 +118,6 @@
     for(const text of $('route-stops').querySelectorAll('.stop-label'))text._width=labelWidth(text);
     $('empty-hint').hidden=stops.length>0;$('stop-list').hidden=stops.length===0;
     $('play').disabled=stops.length<2;$('clear').disabled=stops.length===0;
-    if(!stops.some(p=>p.id===activeStopId))activeStopId=null;
     updateActiveStop();
     $('toggle-stops').disabled=stops.length===0;
     $('status').textContent='';
@@ -153,9 +160,7 @@
     const bounds=map.getBoundingClientRect(),{width,height}=bounds,padding=Math.min(54,width*.09,height*.08);
     const dock=$('route-dock').getBoundingClientRect();
     const bottom=!document.body.classList.contains('map-only')&&dock.top>bounds.top+height*.25?Math.min(height-padding,dock.top-bounds.top-28):height-padding;
-    // An open photo drawer covers the right side; keep the camera's subject beside it.
-    const right=Math.max(Math.min(width-padding,padding+240),width-padding-insetRight);
-    return {width,height,left:padding,right,top:padding,bottom:Math.max(padding+60,bottom)};
+    return {width,height,left:padding,right:width-padding,top:padding,bottom:Math.max(padding+60,bottom)};
   }
   function cameraFor(leg,direction){
     return RedlineTrace.camera(geometry[leg],cameraSpace(),baseView,project(stops[direction>0?leg+1:leg]),traceZoom);
@@ -185,7 +190,7 @@
       beginLeg(run.target,run.direction,run.returnToOverview);return true;
     }
     function tick(now){
-      const speed=spaceSince!==null&&now-spaceSince>=180?2:1;
+      const speed=[...held.values()].some(since=>now-since>=180)?2:1;
       const elapsed=lastTick===null?0:Math.max(0,Math.min(80,now-lastTick));lastTick=now;
       const run=playback;
       if(run.settling){
@@ -222,6 +227,7 @@
   }
   function startTrace(){
     if(running||!lines.length)return;
+    resumeFromFocus();
     if(progress===null||progress>=lines.length){progress=0;traceZoom=null;}
     runTo(lines.length,{returnToOverview:true});
   }
@@ -282,7 +288,7 @@
   }
   input.addEventListener('input',()=>scheduleSearch());
   input.addEventListener('keydown',event=>{
-    if(event.key==='Escape'){closeSearch();return;}
+    if(event.key==='Escape'){if(!$('suggestion-panel').hidden)event.preventDefault();closeSearch();return;}
     if((event.key==='ArrowDown'||event.key==='ArrowUp')&&results.length&&!$('suggestion-panel').hidden){
       event.preventDefault();selected=(selected+(event.key==='ArrowDown'?1:-1)+results.length)%results.length;
       [...$('suggestions').children].forEach((el,i)=>el.setAttribute('aria-selected',String(i===selected)));
@@ -359,7 +365,6 @@
     const local=(el,pad)=>{const r=el.getBoundingClientRect();return {x:r.left-bounds.left-pad,y:r.top-bounds.top-pad,w:r.width+pad*2,h:r.height+pad*2};};
     const controls=!document.body.classList.contains('map-only'),dock=controls?local($('route-dock'),8):null,obstacles=[];
     if(controls){obstacles.push({x:dock.x+4,y:dock.y+4,w:dock.w-8,h:dock.h-8});if(zoomControls)obstacles.push(local(zoomControls,4));}
-    if(insetRight)obstacles.push({x:bounds.width-insetRight,y:0,w:insetRight,h:bounds.height});
     paintAntarctica(matrix,bounds);
     zoomLevel=baseView.w/view.w;
     $('zoom-in').disabled=zoomLevel>=MAX_ZOOM-.001;$('zoom-out').disabled=zoomLevel<=1.001;
@@ -382,6 +387,7 @@
       // Unreached stops stay out of the layout while a trace reveals them.
       if(!stopShown(index))return;
       const sx=x*matrix.a+matrix.e-bounds.left,sy=y*matrix.d+matrix.f-bounds.top,id=stops[index].id;
+      if(labelOwner(index)!==index){text.classList.add('label-hidden');occupied.push({x:sx-7,y:sy-7,w:14,h:14});return;}
       items.push({id,x:sx,y:sy,width:text._width??text.textContent.length*8.3,height:14,priority:id===activeStopId?-1:index});texts.push(text);
       occupied.push({x:sx-7,y:sy-7,w:14,h:14});
     });
@@ -442,9 +448,9 @@
     const step=activeStopId?stops.findIndex(p=>p.id===activeStopId)+1:0;
     map.dataset.tripStep=String(Math.max(0,step));
     $('previous-city').disabled=stops.length===0;$('next-city').disabled=stops.length===0;
-    const previousLabel=step===0&&stops.length?'Last city':step===1?'Trip overview':'Previous city';
+    const previousLabel=step===0&&stops.length?'Last port':step===1?'Whole voyage':'Previous port';
     $('previous-city').setAttribute('aria-label',previousLabel);$('previous-city').title=previousLabel;
-    const nextLabel=step===stops.length&&stops.length?'Trip overview':'Next city';
+    const nextLabel=step===stops.length&&stops.length?'Whole voyage':'Next port';
     $('next-city').setAttribute('aria-label',nextLabel);$('next-city').title=nextLabel;
     [...$('stop-list').children].forEach((node,i)=>{const grip=node.querySelector('.stop-grip');if(step===i+1)grip.setAttribute('aria-current','step');else grip.removeAttribute('aria-current');});
   }
@@ -470,7 +476,7 @@
       return {x:(fx[0]+u*(fx[1]-fx[0]))*(WORLD_W-w),y:(fy[0]+u*(fy[1]-fy[0]))*(WORLD_H-h),w,h};
     }};
   }
-  function showWorld(){progress=null;activeLeg=null;activeStopId=null;traceZoom=null;updateActiveStop();}
+  function showWorld(){progress=null;activeLeg=null;activeStopId=null;traceZoom=null;focused=null;updateActiveStop();}
   function animateView(target,{overview=false,hold=0}={}){
     stopAnimation();cancelAnimationFrame(viewFrame);viewFrame=0;
     const finish=()=>{stopAnimation();view={...target};if(overview)showWorld();paintView();};
@@ -489,10 +495,21 @@
   function returnToWorld(){animateView({...baseView},{overview:true,hold:320});if(playback)setPlayState(true);}
   // Enter, Home, and the globe: the complete route, with the camera easing back to the world.
   function showOverview(){stopAnimation();showWorld();paintProgress();animateView({...baseView},{overview:true});}
+  // A clicked city is seen within the whole drawn trip; the arrows or play then continue from it.
   function jumpToCity(index){
     if(!stops[index])return;
-    stopAnimation();traceZoom=null;progress=index;activeLeg=null;reachedCity();paintProgress();
-    animateView(RedlineTrace.pointFrame(project(stops[index]),cameraSpace(),baseView,Math.max(3,baseView.w/view.w)));
+    stopAnimation();traceZoom=null;progress=null;activeLeg=null;activeStopId=stops[index].id;focused=stops[index].id;updateActiveStop();paintProgress();
+    animateView(cityFrame=RedlineTrace.pointFrame(project(stops[index]),cameraSpace(),baseView,Math.max(3,baseView.w/view.w)));
+  }
+  // A focused city the camera is still flying to, or resting on, moves into the free space the settled dock leaves.
+  function reframeCity(){
+    if(focused===null||running||idleZoom||drag||!animation&&frameDistance(view,cityFrame)>.5)return;
+    const index=stops.findIndex(p=>p.id===focused);if(index>=0)animateView(cityFrame=RedlineTrace.pointFrame(project(stops[index]),cameraSpace(),baseView,baseView.w/cityFrame.w));
+  }
+  function resumeFromFocus(){
+    if(focused===null||running)return false;
+    const index=stops.findIndex(p=>p.id===focused);focused=null;if(index<0)return false;
+    progress=index;activeLeg=null;reachedCity();paintProgress();return true;
   }
   function goToStep(step){
     step=Math.max(0,Math.min(stops.length,step));
@@ -510,6 +527,7 @@
   }
   function stepTrip(direction){
     if(!stops.length)return;
+    resumeFromFocus();
     if(playback?.phase==='overview'){goToStep(0);if(direction<0)stepTrip(-1);return;}
     if(running){
       // The second press finishes the current leg immediately, even before its first frame.
@@ -522,55 +540,60 @@
   }
   $('previous-city').addEventListener('click',()=>stepTrip(-1));
   $('next-city').addEventListener('click',()=>stepTrip(1));
+  // A click on a map control leaves the keys with the map, so Return sets sail rather than pressing it again.
+  for(const id of ['previous-city','next-city','zoom-in','zoom-out','reset-view','toggle-stops'])$(id).addEventListener('click',event=>{if(event.detail)map.focus({preventScroll:true});});
   function collapseStops(collapsed){
     $('route-dock').classList.toggle('stops-collapsed',collapsed);$('route-stops-panel').hidden=collapsed;
-    $('toggle-stops').setAttribute('aria-expanded',String(!collapsed));$('toggle-stops').setAttribute('aria-label',collapsed?'Show cities':'Collapse cities');$('toggle-stops').title=collapsed?'Show cities':'Collapse cities';
+    $('toggle-stops').setAttribute('aria-expanded',String(!collapsed));$('toggle-stops').setAttribute('aria-label',collapsed?'Show ports':'Collapse ports');$('toggle-stops').title=collapsed?'Show ports':'Collapse ports';
     try{localStorage.setItem('redline-cities-collapsed',String(collapsed));}catch{}scheduleView();
     // An animated dock reframes the camera once its height settles (or soon after, without transitions).
     clearTimeout(dockTimer);
-    if($('route-dock').classList.contains('dock-motion')&&!matchMedia('(prefers-reduced-motion: reduce)').matches)dockTimer=setTimeout(settleDock,450);else reframeTrace();
+    if($('route-dock').classList.contains('dock-motion')&&!matchMedia('(prefers-reduced-motion: reduce)').matches)dockTimer=setTimeout(settleDock,450);else settleDock();
   }
-  // While the dock resizes, labels keep clear of it frame by frame.
-  const stopsPanel=$('route-stops-panel');let dockTimer=0,dockMovingUntil=0;
-  const dockSize=event=>event.target===stopsPanel&&event.propertyName==='grid-template-rows';
+  // While the ports or the logbook fold, labels keep clear of the dock frame by frame; the last fold to end settles it.
+  const stopsPanel=$('route-stops-panel'),dockPanels=[stopsPanel,$('trip-panel')],dockMoving=new Set();let dockTimer=0,dockMovingUntil=0;
+  const dockSize=event=>dockPanels.includes(event.target)&&event.propertyName==='grid-template-rows';
   const followDock=()=>{if(performance.now()>dockMovingUntil)return;if(!animation)scheduleView();requestAnimationFrame(followDock);};
-  function settleDock(){clearTimeout(dockTimer);dockTimer=0;dockMovingUntil=0;scheduleView();reframeTrace();}
-  stopsPanel.addEventListener('transitionrun',event=>{if(!dockSize(event))return;const idle=performance.now()>dockMovingUntil;dockMovingUntil=performance.now()+600;if(idle)followDock();});
-  stopsPanel.addEventListener('transitionend',event=>{if(dockSize(event)&&dockTimer)settleDock();});
+  function settleDock(){clearTimeout(dockTimer);dockTimer=0;dockMovingUntil=0;dockMoving.clear();scheduleView();reframeTrace();reframeCity();}
+  for(const panel of dockPanels){
+    panel.addEventListener('transitionrun',event=>{if(!dockSize(event))return;const idle=performance.now()>dockMovingUntil;dockMoving.add(panel);dockMovingUntil=performance.now()+600;clearTimeout(dockTimer);dockTimer=setTimeout(settleDock,600);if(idle)followDock();});
+    panel.addEventListener('transitionend',event=>{if(dockSize(event)&&dockMoving.delete(panel)&&!dockMoving.size)settleDock();});
+    // A cancelled fold (reversed, or hidden mid-way) is settled by whichever ends next, or the timer.
+    panel.addEventListener('transitioncancel',event=>{if(dockSize(event))dockMoving.delete(panel);});
+  }
   // Only the user's toggle animates; the saved state is restored at once.
   $('toggle-stops').addEventListener('click',()=>{$('route-dock').classList.add('dock-motion');collapseStops(!stopsPanel.hidden);});
   try{collapseStops(localStorage.getItem('redline-cities-collapsed')==='true');}catch{}
   function setMapOnly(hidden){
     document.body.classList.toggle('map-only',hidden);
-    document.querySelectorAll('.route-dock,.zoom-controls,.library-panel').forEach(el=>{el.inert=hidden;});
-    if(hidden){closeSearch();map.focus({preventScroll:true});}else $('info-button').focus({preventScroll:true});scheduleView();reframeTrace();
+    document.querySelectorAll('.route-dock,.zoom-controls').forEach(el=>{el.inert=hidden;});
+    if(hidden){closeSearch();map.focus({preventScroll:true});}scheduleView();reframeTrace();
   }
   $('info-button').addEventListener('click',()=>$('info-dialog').showModal());
   $('close-info').addEventListener('click',()=>$('info-dialog').close());
   $('info-dialog').addEventListener('click',event=>{if(event.target===$('info-dialog'))$('info-dialog').close();});
   map.addEventListener('dblclick',()=>{if(document.body.classList.contains('map-only'))setMapOnly(false);});
   document.addEventListener('keydown',event=>{
-    if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"]')||document.querySelector('dialog[open]'))return;
+    if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"],#trip-panel')||document.querySelector('dialog[open]'))return;
     if(event.key==='Escape'&&document.body.classList.contains('map-only')){event.preventDefault();setMapOnly(false);return;}
     if(event.key.toLowerCase()==='h'){event.preventDefault();setMapOnly(!document.body.classList.contains('map-only'));return;}
-    // Space starts or resumes the trace, and holding it doubles the speed.
-    if(event.key===' '){
-      if(event.target.closest?.('button')&&event.target.id!=='play')return;
-      event.preventDefault();spaceSince??=performance.now();
-      if(!event.repeat)startTrace();return;
+    // Space or Return starts or resumes the trace, and holding either doubles the speed.
+    if(event.key===' '||event.key==='Enter'){
+      if(event.target.closest?.('button,a,[role=button]')&&event.target.id!=='play')return;
+      event.preventDefault();if(!held.has(event.key))held.set(event.key,performance.now());
+      if(!event.repeat){if(event.target.id==='play')trace();else startTrace();}return;
     }
-    if(event.key==='Enter'){
-      if(event.target.closest?.('button,a,[role=button]'))return;
-      event.preventDefault();if(!event.repeat)showOverview();return;
-    }
+    // Backspace (Delete on a Mac keyboard) glides back to the whole-trip overview.
+    if(event.key==='Backspace'||event.key==='Delete'){event.preventDefault();if(!event.repeat)showOverview();return;}
     if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home'].includes(event.key)){
       event.preventDefault();if(event.repeat)return;
       if(event.key==='Home')showOverview();else stepTrip(['ArrowRight','ArrowDown'].includes(event.key)?1:-1);
     }
   });
-  document.addEventListener('keyup',event=>{if(event.key===' ')spaceSince=null;});
-  window.addEventListener('blur',()=>{spaceSince=null;});
-  document.addEventListener('visibilitychange',()=>{if(document.hidden){spaceSince=null;lastTick=null;}});
+  // The play button's own Space activation would toggle a second time.
+  document.addEventListener('keyup',event=>{held.delete(event.key);if(event.key===' '&&event.target.id==='play')event.preventDefault();});
+  window.addEventListener('blur',()=>held.clear());
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){held.clear();lastTick=null;}});
   const fragment=document.createDocumentFragment();
   for(const d of window.WORLD_PATHS)fragment.append(svg('path',{d}));$('land').append(fragment);
   for(const polygon of window.ANTARCTICA_POLYGONS)$('antarctica').append(svg('path'));
@@ -579,13 +602,14 @@
   window.RedlineApp={
     showControls:()=>setMapOnly(false),
     closeSearch,
-    focusStop:id=>{const index=stops.findIndex(p=>p.id===id);if(index>=0)jumpToCity(index);return index>=0;},
-    setInsets:({right=0}={})=>{if(right===insetRight)return;insetRight=right;scheduleView();reframeTrace();},
+    focusStop:id=>{const index=stops.findIndex(p=>p.id===id);if(index>=0){jumpToCity(index);map.focus({preventScroll:true});}return index>=0;},
     getStops:()=>stops.map(p=>({...p})),
     setStops:(items,{preserveView=false}={})=>{stops=items.map(p=>({...p,id:p.id||crypto.randomUUID()}));if(!preserveView)drawRoute();persist();},
     addCity:place=>{let existing=stops.find(p=>Math.abs(p.latitude-place.latitude)<.02&&Math.abs(p.longitude-place.longitude)<.02);if(existing)return {...existing};if(stops.length>=100)throw Error('A trip can contain up to 100 stops.');const added={...place,id:crypto.randomUUID()};stops.push(added);drawRoute();persist();return {...added};},
     cityDistance:(a,b)=>RedlineGeo.geoDistance([a.longitude,a.latitude],[b.longitude,b.latitude])*6371,
   };
   new ResizeObserver(resizeMap).observe(map);
+  // Dock size changes without a fold animation (reduced motion, the logbook's list filling in) still move the labels.
+  new ResizeObserver(()=>{if(!animation)scheduleView();}).observe($('route-dock'));
   drawRoute();resizeMap();
 })();

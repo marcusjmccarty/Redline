@@ -14,9 +14,9 @@ const wait=async condition=>{
 };
 const tick=()=>new Promise(resolve=>setTimeout(resolve,5));
 
-async function setup(t,{seed=true}={}){
+async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,paris]}={}){
   const dom=new JSDOM(source('map.html'),{url:'https://redline.test/Redline/',runScripts:'outside-only',pretendToBeVisual:true});
-  const w=dom.window,$=id=>w.document.getElementById(id),objects=new Set();let stops=[paris,madrid];
+  const w=dom.window,$=id=>w.document.getElementById(id),objects=new Set();let stops=route;
   Object.assign(w,{Blob,File,FormData,TextEncoder,TextDecoder,indexedDB:new IDBFactory()});
   w.URL.createObjectURL=blob=>{const url=URL.createObjectURL(blob);objects.add(url);return url;};
   w.URL.revokeObjectURL=url=>{objects.delete(url);URL.revokeObjectURL(url);};
@@ -33,19 +33,19 @@ async function setup(t,{seed=true}={}){
   w.exifr={gps:async file=>file.name.startsWith('gps')?paris:null};
   w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
   w.HTMLDialogElement.prototype.close=function(){this.open=false;};
-  w.HTMLImageElement.prototype.decode=async()=>{};
+  w.HTMLImageElement.prototype.decode=async()=>{};w.Element.prototype.scrollIntoView=function(){};
   Object.defineProperties(w.HTMLImageElement.prototype,{naturalWidth:{get:()=>1600},naturalHeight:{get:()=>1000}});
   w.RedlinePostcardExport={render:()=>({toBlob:callback=>callback(new Blob([jpeg],{type:'image/jpeg'}))})};
   for(const name of ['jpeg','archive','storage'])w.eval(source(`public/${name}.js`));
   const storage=w.RedlineStorage,api=storage.api;
   const {trip}=await api('/trips',{method:'POST',body:JSON.stringify({title:'A summer away',stops})});
-  if(seed)for(const stop of [madrid,paris,paris]){
+  if(seed)for(const stop of seedStops){
     const form=new FormData();form.append('photo',new Blob([jpeg],{type:'image/jpeg'}));form.append('stopId',stop.id);
     await api(`/trips/${trip.id}/photos`,{method:'POST',body:form});
   }
   w.localStorage.setItem('redline-saved-trip',JSON.stringify({id:trip.id,title:trip.title,revision:trip.revision,hash:JSON.stringify(stops)}));
   w.eval(source('public/postcards.js'));w.eval(source('public/trips.js'));
-  await wait(()=>$('trip-title').textContent===trip.title&&(!seed||$('photo-count').textContent==='3'));
+  await wait(()=>$('trip-title').textContent===trip.title&&(!seed||$('photo-count').textContent===String(seedStops.length)));
   $('photos-button').click();await wait(()=>$('photo-panel').open);await tick();
   const change=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new w.Event('change',{bubbles:true}));};
   const choose=names=>{
@@ -59,42 +59,131 @@ async function setup(t,{seed=true}={}){
   // "All photos" lists every photo; the album shows only the open spread.
   const tiles=()=>{if($('sheet-view').getAttribute('aria-pressed')!=='true')$('sheet-view').click();return [...$('photo-gallery').querySelectorAll('.photo-image')];};
   const prints=()=>[...$('album-pages').querySelectorAll('.photo-image')];
-  const pages=()=>[...$('album-pages').children].map(page=>page.className.replace(/album-page |page-/g,''));
+  const pages=()=>[...$('album-pages').children].map(page=>`${page.classList.contains('left')?'left':page.classList.contains('right')?'right':'single'}:${page.dataset.type}`).join(' ');
   const tab=id=>[...$('gallery-filter').children].find(el=>el.dataset.filter===id);
   return {w,$,api,storage,trip,change,choose,press,click,objects,tiles,prints,pages,tab,mapCalls};
 }
 
-test('the album opens on its title spread, turns like a book, and city tabs jump to their pages',async t=>{
+test('the album opens from its cover, turns like a book, and its contents and tabs jump to cities',async t=>{
   const {w,$,press,prints,pages,tab,mapCalls}=await setup(t);
-  assert.deepEqual(pages(),['left inside','right title']);
+  await wait(()=>pages()==='left:inside right:title');
   assert.equal($('photo-panel').querySelector('.album-name').textContent,'A summer away');
   assert.equal($('photo-panel').querySelector('.title-route').textContent,'Paris → Madrid');
-  assert.equal($('album-position').textContent,'Title page');assert.equal($('album-previous').disabled,true);
+  assert.equal($('album-position').textContent,'Title page');
   assert.deepEqual([...$('gallery-filter').children].map(el=>el.textContent),['01Paris2','02Madrid1']);
   $('album-next').click();
-  assert.deepEqual(pages(),['left city','right city']);
-  assert.deepEqual([...$('album-pages').querySelectorAll('.city-name')].map(el=>el.textContent),['Paris','Madrid']);
-  assert.deepEqual([...$('album-pages').querySelectorAll('.page-stop')].map(el=>el.textContent),['Stop 01','Stop 02']);
-  assert.equal(prints().length,3);assert.equal($('album-next').disabled,true);
-  assert.match($('album-position').textContent,/pages 1–2 of 2/);
-  press('ArrowLeft');assert.deepEqual(pages(),['left inside','right title'],'The keyboard turns pages');
-  tab(madrid.id).click();assert.equal(tab(madrid.id).getAttribute('aria-current'),'true');assert.equal(prints().length,3);
+  assert.equal(pages(),'left:contents right:city');
+  assert.deepEqual([...$('album-pages').querySelectorAll('.contents-list button')].map(el=>el.textContent),['01Paris3','02Madrid4']);
+  assert.deepEqual([...$('album-pages').querySelectorAll('.city-name')].map(el=>el.textContent),['Paris']);
+  assert.equal($('album-pages').querySelector('.page-stop').textContent,'Port 01');
+  assert.equal(prints().length,2);assert.match($('album-position').textContent,/^Paris · pages 2–3$/);
+  $('album-pages').querySelectorAll('.contents-list button')[1].click();
+  assert.equal(pages(),'left:city right:inside');assert.equal(prints().length,1);assert.equal(tab(madrid.id).getAttribute('aria-current'),'true');
+  $('album-next').click();assert.equal(pages(),'left:back right:void','The album closes on its back cover');
+  assert.equal($('album-position').textContent,'Back cover');assert.equal($('album-next').disabled,true);
+  assert.ok($('album-book').classList.contains('closed-back'));
+  press('Home');assert.equal(pages(),'left:void right:cover');assert.ok($('album-book').classList.contains('closed-front'));
+  assert.equal($('album-pages').querySelector('.cover-title').textContent,'A summer away');
+  press('End');assert.equal(pages(),'left:back right:void');
+  press('ArrowLeft');press('ArrowLeft');assert.equal(pages(),'left:contents right:city','The keyboard turns pages');
   const opener=prints()[0];opener.focus();opener.click();
   assert.equal($('photo-viewer').open,true);assert.equal($('photo-position').textContent,'1 / 2','The viewer browses the city it was opened from');
   press('ArrowRight');await wait(()=>$('photo-position').textContent==='2 / 2');
-  assert.equal($('photo-caption').textContent,'Paris');assert.equal($('next-photo').disabled,true);
+  assert.equal($('photo-caption').textContent,'Paris');assert.equal($('viewer-next').hidden,true);
   press('ArrowRight');await tick();assert.equal($('photo-position').textContent,'2 / 2');
-  press('ArrowRight');assert.equal(prints().length,3,'Arrow keys in the viewer never turn the album');
+  assert.equal(prints().length,2,'Arrow keys in the viewer never turn the album');
   await w.RedlinePostcards.close();assert.equal(w.document.activeElement,opener);
-  press('Escape');assert.equal($('photo-panel').open,false);assert.equal(w.document.activeElement,$('photos-button'));
+  press('Escape');assert.equal($('photo-panel').open,false);assert.equal(w.document.activeElement,$('map'),'Opened with nothing focused, the album hands the keys back to the map');
   $('photos-button').click();await wait(()=>$('photo-panel').open);
-  assert.deepEqual(pages(),['left city','right city'],'The album reopens where it was left');
+  assert.equal(pages(),'left:contents right:city','The album reopens where it was left');
   $('album-pages').querySelector('.gallery-map-button').click();
   assert.equal(mapCalls.focused,paris.id);assert.equal($('photo-panel').open,false,'Finding a city on the map closes the album');
 });
 
+test('a spread names both its cities, and turns keep tab focus and finish when pressed twice',async t=>{
+  const rome={id:'city-rome-0001',name:'Rome',country:'Italy',latitude:41.9,longitude:12.5};
+  const {w,$,press,pages,tab}=await setup(t,{route:[paris,madrid,rome],seedStops:[paris,madrid,rome]});
+  await wait(()=>pages()==='left:inside right:title');
+  const scrolled=[];w.Element.prototype.scrollIntoView=function(options){scrolled.push([this,options]);};
+  press('ArrowRight');assert.equal($('album-position').textContent,'Paris · pages 2–3');
+  press('ArrowRight');assert.equal(pages(),'left:city right:city');
+  assert.equal($('album-position').textContent,'Madrid & Rome · pages 4–5','Both cities are named, left page first');
+  assert.equal(tab(madrid.id).getAttribute('aria-current'),'true','The tab follows the first city on the pages');
+  assert.equal($('album-scrub').getAttribute('aria-valuetext'),'Madrid & Rome · pages 4–5','The slider speaks the page label, not an index');
+  assert.ok(scrolled.some(([el,options])=>el===tab(madrid.id)&&options.block==='nearest'&&options.inline==='nearest'),'The current tab scrolls into view');
+  tab(rome.id).click();assert.equal(tab(rome.id).getAttribute('aria-current'),'true','A chosen city on the same pages keeps its tab');
+  assert.equal($('album-position').textContent,'Madrid & Rome · pages 4–5');
+  // Turns animate from here on, and finish only when the test says so.
+  const running=new Set();
+  class Turn{constructor(){this.ended=new Promise((resolve,reject)=>{this.finish=()=>{running.delete(this);resolve(this);};this.cancel=()=>{if(running.delete(this))reject(Error('Cancelled'));};});this.ended.catch(()=>{});running.add(this);}get finished(){return this.ended;}}
+  w.Animation=Turn;w.Element.prototype.animate=()=>new Turn();
+  const finish=async()=>{[...running].forEach(turn=>turn.finish());await tick();};
+  tab(paris.id).focus();tab(paris.id).click();const turning=[...running];assert.equal(turning.length,4);
+  tab(paris.id).click();assert.deepEqual([...running],turning,'A second press toward the same page lets the turn finish');
+  await finish();assert.equal(pages(),'left:contents right:city');
+  assert.equal(w.document.activeElement,tab(paris.id),'Keyboard focus stays on the tab after an animated turn');
+  press('End');const closing=[...running];press('End');assert.deepEqual([...running],closing);
+  await finish();assert.equal(pages(),'left:back right:void');
+  $('sheet-view').click();assert.equal($('album-foot').inert,true,'Hidden page controls leave the tab order');
+  $('album-view').click();assert.equal($('album-foot').inert,false);
+});
+
+test('the divider tabs are coloured book cloth with readable labels',()=>{
+  const css=source('public/gallery.css'),rule=css.match(/\.album-tab \{[^}]*\}/)[0];
+  assert.match(rule,/var\(--tab\b/,'Each tab takes its colour from its --tab index');
+  const colours=rule.match(/linear-gradient\(([^;]*)\)/)[1].match(/#[0-9a-f]{6}/gi);assert.equal(colours.length,6);
+  const luminance=hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(c=>c<=.03928?c/12.92:((c+.055)/1.055)**2.4).reduce((sum,c,i)=>sum+c*[.2126,.7152,.0722][i],0);
+  for(const colour of colours)assert.ok((luminance('#fbf4e6')+.05)/(luminance(colour)+.05)>=4.5,`${colour} keeps the tab label readable`);
+  assert.doesNotMatch(css,/--tab-color|\.at-(start|end)|^\.eyebrow /m,'No dead colour fallback, duplicate classes, or second .eyebrow');
+});
+
+test('the album keeps its place when it changes between one page and two',async t=>{
+  const {w,$,api,trip,press,pages}=await setup(t,{route:[paris],seedStops:[paris,paris,paris,paris]});
+  await wait(()=>pages()==='left:inside right:title');
+  const setWidth=value=>Object.defineProperty(w,'innerWidth',{configurable:true,writable:true,value});
+  const width=async(value,shown)=>{setWidth(value);w.dispatchEvent(new w.Event('resize'));await wait(()=>pages()===shown);};
+  press('End');assert.equal(pages(),'left:back right:void');
+  await width(700,'single:back');assert.ok($('album-book').classList.contains('closed-back'));
+  assert.equal($('album-pages').querySelector('.page-corner'),null,'The closed back cover has nothing to turn');
+  press('ArrowLeft');assert.equal(pages(),'single:inside');assert.equal($('album-position').textContent,'Endpapers');
+  await width(1024,'left:blank right:inside');assert.equal($('album-book').classList.contains('closed-back'),false,'The endpapers stay open');
+  await width(700,'single:inside');
+  press('End');press('Escape');assert.equal($('photo-panel').open,false);
+  // Another voyage is drawn side by side in between, so only the remembered place can reopen this one closed.
+  setWidth(1024);const other=(await api('/trips',{method:'POST',body:JSON.stringify({title:'Another time',stops:[madrid]})})).trip;
+  for(const [id,title] of [[other.id,'Another time'],[trip.id,'A summer away']]){
+    $('trips-button').click();await wait(()=>$('trip-list').querySelector(`[data-trip-id="${id}"] .trip-open`));
+    $('trip-list').querySelector(`[data-trip-id="${id}"] .trip-open`).click();await wait(()=>$('trip-title').textContent===title&&!$('trips-button').disabled);
+  }
+  $('photos-button').click();await wait(()=>$('photo-panel').open);
+  assert.equal(pages(),'left:back right:void','The album reopens closed on its back cover');
+  press('Escape');
+});
+
+test('a long voyage continues its contents onto further pages and closes on endpapers',async t=>{
+  const ports=Array.from({length:10},(_,i)=>({id:`city-port-${i}`,name:`Port ${String.fromCharCode(65+i)}`,country:'Atlantis',latitude:-40+i*8,longitude:-120+i*24}));
+  const {w,$,pages,press}=await setup(t,{route:ports,seedStops:ports});
+  await wait(()=>pages()==='left:inside right:title');
+  $('album-next').click();
+  assert.equal(pages(),'left:contents right:contents');
+  assert.deepEqual([...$('album-pages').querySelectorAll('.contents-title')].map(el=>el.textContent),['Ports of call','Ports of call, continued']);
+  const entries=[...$('album-pages').querySelectorAll('.contents-list button')];
+  assert.equal(entries.length,10,'Every port is listed');
+  assert.equal(entries[9].querySelector('.contents-page').textContent,'13');
+  entries[9].click();
+  assert.deepEqual([...$('album-pages').querySelectorAll('.city-name')].map(el=>el.textContent),['Port I','Port J']);
+  $('album-next').click();
+  assert.equal(pages(),'left:blank right:inside');assert.equal($('album-position').textContent,'Endpapers');
+  // A short page holds fewer ports, and the album keeps its place although the pages are renumbered.
+  $('album-previous').click();assert.equal($('album-position').textContent,'Port I & Port J · pages 12–13');
+  Object.defineProperty($('album-book'),'clientHeight',{configurable:true,get:()=>160});$('album-book').style.padding='10px';
+  w.dispatchEvent(new w.Event('resize'));await wait(()=>$('album-position').textContent==='Port I & Port J · pages 14–15');
+  press('Home');press('ArrowRight');press('ArrowRight');
+  assert.deepEqual([...$('album-pages').querySelectorAll('.contents-list')].map(list=>list.children.length),[3,3]);
+});
+
 test('navigation saves postcard edits before moving; failed saves keep the photo and draft open',async t=>{
-  const {w,$,storage,api,trip,press,click,tiles}=await setup(t);
+  const {w,$,storage,api,trip,press,click,tiles,tab}=await setup(t);
   tiles()[0].click();click('full-photo');
   assert.equal($('photo-viewer').classList.contains('flipped'),true);
   $('postcard-message').value='A memory worth keeping.';$('postcard-message').dispatchEvent(new w.Event('input',{bubbles:true}));
@@ -109,13 +198,14 @@ test('navigation saves postcard edits before moving; failed saves keep the photo
   assert.equal($('postcard-message').value,'A memory worth keeping.');
   const records=await w.RedlineArchive.unpack(await storage.exportArchive(trip.id));
   assert.equal(records[0].photos.filter(p=>p.photo.postcard.message==='A memory worth keeping.').length,1);
-  await w.RedlinePostcards.close();$('album-view').click();$('album-next').click();
+  await w.RedlinePostcards.close();$('album-view').click();tab(paris.id).click();
   assert.equal($('album-pages').querySelector('figcaption').textContent,'A memory worth keeping.','The album captions a print with its postcard');
 });
 
 test('import review supports bulk assignment, previews, and saving only assigned photos',async t=>{
   const {w,$,choose,change,api,trip,click,pages}=await setup(t,{seed:false});
-  assert.deepEqual(pages(),['left inside','right title']);$('album-next').click();
+  await wait(()=>pages()==='left:inside right:title');$('album-next').click();
+  assert.equal(pages(),'left:empty right:inside');
   assert.equal($('album-pages').querySelector('.photo-empty p').textContent,'No photos yet');assert.equal($('gallery-toolbar').hidden,true);
   choose(['gps-paris.jpg','one.jpg','two.jpg']);
   await wait(()=>$('photo-review').children.length===3&&!$('choose-photos').disabled);
@@ -124,6 +214,9 @@ test('import review supports bulk assignment, previews, and saving only assigned
   const entries=[...$('photo-review').children];entries[0].querySelector('.photo-image').click();
   assert.equal($('photo-position').textContent,'1 / 3');click('full-photo');assert.equal($('photo-viewer').classList.contains('flipped'),false);
   assert.equal($('print-postcard').disabled,true);await w.RedlinePostcards.close();
+  const css=source('public/gallery.css');
+  assert.match(css,/\.remove-photo \{[^}]*width: 44px; height: 44px;/,'The remove control keeps a 44px target around its small mark');
+  assert.match(css,/\.review-photo:focus-within \.remove-photo svg/);assert.match(css,/@media \(hover: none\), \(any-pointer: coarse\) \{ \.remove-photo svg/);
   const checkbox=entries[2].querySelector('input');checkbox.checked=false;checkbox.dispatchEvent(new w.Event('change'));
   assert.equal($('select-all-photos').indeterminate,true);
   change('bulk-photo-city',madrid.id);
@@ -166,13 +259,44 @@ test('file drops, batch limits, and cancelling imports leave saved photos untouc
 
 test('swiping browses without flipping, while a tap still flips the entire postcard',async t=>{
   const {w,$,click,tiles}=await setup(t);tiles()[0].click();
-  for(const [type,x] of [['pointerdown',200],['pointerup',100]]){
-    const event=new w.Event(type,{bubbles:true});Object.assign(event,{pointerType:'touch',pointerId:1,clientX:x,clientY:100});$('full-photo').dispatchEvent(event);
-  }
+  const swipe=(el,from,to)=>{for(const [type,x] of [['pointerdown',from],['pointerup',to]]){
+    const event=new w.Event(type,{bubbles:true});Object.assign(event,{pointerType:'touch',pointerId:1,clientX:x,clientY:100});el.dispatchEvent(event);
+  }};
+  swipe($('full-photo'),200,100);
   click('full-photo');await wait(()=>$('photo-position').textContent==='2 / 2');
   assert.equal($('photo-viewer').classList.contains('flipped'),false);
+  swipe($('viewer-previous'),30,190);await wait(()=>$('photo-position').textContent==='1 / 2');
+  assert.match(source('public/gallery.css'),/\.viewer-edge \{[^}]*touch-action: pan-y pinch-zoom;/,'A swipe that starts on an edge arrow is not taken as a browser pan');
   await new Promise(resolve=>setTimeout(resolve,510));click('full-photo');
   assert.equal($('photo-viewer').classList.contains('flipped'),true);assert.equal($('postcard-front').inert,true);
+});
+
+test('the viewer opens on Close, its edge arrows are labelled buttons, and focus survives the ends, the back, and printing',async t=>{
+  const {w,$,press,tiles}=await setup(t),focused=()=>w.document.activeElement;
+  // Like a browser, opening a dialog focuses its first focusable control. jsdom has no inert, so read the flag postcards.js sets.
+  const off=el=>!!el&&((el.inert??el.hasAttribute('inert'))||el.hidden||off(el.parentElement));
+  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;[...this.querySelectorAll('button,select,input,textarea')].find(el=>!el.disabled&&!off(el))?.focus();};
+  tiles()[0].click();
+  assert.equal(focused(),$('close-photo-viewer'),'← →, F, and Delete work at once, and the arrows never reach the invisible city picker');
+  for(const [edge,label] of [[$('viewer-previous'),'Previous photo'],[$('viewer-next'),'Next photo']]){
+    assert.equal(edge.getAttribute('aria-label'),label);assert.equal(edge.hasAttribute('aria-hidden'),false);assert.equal(edge.tabIndex,0);
+    assert.equal(edge.querySelector('svg').getAttribute('aria-hidden'),'true');
+  }
+  assert.match(source('public/gallery.css'),/\.viewer-edge:focus-visible \{ opacity: 1; \}/,'A focused arrow is visible');
+  assert.equal($('viewer-previous').hidden,true);assert.equal($('photo-position').hidden,false);
+  $('viewer-next').focus();$('viewer-next').click();await wait(()=>$('photo-position').textContent==='2 / 2');
+  assert.equal($('viewer-next').hidden,true);assert.equal(focused(),$('viewer-previous'),'A focused arrow that disappears at the end hands focus to the other one');
+  press('f',focused());assert.equal(focused(),$('close-postcard'));
+  let printed=0;w.print=()=>{printed++;};
+  $('print-postcard').click();await wait(()=>printed===1);w.dispatchEvent(new w.Event('afterprint'));
+  assert.equal($('photo-viewer').open,true);assert.equal(focused(),$('close-postcard'),'After printing, focus returns to the postcard’s Close, not its first field');
+  w.print=()=>{throw Error('No printer.');};$('print-postcard').click();await wait(()=>$('postcard-error').textContent==='No printer.');
+  assert.equal($('photo-viewer').open,true);assert.equal(focused(),$('close-postcard'));
+  press('ArrowLeft',focused());await wait(()=>$('photo-position').textContent==='1 / 2');
+  assert.equal($('photo-viewer').classList.contains('flipped'),false);assert.equal(focused(),$('close-photo-viewer'),'Browsing from the back moves focus to the front it shows');
+  await w.RedlinePostcards.close();tiles()[2].click();assert.equal($('photo-caption').textContent,'Madrid');
+  assert.deepEqual([$('viewer-previous').hidden,$('viewer-next').hidden,$('photo-position').hidden],[true,true,true],'A single photo has nothing to browse');
+  assert.equal(focused(),$('close-photo-viewer'));
 });
 
 test('print and share use the browsed photo and preserve the postcard viewer',async t=>{
@@ -183,33 +307,42 @@ test('print and share use the browsed photo and preserve the postcard viewer',as
   $('postcard-message').value='An afternoon in Madrid.';$('postcard-message').dispatchEvent(new w.Event('input',{bubbles:true}));
   await wait(()=>!$('share-postcard').disabled);$('share-postcard').click();await wait(()=>shared);
   assert.equal(shared.files[0].name,'Madrid-postcard.jpg');assert.equal(shared.url,undefined);
+  const lastPage=source('public/style.css').match(/(\.postcard-print-page:[\w-]+) \{ break-after: auto;/)[1];let unbroken=null;
   w.print=()=>{
-    printed++;assert.equal($('photo-viewer').open,false);
+    printed++;assert.equal($('photo-viewer').open,false);unbroken=$('postcard-print-root').querySelector(lastPage);
     assert.equal($('postcard-print-root').querySelector('.print-front img').src,$('full-photo').src);
     assert.equal($('postcard-print-root').querySelector('.print-message').textContent,'An afternoon in Madrid.');
   };
-  $('print-postcard').click();await wait(()=>printed===1);w.dispatchEvent(new w.Event('afterprint'));
+  $('print-postcard').click();await wait(()=>printed===1);
+  assert.equal(unbroken?.classList.contains('print-back'),true,'Only the back page drops its page break, so no blank sheet follows');
+  w.dispatchEvent(new w.Event('afterprint'));
   assert.equal($('photo-viewer').open,true);assert.equal($('photo-caption').textContent,'Madrid');assert.equal($('photo-viewer').classList.contains('flipped'),true);
   press('p',w.document,{metaKey:true});await wait(()=>printed===2);w.dispatchEvent(new w.Event('afterprint'));
 });
 
 test('select mode moves and deletes several photos atomically',async t=>{
   const {w,$,api,trip,tiles,change}=await setup(t);
-  $('select-photos').click();
+  tiles();$('select-photos').focus();$('select-photos').click();
   assert.equal($('sheet-view').getAttribute('aria-pressed'),'true','Selecting works on the full list of photos');
   assert.equal($('gallery-actions').hidden,false);assert.equal($('gallery-toolbar').hidden,true);
+  assert.equal(w.document.activeElement,$('done-selecting'),'Focus leaves the hidden Select button for Done');
   assert.equal($('gallery-selection-count').textContent,'Tap photos to select');assert.equal($('delete-photos').disabled,true);
-  tiles()[0].click();tiles()[1].click();
+  assert.equal($('select-photos').hasAttribute('aria-pressed'),false,'Select is a plain button; the Done bar replaces it');
+  tiles()[0].click();tiles()[2].dispatchEvent(new w.MouseEvent('click',{bubbles:true,shiftKey:true}));
+  assert.equal($('gallery-selection-count').textContent,'3 selected','Shift-click selects every photo in between');
+  tiles()[2].click();
   assert.equal($('photo-viewer').open,false,'Selecting never opens the viewer');
   assert.equal($('gallery-selection-count').textContent,'2 selected');assert.equal(tiles()[0].getAttribute('aria-pressed'),'true');
-  change('move-photos',madrid.id);
+  $('move-photos').focus();change('move-photos',madrid.id);
   await wait(()=>$('photo-message').textContent==='Moved 2 photos to Madrid.');
+  await wait(()=>w.document.activeElement===$('select-photos'));
   assert.deepEqual([...$('photo-gallery').querySelectorAll('.gallery-city-count')].map(el=>el.textContent),['3 photos']);
   assert.equal((await api(`/trips/${trip.id}`)).photos.filter(p=>p.stopId===madrid.id).length,3);
   $('select-photos').click();$('select-visible').click();assert.equal($('gallery-selection-count').textContent,'3 selected');
   w.confirm=()=>false;$('delete-photos').click();await tick();assert.equal(tiles().length,3);
-  w.confirm=()=>true;tiles()[2].click();$('delete-photos').click();
+  w.confirm=()=>true;tiles()[2].click();$('delete-photos').focus();$('delete-photos').click();
   await wait(()=>$('photo-message').textContent==='2 photos deleted.');
+  await wait(()=>w.document.activeElement===$('done-selecting'));assert.equal($('delete-photos').disabled,true,'Focus leaves the emptied selection’s Delete for Done');
   assert.equal(tiles().length,1);assert.equal($('photo-count').textContent,'1');
   assert.equal((await api(`/trips/${trip.id}`)).photos.length,1);
   w.document.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
@@ -224,23 +357,23 @@ test('the viewer moves a photo to another city and deletes it, then shows the ne
   await wait(()=>$('photo-caption').textContent==='Madrid');
   assert.equal((await api(`/trips/${trip.id}`)).photos.filter(p=>p.stopId===madrid.id).length,2);
   w.confirm=()=>true;$('delete-photo').click();
-  await wait(()=>$('photo-navigation').hidden&&$('photo-caption').textContent==='Paris');
+  await wait(()=>$('photo-position').hidden&&$('photo-caption').textContent==='Paris');
   assert.equal($('photo-viewer').open,true);assert.equal((await api(`/trips/${trip.id}`)).photos.length,2);
   $('delete-photo').click();await wait(()=>!$('photo-viewer').open);
   assert.equal((await api(`/trips/${trip.id}`)).photos.length,1);
   assert.equal(tiles().length,1);
 });
 
-test('the trips sheet lists, renames, and deletes trips, and closes when you click outside it',async t=>{
+test('the logbook lists, renames, and deletes voyages, and folds away when you work on the map',async t=>{
   const {w,$,api,trip}=await setup(t);
   await api('/trips',{method:'POST',body:JSON.stringify({title:'Another time',stops:[madrid]})});
   $('trips-button').click();
-  assert.equal($('trip-panel').open,true);assert.equal($('photo-panel').open,false,'Only one sheet at a time');
+  assert.equal(!$('trip-panel').hidden,true);assert.equal($('photo-panel').open,false,'Only one sheet at a time');
   assert.equal($('trips-button').getAttribute('aria-expanded'),'true');
   await wait(()=>$('trip-list').querySelectorAll('.trip-card').length===2);
-  assert.equal($('trips-summary').textContent,'2 trips saved in this browser');assert.equal($('trip-state').textContent,'All changes saved');
+  assert.equal($('trips-summary').textContent,'2 voyages kept in this browser');assert.equal($('trip-state').textContent,'All changes saved');
   const card=()=>[...$('trip-list').querySelectorAll('.trip-card')].find(el=>el.classList.contains('active'));
-  assert.match(card().querySelector('.trip-meta').textContent,/^2 stops · 3 photos · /);
+  assert.match(card().querySelector('.trip-meta').textContent,/^2 ports · 3 photos · /);
   assert.ok(card().querySelector('.trip-cover').src,'A saved trip shows its first photo');
   card().querySelector('.trip-more').click();assert.equal(card().querySelector('.trip-menu').hidden,false);
   card().querySelector('.trip-rename').click();assert.equal(card().querySelector('.trip-menu').hidden,true);
@@ -254,11 +387,18 @@ test('the trips sheet lists, renames, and deletes trips, and closes when you cli
   $('trip-list').querySelector('.trip-rename-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
   await wait(()=>other()?.querySelector('.trip-name')?.textContent==='Another place');
   assert.equal($('trip-title').textContent,'Summer in Spain','Renaming another trip leaves the open one alone');
-  const pointer=(type,target)=>target.dispatchEvent(new w.MouseEvent(type,{bubbles:true,clientX:5,clientY:5}));
-  pointer('pointerdown',$('trip-name'));pointer('click',$('trip-panel'));
-  assert.equal($('trip-panel').open,true,'A drag that ends outside the sheet keeps it open');
-  pointer('pointerdown',$('trip-panel'));pointer('click',$('trip-panel'));
-  assert.equal($('trip-panel').open,false,'Clicking outside the sheet closes it');
+  const down=el=>el.dispatchEvent(new w.Event('pointerdown',{bubbles:true}));
+  for(const id of ['trip-name','save-trip','photos-button','trips-button'])down($(id));
+  assert.equal(!$('trip-panel').hidden,true,'Working in the logbook or on the planner tabs keeps the logbook open');
+  $('trips-button').click();assert.equal($('trip-panel').hidden,true,'The Logbook tab still folds it away');
+  for(const id of ['destination','play','next-city','stop-list']){
+    $('trips-button').click();down($(id));
+    assert.equal($('trip-panel').hidden,true,`Pressing #${id} folds the logbook away, so nothing plays or opens behind it`);
+  }
+  $('trips-button').click();$('play').focus();
+  assert.equal($('trip-panel').hidden,true,'Moving keyboard focus elsewhere in the planner folds it away');
+  $('trips-button').click();down(w.document.body);
+  assert.equal($('trip-panel').hidden,true,'Working on the map folds the logbook away');
   $('trips-button').click();await wait(()=>$('trip-list').querySelectorAll('.trip-delete').length===2);
   w.confirm=()=>true;card().querySelector('.trip-more').click();card().querySelector('.trip-delete').click();
   await wait(()=>$('trip-list').querySelectorAll('.trip-card').length===1);
@@ -266,14 +406,14 @@ test('the trips sheet lists, renames, and deletes trips, and closes when you cli
   assert.equal((await api('/trips')).trips.length,1);
   await assert.rejects(api(`/trips/${trip.id}`),e=>e.status===404);
   w.document.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
-  assert.equal($('trip-panel').open,false);assert.equal(w.document.activeElement,$('trips-button'));
-  $('photos-button').click();await wait(()=>$('trip-panel').open);
+  assert.equal($('trip-panel').hidden,true);assert.equal(w.document.activeElement,$('trips-button'));
+  $('photos-button').click();await wait(()=>!$('trip-panel').hidden);
   await new Promise(resolve=>setTimeout(resolve,50));
   assert.equal($('trip-message').textContent,'Name and save this trip to add photos.','The prompt is not replaced by the list');
   assert.equal($('trip-list').querySelectorAll('.trip-card').length,1);
 });
 
-test('renaming the open trip keeps the stale-tab check, and focus stays in the sheet',async t=>{
+test('renaming the open trip keeps the stale-tab check, and focus stays in the logbook',async t=>{
   const {w,$,api,trip}=await setup(t);
   // Another tab saves a newer route while this tab still shows revision 1.
   await api(`/trips/${trip.id}`,{method:'PUT',body:JSON.stringify({title:trip.title,stops:[paris],revision:1})});
@@ -288,7 +428,47 @@ test('renaming the open trip keeps the stale-tab check, and focus stays in the s
   $('trip-list').querySelector('.trip-rename').click();
   $('trip-list').querySelector('.trip-rename-form input').dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
   await wait(()=>w.document.activeElement?.classList.contains('trip-more'));
-  assert.equal($('trip-panel').open,true,'Escape in the rename field only cancels the rename');
+  assert.equal(!$('trip-panel').hidden,true,'Escape in the rename field only cancels the rename');
+});
+
+test('saving, exporting, and opening voyages from the logbook keep its list current and focus in place',async t=>{
+  const {w,$,api,trip,press}=await setup(t,{seed:false});
+  const other=(await api('/trips',{method:'POST',body:JSON.stringify({title:'Another time',stops:[madrid]})})).trip;
+  const rome={id:'city-rome-0001',name:'Rome',country:'Italy',latitude:41.9,longitude:12.5},scrolled=[],downloads=[];
+  w.Element.prototype.scrollIntoView=function(options){scrolled.push([this,options]);};
+  w.HTMLAnchorElement.prototype.click=function(){downloads.push(this.download);};
+  const row=id=>[...$('trip-list').querySelectorAll('.trip-card')].find(el=>el.dataset.tripId===id);
+  const meta=id=>row(id)?.querySelector('.trip-meta').textContent||'';
+  const edit=route=>{w.RedlineApp.setStops(route);w.dispatchEvent(new w.Event('redline:routechange'));};
+  $('trips-button').click();await wait(()=>row(other.id));
+  edit([paris,madrid,rome]);row(trip.id).querySelector('.trip-open').focus();press('s',w.document.activeElement);
+  await wait(()=>/^3 ports/.test(meta(trip.id))&&!$('save-trip').disabled);
+  assert.equal(w.document.activeElement,row(trip.id).querySelector('.trip-open'),'Saving with S keeps focus on the same voyage');
+  assert.equal($('trip-list').querySelectorAll('button:disabled').length,0);
+  const more=row(trip.id).querySelector('.trip-more');more.click();
+  assert.ok(scrolled.some(([el,options])=>el===row(trip.id).querySelector('.trip-menu')&&options.block==='nearest'),'The menu is brought into view inside the logbook');
+  press('Escape',row(trip.id).querySelector('.trip-menu'));
+  $('trip-name').value='Summer in Rome';$('trip-name').dispatchEvent(new w.Event('input',{bubbles:true}));
+  const save=$('trip-name-form').querySelector('button');save.focus();save.click();
+  await wait(()=>$('trip-title').textContent==='Summer in Rome'&&!$('save-trip').disabled);
+  assert.equal(save.disabled,true);assert.equal(w.document.activeElement,$('trip-name'),'Focus leaves the disabled Save button for the name');
+  edit([paris,madrid]);row(trip.id).querySelector('.trip-more').click();row(trip.id).querySelector('.trip-export').click();
+  await wait(()=>downloads.length===1&&/^2 ports/.test(meta(trip.id)));
+  assert.equal(w.document.activeElement,row(trip.id).querySelector('.trip-more'),'Exporting from the menu saves first and keeps focus on its button');
+  row(other.id).querySelector('.trip-open').focus();row(other.id).querySelector('.trip-open').click();
+  await wait(()=>$('trip-title').textContent==='Another time'&&!$('trips-button').disabled);
+  assert.equal($('trip-panel').hidden,true);assert.equal(w.document.activeElement,$('trips-button'),'Focus returns to the Logbook tab, not a hidden button');
+});
+
+test('the album closes from its backdrop or Escape, and Escape leaves select mode first',async t=>{
+  const {w,$}=await setup(t);
+  $('select-photos').click();assert.equal($('gallery-actions').hidden,false);
+  $('photo-panel').dispatchEvent(new w.Event('cancel',{cancelable:true}));
+  assert.equal($('photo-panel').open,true);assert.equal($('gallery-actions').hidden,true);
+  const on=(el,type)=>el.dispatchEvent(new w.Event(type,{bubbles:true}));
+  on($('album-pages'),'pointerdown');on($('photo-panel'),'click');assert.equal($('photo-panel').open,true,'A drag that ends on the backdrop does not close');
+  on($('photo-panel'),'pointerdown');on($('photo-panel'),'click');
+  assert.equal($('photo-panel').open,false);assert.equal(w.document.activeElement,$('map'),'A close by pointer leaves the keys with the map');
 });
 
 test('a viewer delete blocks browsing until it finishes, and focus returns to the album',async t=>{
@@ -297,9 +477,9 @@ test('a viewer delete blocks browsing until it finishes, and focus returns to th
   storage.api=async(path,options)=>{if(options?.method==='DELETE')await gate;return api(path,options);};
   tiles()[1].click();assert.equal($('photo-position').textContent,'2 / 2');
   w.confirm=()=>true;$('delete-photo').click();await tick();
-  press('ArrowLeft');await tick();assert.equal($('previous-photo').disabled,true);
-  release();await wait(()=>$('photo-position').textContent==='1 / 1');
-  assert.equal($('photo-caption').textContent,'Paris');
+  press('ArrowLeft');$('viewer-previous').click();await tick();assert.equal($('photo-position').textContent,'2 / 2','Browsing waits for the delete');
+  assert.equal($('viewer-previous').hidden,false,'The arrows stay put during a delete, so a focused one keeps focus');
+  release();await wait(()=>$('photo-caption').textContent==='Paris'&&$('photo-position').hidden);
   await w.RedlinePostcards.close();
   assert.ok(w.document.activeElement===$('photo-panel')||w.document.activeElement?.classList.contains('photo-image'),'Focus is not lost to the page');
 });
@@ -309,7 +489,7 @@ test('select mode follows route edits, and dragging files never saves route edit
   $('select-photos').click();$('select-visible').click();w.confirm=()=>true;$('delete-photos').click();
   await wait(()=>$('photo-message').textContent==='3 photos deleted.');
   assert.equal($('gallery-actions').hidden,true,'Selection ends when no photos are left');
-  $('album-view').click();$('album-next').click();
+  $('album-view').click();$('album-next').click();$('album-next').click();
   assert.equal($('album-pages').querySelector('.photo-empty p').textContent,'No photos yet');
   $('select-photos').click();
   const rome={id:'city-rome-0001',name:'Rome',country:'Italy',latitude:41.9,longitude:12.5};
@@ -333,4 +513,67 @@ test('the trip search never hides trips once it is no longer needed',async t=>{
   w.confirm=()=>true;card.querySelector('.trip-delete').click();
   await wait(()=>$('trip-search-label').hidden);
   assert.equal($('trip-search').value,'');assert.equal($('trip-list').querySelectorAll('.trip-card').length,6);
+});
+
+test('focus follows the reader: a clicked voyage hands keys to the map, renames survive a save, and turned pages pass focus to the tab',async t=>{
+  const rome={id:'city-rome-0001',name:'Rome',country:'Italy',latitude:41.9,longitude:12.5};
+  const {w,$,api,trip,pages,tab,tiles}=await setup(t,{route:[paris,madrid,rome],seedStops:[paris,madrid,rome]});
+  await wait(()=>pages()==='left:inside right:title');
+  // A contents entry turns its page away; focus moves to the port's tab instead of the page body.
+  $('album-next').click();const entry=$('album-pages').querySelectorAll('.contents-list button')[2];entry.focus();entry.click();
+  assert.equal(pages(),'left:city right:city');assert.equal(w.document.activeElement,tab(rome.id));
+  // The chosen city anchors the place when the layout changes, even on the left-hand page.
+  tab(madrid.id).click();const setWidth=value=>Object.defineProperty(w,'innerWidth',{configurable:true,writable:true,value});
+  setWidth(700);w.dispatchEvent(new w.Event('resize'));await wait(()=>pages()==='single:city');
+  assert.equal($('album-pages').querySelector('.city-name').textContent,'Madrid');
+  setWidth(1024);w.dispatchEvent(new w.Event('resize'));await wait(()=>pages()==='left:city right:city');
+  // A close request in select mode leaves select mode and returns to Select.
+  tiles();$('select-photos').click();$('photo-panel').dispatchEvent(new w.Event('cancel',{cancelable:true}));
+  assert.equal($('photo-panel').open,true);assert.equal(w.document.activeElement,$('select-photos'));
+  // A held Return on an edge arrow does not keep browsing.
+  tiles()[0].click();await wait(()=>$('photo-viewer').open);
+  const held=new w.KeyboardEvent('keydown',{key:'Enter',repeat:true,bubbles:true,cancelable:true});$('viewer-next').dispatchEvent(held);
+  assert.equal(held.defaultPrevented,true);
+  await w.RedlinePostcards.close();$('photos-button').click();await wait(()=>!$('photo-panel').open);
+  // The logbook folds away when focus leaves the planner for the zoom controls.
+  $('trips-button').click();assert.equal($('trip-panel').hidden,false);
+  w.document.querySelector('.zoom-controls button').focus();assert.equal($('trip-panel').hidden,true);
+  // A half-typed rename of another voyage survives a save from the seal.
+  const other=(await api('/trips',{method:'POST',body:JSON.stringify({title:'Another time',stops:[madrid]})})).trip;
+  const row=id=>[...$('trip-list').querySelectorAll('.trip-card')].find(el=>el.dataset.tripId===id);
+  $('trips-button').click();await wait(()=>row(other.id));
+  row(other.id).querySelector('.trip-more').click();row(other.id).querySelector('.trip-rename').click();
+  row(other.id).querySelector('.trip-rename-form input').value='Another tim';
+  w.RedlineApp.setStops([paris,madrid]);w.dispatchEvent(new w.Event('redline:routechange'));
+  $('save-trip').click();await wait(()=>/^2 ports/.test(row(trip.id)?.querySelector('.trip-meta').textContent||''));
+  assert.equal(row(other.id).querySelector('.trip-rename-form input')?.value,'Another tim','The typed name is kept');
+  // A voyage opened with the mouse leaves the keys on the map, so Return sets sail.
+  row(other.id).querySelector('.trip-rename-form .text-button').click();
+  row(other.id).querySelector('.trip-open').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));
+  await wait(()=>$('trip-title').textContent==='Another time'&&!$('trips-button').disabled);
+  assert.equal(w.document.activeElement,$('map'));
+});
+
+test('closing a panel returns focus where it was opened from, and an open logbook keeps a typed name',async t=>{
+  const {w,$,api,press}=await setup(t,{seed:false});
+  // Opened from its focused tab with the keyboard, the album returns there; closed with the mouse, the keys go to the map.
+  press('Escape');$('photos-button').focus();$('photos-button').click();await wait(()=>$('photo-panel').open);
+  press('Escape');assert.equal(w.document.activeElement,$('photos-button'));
+  $('photos-button').click();await wait(()=>$('photo-panel').open);
+  $('photo-panel').querySelector('[data-close]').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));
+  assert.equal($('photo-panel').open,false);assert.equal(w.document.activeElement,$('map'));
+  // A logbook opened by a click closes back to the map; one opened from the keyboard returns to its tab.
+  $('trips-button').focus();$('trips-button').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));
+  press('Escape');assert.equal($('trip-panel').hidden,true);assert.equal(w.document.activeElement,$('map'));
+  $('trips-button').focus();$('trips-button').click();press('Escape');assert.equal(w.document.activeElement,$('trips-button'));
+  // A travel key pressed on the planner's head folds the logbook before the voyage moves.
+  $('trips-button').click();$('save-trip').focus();press('ArrowRight',$('save-trip'));assert.equal($('trip-panel').hidden,true);
+  // A new, unsaved course: the seal and the Album tab keep the name being typed, and the seal saves it.
+  $('trips-button').click();$('new-trip').click();w.RedlineApp.setStops([paris,madrid]);w.dispatchEvent(new w.Event('redline:routechange'));
+  $('photos-button').click();assert.equal($('trip-panel').hidden,false);assert.match($('trip-message').textContent,/Name and save/);
+  $('trip-name').value='Pacific crossing';$('photos-button').click();assert.equal($('trip-name').value,'Pacific crossing','Album keeps the typed name');
+  // Saving the name goes on to the album the logbook asked for.
+  $('save-trip').click();await wait(()=>$('trip-title').textContent==='Pacific crossing'&&$('photo-panel').open);
+  assert.equal($('trip-panel').hidden,true);
+  const {trips}=await api('/trips');assert.ok(trips.some(other=>other.title==='Pacific crossing'));
 });

@@ -34,15 +34,17 @@
     $('postcard-back').inert=!back;$('postcard-back').setAttribute('aria-hidden',String(!back));
     $('close-photo-viewer').inert=back;$('close-photo-viewer').setAttribute('aria-hidden',String(back));
     $('close-postcard').inert=!back;$('close-postcard').setAttribute('aria-hidden',String(!back));
-    if(document.activeElement!==document.body)(back?$('close-postcard'):$('close-photo-viewer')).focus({preventScroll:true});
+    if(document.activeElement!==document.body)closer().focus({preventScroll:true});
   }
+  // Focus rests on the visible face's close button, never on the invisible city picker.
+  const closer=()=>$('photo-viewer').classList.contains('flipped')?$('close-postcard'):$('close-photo-viewer');
   function updateNavigation(){
-    const index=sequence.findIndex(photo=>photo.id===active?.photo.id);
-    $('photo-navigation').hidden=sequence.length<2;
+    const index=sequence.findIndex(photo=>photo.id===active?.photo.id),previous=$('viewer-previous'),next=$('viewer-next');
+    $('photo-position').hidden=sequence.length<2;
     $('photo-position').textContent=`${index+1} / ${sequence.length}`;
-    $('previous-photo').disabled=navigating||changing||index<=0;
-    $('next-photo').disabled=navigating||changing||index<0||index>=sequence.length-1;
-    $('viewer-previous').hidden=$('previous-photo').disabled;$('viewer-next').hidden=$('next-photo').disabled;
+    // The photo's own edges browse; they disappear at either end of the city, handing focus to the other edge or Close.
+    previous.hidden=index<=0;next.hidden=index<0||index>=sequence.length-1;
+    if([previous,next].some(edge=>edge.hidden&&edge===document.activeElement))[previous,next,$('close-photo-viewer')].find(el=>!el.hidden).focus({preventScroll:true});
     // Warm the neighbours so browsing feels instant.
     for(const near of [sequence[index-1],sequence[index+1]])if(near?.url){const image=new Image();image.decoding='async';image.src=near.url;}
   }
@@ -70,7 +72,7 @@
   async function removeCurrent(){
     const state=active;if(!actions||!state||changing||navigating)return;
     if(!confirm('Delete this photo and its postcard? This can’t be undone.'))return;
-    changing=true;clearTimeout(timer);updateNavigation();
+    changing=true;clearTimeout(timer);
     try{
       const index=sequence.findIndex(photo=>photo.id===state.photo.id);
       await actions.remove(state.photo);
@@ -129,7 +131,7 @@
     };
   }
   function open(photo,api,collection=[photo],viewerActions=null,origin=null){
-    const wasOpen=$('photo-viewer').open;
+    const wasOpen=$('photo-viewer').open,onBack=$('postcard-back').contains(document.activeElement);
     if(!wasOpen)returnFocus=origin||document.activeElement;
     sequence=collection;actions=api?viewerActions:null;
     shareGeneration++;shareFile=null;clearTimeout(shareTimer);$('share-postcard').disabled=true;
@@ -154,13 +156,15 @@
       const viewer=$('photo-viewer');viewer.getAnimations?.().forEach(animation=>animation.cancel());viewer.showModal();
       if(motion(viewer)&&origin){viewer.style.opacity='0';decode(photo.url).then(()=>{viewer.style.opacity='';if(active?.photo===photo)zoomFrom(origin);});}
     }
+    // A new photo always shows its front, so focus on the back moves to the front's Close too.
+    if(!wasOpen||onBack)$('close-photo-viewer').focus({preventScroll:true});
     prepareShare();
   }
   async function navigate(direction){
     if(navigating||changing||closing||printing||!$('photo-viewer').open)return;
     const index=sequence.findIndex(photo=>photo.id===active?.photo.id),photo=sequence[index+direction];
     if(!photo)return;
-    const version=++navigationVersion; navigating=true;updateNavigation();clearTimeout(timer);
+    const version=++navigationVersion; navigating=true;clearTimeout(timer);
     try{
       await save(active);
       if(version!==navigationVersion||!$('photo-viewer').open)return;
@@ -190,10 +194,10 @@
   $('full-photo').addEventListener('load',()=>{updateOrientation();prepareShare();});
   $('close-photo-viewer').addEventListener('click',close);
   $('close-postcard').addEventListener('click',close);
-  $('previous-photo').addEventListener('click',()=>navigate(-1));
-  $('next-photo').addEventListener('click',()=>navigate(1));
   $('viewer-previous').addEventListener('click',()=>navigate(-1));
   $('viewer-next').addEventListener('click',()=>navigate(1));
+  // A held Return on an edge would keep clicking it, and focus hands over to the other edge at the end of the port.
+  for(const edge of [$('viewer-previous'),$('viewer-next')])edge.addEventListener('keydown',event=>{if(event.repeat&&event.key==='Enter')event.preventDefault();});
   $('flip-postcard').addEventListener('click',flip);
   $('unflip-postcard').addEventListener('click',flip);
   $('photo-city').addEventListener('change',move);
@@ -209,16 +213,18 @@
     if(event.detail>1||event.target.closest('input,textarea,button,a,label,select,.photo-viewer-footer,.postcard-actions'))return;
     flip();
   });
-  $('full-photo').addEventListener('pointerdown',event=>{
+  // A swipe can start anywhere on the photo, its edge arrows included.
+  const frame=$('full-photo').parentElement;
+  frame.addEventListener('pointerdown',event=>{
     swipe=event.pointerType==='touch'&&!$('photo-viewer').classList.contains('flipped')?{x:event.clientX,y:event.clientY,id:event.pointerId}:null;
   });
-  $('full-photo').addEventListener('pointerup',event=>{
+  frame.addEventListener('pointerup',event=>{
     if(!swipe||swipe.id!==event.pointerId)return;
     const dx=event.clientX-swipe.x,dy=event.clientY-swipe.y;swipe=null;
     if(Math.abs(dx)<55||Math.abs(dx)<Math.abs(dy)*1.5)return;
     suppressClickUntil=Date.now()+500;navigate(dx<0?1:-1);
   });
-  $('full-photo').addEventListener('pointercancel',()=>swipe=null);
+  frame.addEventListener('pointercancel',()=>swipe=null);
   document.addEventListener('keydown',event=>{
     if(!$('photo-viewer').open||event.defaultPrevented||event.altKey||event.metaKey||event.ctrlKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"]'))return;
     if(event.key.toLowerCase()==='f'&&!active?.preview){event.preventDefault();if(!event.repeat)flip();return;}
@@ -273,13 +279,14 @@
       await image.decode();
       for(const block of [message,address]){let size=10;while((block.scrollHeight>block.clientHeight+1||block.scrollWidth>block.clientWidth+1)&&size>6){size-=.25;block.style.fontSize=`${size}pt`;}if(block.scrollHeight>block.clientHeight+1||block.scrollWidth>block.clientWidth+1)throw Error('Shorten the text to fit this postcard.');}
       restoreAfterPrint=$('photo-viewer').open;$('photo-viewer').close();document.body.classList.add('printing-postcard');window.print();
-    }catch(error){$('postcard-print-root')?.remove();document.body.classList.remove('printing-postcard');if(restoreAfterPrint&&!$('photo-viewer').open)$('photo-viewer').showModal();restoreAfterPrint=false;$('postcard-error').textContent=error.message;}finally{printing=false;}
+    }catch(error){$('postcard-print-root')?.remove();document.body.classList.remove('printing-postcard');reopen();$('postcard-error').textContent=error.message;}finally{printing=false;}
   }
+  function reopen(){if(restoreAfterPrint&&!$('photo-viewer').open){$('photo-viewer').showModal();closer().focus({preventScroll:true});}restoreAfterPrint=false;}
   document.addEventListener('keydown',event=>{
     if(!$('photo-viewer').open||!(event.ctrlKey||event.metaKey)||event.key.toLowerCase()!=='p')return;
     event.preventDefault();if(!event.repeat)printPostcard();
   });
-  window.addEventListener('afterprint',()=>{document.body.classList.remove('printing-postcard');$('postcard-print-root')?.remove();if(restoreAfterPrint&&!$('photo-viewer').open)$('photo-viewer').showModal();restoreAfterPrint=false;});
+  window.addEventListener('afterprint',()=>{document.body.classList.remove('printing-postcard');$('postcard-print-root')?.remove();reopen();});
   window.addEventListener('beforeunload',event=>{if([...states.values()].some(s=>dirty(s)||s.promise)){event.preventDefault();event.returnValue='';}});
   window.RedlinePostcards={open,close,forget:id=>{states.delete(id);if(active?.photo.id===id){clearTimeout(timer);active=null;}}};
 })();

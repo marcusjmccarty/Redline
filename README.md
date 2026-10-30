@@ -6,40 +6,40 @@ A minimalist travel map inspired by the red routes in Indiana Jones: parchment, 
 
 ## Travel
 
-Type a city and press Enter. Click a route city to jump to that point in the journey, or drag its name to reorder the stops. The chevron collapses the city list.
+The route controls are a voyage planner at the bottom of the map: a compass, the voyage's name, the logbook, the album, a wax seal that saves, and the ports of call. Type a port and press Enter to add it. Drag a port's name to reorder, and use the chevron to fold the list away.
 
-- **Trace route / Space:** start or resume. Hold Space for 2× travel speed; the Trace button pauses.
-- **Return:** glide back to the whole-world overview from anywhere in the trip.
-- **Arrow buttons or keys:** travel one leg. Press again during travel to arrive instantly. Navigation loops through the hidden world-overview step in both directions.
-- **Full playback:** reveals each destination on arrival, then smoothly returns to the complete world overview.
+- **Set sail / Return / Space:** start or resume the trace. Hold Return or Space for 2× travel speed; the button pauses.
+- **Click a port** (on the map or in the list): look at it within the whole voyage, with every leg still drawn.
+- **Arrow buttons or keys:** sail one leg, continuing from a port you clicked. Press again during travel to arrive instantly. Navigation loops through the overview in both directions.
+- **Backspace (Delete on a Mac), Home, or the globe:** glide back to the whole-voyage overview.
+- **Full playback:** reveals each port on arrival, then smoothly returns to the complete world overview.
 - **Scroll or + / −:** zoom with continuous easing. During travel, the chosen zoom persists across legs; the camera follows the tracer and adjusts its visible speed for close views.
-- **Home / globe:** glide back to the overview, like Return.
 - **H:** hide the controls. H, Escape, or a double-click on the map restores them.
-- **T / S / P:** toggle Trips, save the trip, or toggle Photos. Escape closes whichever menu or panel is open.
+- **T / S / P:** open the logbook, seal (save) the voyage, or open the album. Escape closes whichever is open.
 
-The original rectangular world map fills the screen, including New Zealand and the reduced-height Antarctica. Geographic shapes are intentionally stretched to fit. Country names, cities, and regional boundaries appear as you zoom. Geometry and labels are bundled; there are no map-tile requests. City labels are limited to 115 visible items to keep movement responsive.
+The original rectangular world map fills the screen, including New Zealand and the reduced-height Antarctica. Geographic shapes are intentionally stretched to fit. Country names, cities, and regional boundaries appear as you zoom. Geometry and labels are bundled; there are no map-tile requests. Route port names are placed so they never overlap, and a port visited twice is named once. City labels are limited to 115 visible items to keep movement responsive.
 
 ## Trips, photos, and postcards
 
-**Trips** opens a sheet over the map. At the top is the route you are working on, with its own little map, a name field, and whether it is saved. Below it, every saved trip is a card showing its route and first photo: click a card to open that trip, or use its ⋯ menu to rename, export, or delete it. Deleting a trip also deletes its photos and postcards, so export it first if you might want it later. With more than six trips, a search field finds one by name. The sheet closes with Escape, its close button, or a click outside it.
+**Logbook** opens inside the planner, above the ports of call. At the top is this voyage, with its own little chart, a name field, and whether it is saved. Below it, every saved voyage is a ledger line with its route and first photo: click one to open it, or use its ⋯ menu to rename, export, or delete it. Deleting a voyage also deletes its photos and postcards, so export it first if you might want it later. With more than six voyages, a search field finds one by name. The logbook folds away with Escape or its close button, or as soon as you search, set sail, pick a port, or go back to the map.
 
-No ChatGPT account, subscription, server, or sign-in is required. Trips, photos, and postcard notes are saved privately in this browser using IndexedDB. They are not uploaded to GitHub or synced automatically between devices. Use **Trips → Back up all** regularly and **Import** to restore a backup on another device. Export trip saves just the selected trip. Imports add copies and never overwrite existing trips.
+No ChatGPT account, subscription, server, or sign-in is required. Trips, photos, and postcard notes are saved privately in this browser using IndexedDB. They are not uploaded to GitHub or synced automatically between devices. Use **Logbook → Back up all** regularly and **Logbook → Import backup** to restore a backup on another device. **Export this voyage** (or ⋯ → Export) saves just one voyage. Imports add copies and never overwrite existing trips.
 
 Browser storage is not a permanent backup: clearing site data, private browsing, browser removal, or device loss can erase it. The app requests persistent storage where available, but that does not replace a downloaded backup. Backups contain your private photos and notes; do not commit them to this repository.
 
-To move from the original website: sign in there, open **Trips → Back up all**, then use **Trips → Import** on this website. Existing hosted records remain on the original website until you export them; they are not transferred automatically.
+To move from the original website: sign in there, open **Trips → Back up all**, then use **Logbook → Import backup** on this website. Existing hosted records remain on the original website until you export them; they are not transferred automatically.
 
-**Photos** opens the trip's album: a leather-bound book over the dimmed map. The first time it opens, the cover swings back to an endpaper and a title page with the route. Each city then gets its own chapter, in route order, with its photos mounted as prints in photo corners and any postcard message written beneath them. Turn pages with the arrow buttons, the keyboard arrows, the page corners, a swipe, or the page slider. The coloured divider tabs on the album's edge jump to a city, and the pin beside a city's name closes the album and finds that city on the map. **All photos** shows every photo on one sheet, grouped by city; **Select** there moves several photos to another city or deletes them in one step. Photos load from small stored previews.
+**Album** opens the voyage's album: a leather-bound book over the dimmed map, with a front and a back cover. The first time it opens, the closed album swings open to an endpaper and a title page with the route, followed by a contents page and a chapter for each port in route order, its photos mounted as prints in photo corners and any postcard message written beneath them. Turn pages with the arrow buttons, the keyboard arrows, the page corners, a swipe, or the slider; Home and End close the book on either cover. The contents page and the coloured divider tabs jump to a port, and the pin beside a port's name closes the album and finds that port on the map. **All photos** shows every photo as a tight grid of square thumbnails, grouped by port; **Select** there moves photos to another port or deletes them, and Shift-click selects everything between two photos.
 
 Use **Add photos** or drag image files anywhere onto the page. In import review, every new photo starts selected: pick a city for the selection at once, or choose one under each photo. Photos are matched to a nearby trip stop or indexed city using GPS metadata, when available, and marked with a GPS label. Unassigned or failed photos stay in review for correction or retry. Cancelling an import does not change saved photos.
 
-Photos are re-encoded in the browser and their metadata is stripped again before local storage; original filenames and precise photo GPS are not retained. Each photo also stores a small preview and its pixel size; photos saved by earlier versions get theirs the first time the album shows them. Previews are rebuilt rather than included in backups. Import previews and saved photos can be browsed using the viewer arrows, keyboard left/right, or a touch swipe. Browsing follows the current city filter. Postcard edits are saved before navigation; a failed save keeps the current photo and draft open.
+Photos are re-encoded in the browser and their metadata is stripped again before local storage; original filenames and precise photo GPS are not retained. Each photo also stores a small preview and its pixel size; photos saved by earlier versions get theirs the first time the album shows them. Previews are rebuilt rather than included in backups.
 
-Click a photo to expand it; it grows out of its print and shrinks back when closed. Browse that city's photos with the arrows, the edges of the photo, keyboard left/right, or a swipe. Change the city under the photo to move it there, or use the bin (or Delete) to remove it. Choose **Postcard**, press F, or click the photo to turn the entire viewer over. Write on the postcard back; edits save automatically. **← Photo**, F, or a click on the paper turns it back. Editing fields and pressing buttons do not flip the card.
+Click a photo to expand it; it grows out of its print and shrinks back when closed. Browse that port's photos (in import review, the photos being imported) with the arrows at the photo's edges, keyboard left/right, or a swipe; postcard edits are saved first, and a failed save keeps the current photo and draft open. Change the city under the photo to move it there, or use the bin (or Delete) to remove it. Choose **Postcard**, press F, or click the photo to turn the entire viewer over. Write on the postcard back; edits save automatically. **← Photo**, F, or a click on the paper turns it back. Editing fields and pressing buttons do not flip the card.
 
 **Print** or Ctrl/Command + P prints two 6 × 4 inch pages. **Share** prepares one JPEG containing the photograph and written back, then opens the device's available share menu. If file sharing is unavailable, it downloads the image. The share file contains pixels, not a private photo URL.
 
-Limits include 100 stops and 300 photos per trip, 200 trips per account, 30 images per import, and 4 MB per processed image. Browser support for HEIC/HEIF varies.
+Limits include 100 stops and 300 photos per trip, 200 trips in this browser, 30 images per import, and 4 MB per processed image. Browser support for HEIC/HEIF varies.
 
 ## Development
 
@@ -61,7 +61,8 @@ The built website is on the `gh-pages` branch, which GitHub Pages publishes auto
 - `public/labels.js`: placement of route city names so they never overlap.
 - `public/map-layout.js`, `public/world.js`: projection and geography.
 - `public/trace.js`: route geometry, timing, camera framing, and damped zoom.
-- `public/trips.js`, `public/gallery.css`: the Trips sheet, the photo album and its page turns, All photos and selection, import review, and viewer styling.
+- `public/trips.js`: the logbook, the photo album and its page turns, All photos and selection, and import review.
+- `public/gallery.css`: the album, All photos, import review, and the photo viewer and postcard. `public/style.css` holds the map, the voyage planner, the logbook, and printing.
 - `public/postcards.js`, `public/postcard-export.js`: editing, print, and share.
 - `public/storage.js`: private IndexedDB library with atomic saves and revision checks.
 - `public/archive.js`: portable binary backups containing routes, postcards, and JPEG blobs.
