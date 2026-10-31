@@ -119,6 +119,14 @@
 .album-view-surface { contain: layout paint; position: absolute; top: 0; bottom: 0; left: 0; width: 50%; overflow: hidden; }
 .album-view-surface.right { left: 50%; }
 .album-view-surface > .album-snapshot { position: absolute; top: 0; bottom: auto; right: auto; height: 100%; margin: 0; transform: none; }
+.album-view-surface > .album-page { left: 0; width: 100%; }
+.album-view-layer > .native-page::after { content: ''; position: absolute; z-index: 2; inset: 0 auto 0 0; width: 23px; pointer-events: none; background: linear-gradient(90deg, #5a3d1e40, #5a3d1e1c 20%, #0000); }
+.album-view-layer:not(.single) > .native-page.left::after { left: auto; right: 0; transform: scaleX(-1); }
+.album-frozen-sheet { display: block; }
+.album-frozen-scroll { overflow: hidden; padding: 0; }
+.album-frozen-gallery, .album-frozen-group, .album-frozen-grid { position: absolute; inset: 0; }
+:is(#photo-gallery, .album-copy-photo-gallery) .album-frozen-grid { display: block; padding: 0; }
+.album-frozen-scroll .gallery-city-heading { position: absolute; }
 .album-view-preparation { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
 .album-view-hinge { position: absolute; z-index: 3; inset: 0; perspective: 2800px; }
 .album-view-leaf { position: absolute; top: 0; bottom: 0; width: 50%; transform-style: preserve-3d; will-change: transform; }
