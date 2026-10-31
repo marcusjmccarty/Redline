@@ -47,7 +47,7 @@ async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,p
     };
     w.SVGElement.prototype.getScreenCTM=function(){const [x,y,width,height]=$('map').getAttribute('viewBox').split(' ').map(Number);return {a:1440/width,b:0,c:0,d:900/height,e:-x*1440/width,f:-y*900/height};};
     w.Element.prototype.setPointerCapture=function(){};w.Element.prototype.hasPointerCapture=()=>false;
-    for(const name of ['vendor/geo','map-layout','world','trace','labels','app'])w.eval(source(`public/${name}.js`));
+    for(const name of ['vendor/geo','map-layout','world','trace','labels','map-paint','app'])w.eval(source(`public/${name}.js`));
     stops=w.RedlineApp.getStops();
   }
   for(const name of ['jpeg','archive','storage'])w.eval(source(`public/${name}.js`));
@@ -1166,12 +1166,12 @@ test('thumbnail warming limits concurrent decodes so background work cannot floo
   await ready;assert.equal(peak,3);cache.clearPreloads();
 });
 
-test('regional atlas washes use direct coastline shapes and preserve the map holes',async t=>{
-  const {$}=await setup(t,{realMap:true});
-  const land=[...$('land').children],clip=$('atlas-land-clip');
-  assert.equal(clip.getAttribute('clip-rule'),'evenodd');assert.equal(clip.children.length,land.length);
-  assert.ok([...clip.children].every((path,i)=>path.tagName.toLowerCase()==='path'&&path.getAttribute('d')===land[i].getAttribute('d')));
-  assert.equal($('land-washes').getAttribute('clip-path'),'url(#atlas-land-clip)');
+test('the atlas paints each coastline once, preserves lake holes, and uses only local warm fills',async t=>{
+  const {w,$}=await setup(t,{realMap:true});
+  const land=[...$('land').children];assert.equal(land.length,w.WORLD_PATHS.length);
+  assert.ok(land.every((path,i)=>path.getAttribute('d')===w.WORLD_PATHS[i]));
+  assert.ok(land.every(path=>/^url\(#atlas-/.test(path.style.fill)));
+  assert.equal($('atlas-land-clip'),null);assert.equal($('land-washes'),null,'Camera frames have no full-world gradient clipping passes');
 });
 
 test('photo-view turns pause background thumbnail work and resume it after settling or dismissal',async t=>{
@@ -1188,8 +1188,11 @@ test('photo-view turns pause background thumbnail work and resume it after settl
     assert.equal(started,3,'No new background decode competes with the moving leaf');
     if(dismiss){press('Escape');await wait(()=>motion.running.size===3);}
     else await motion.finish();
-    await wait(()=>started===6);releases.splice(0).forEach(resolve=>resolve());await warmed;
-    if(dismiss){await motion.finish();await wait(()=>!$('photo-panel').open);}
+    if(dismiss){
+      await tick();assert.equal(started,3,'The closing cover also keeps background decoding paused');
+      await motion.finish();await wait(()=>!$('photo-panel').open);await warmed;
+      assert.equal(started,3,'Dismissal cancels queued previews instead of decoding an invisible gallery');
+    }else{await wait(()=>started===6);releases.splice(0).forEach(resolve=>resolve());await warmed;}
   }
 });
 
@@ -1218,4 +1221,69 @@ test('opening a cover carries its binding on the turning leaf and cleans up on r
   assert.equal(pages(),'single:cover');$('album-next').click();assert.equal(motion.running.size,1);
   assert.ok(root.querySelector('.cover-turn.album-bound-page.single > .album-cover'));
   await motion.finish();assert.equal(pages(),'single:inside');assert.equal(root.querySelector('.album-bound-page'),null);
+});
+
+test('view faces stay in the same compositor stack from preparation through the final frame',async t=>{
+  const {w,$,tab}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w),releases=[];
+  w.HTMLImageElement.prototype.decode=function(){return this.closest('.album-view-layer')?new Promise(resolve=>releases.push(resolve)):Promise.resolve();};
+  $('sheet-view').click();const layer=$('album-book').querySelector('.album-view-layer'),leaf=layer.querySelector('.album-view-leaf');
+  assert.ok(leaf,'The final hinged leaf exists before thumbnail decoding finishes');
+  const images=[...layer.querySelectorAll('img')],parents=images.map(image=>image.parentNode);
+  const changes=[],observer=new w.MutationObserver(records=>changes.push(...records));observer.observe(layer,{subtree:true,childList:true});
+  assert.equal(motion.running.size,0);releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===4);
+  assert.equal(changes.length+observer.takeRecords().length,0,'Starting the turn does not remove, insert, or reparent any moving content');
+  assert.ok(images.every((image,i)=>image.parentNode===parents[i]));assert.equal(layer.querySelector('.album-view-leaf'),leaf);
+  observer.disconnect();await motion.finish();
+});
+
+test('closing releases gallery image elements while reopening restores saved photos and their city',async t=>{
+  const {$,tiles,press,tab,api,trip}=await setup(t);tiles();tab(madrid.id).click();
+  const before=await api(`/trips/${trip.id}`),ids=before.photos.map(photo=>photo.id);
+  assert.equal($('photo-gallery').querySelectorAll('img').length,3);press('Escape');
+  assert.equal($('photo-gallery').children.length,0,'The closed gallery no longer retains its decoded image elements');
+  assert.equal($('album-pages').children.length,0);
+  $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);
+  assert.equal($('photo-gallery').querySelectorAll('img').length,3);assert.equal(tab(madrid.id).getAttribute('aria-current'),'true');
+  const after=await api(`/trips/${trip.id}`);assert.deepEqual(after.photos.map(photo=>photo.id),ids,'Releasing previews never deletes stored photos');
+});
+
+test('legacy thumbnail generation waits for a page turn to finish',async t=>{
+  const {w,$,tab,storage,api}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w);let writes=0;
+  storage.api=(path,options)=>{if(path.endsWith('/thumb'))writes++;return api(path,options);};
+  $('sheet-view').click();await wait(()=>motion.running.size===4);
+  $('photo-gallery').querySelector('img').dispatchEvent(new w.Event('load'));
+  await tick();await tick();assert.equal(writes,0,'Canvas encoding and IndexedDB writes wait while paper is moving');
+  await motion.finish();await wait(()=>writes===1);
+});
+
+test('map frames read layout before painting, skip unchanged scenes, and defer hidden map work until the album closes',async t=>{
+  const {w,$,press}=await setup(t,{realMap:true}),frames=new Map();let next=10000,time=w.performance.now();
+  w.requestAnimationFrame=callback=>{const id=++next;frames.set(id,callback);return id;};w.cancelAnimationFrame=id=>frames.delete(id);
+  const frame=()=>{time+=16;for(const id of [...frames.keys()]){const callback=frames.get(id);frames.delete(id);callback?.(time);}};
+  press('Escape');await tick();frame();await tick();
+  const map=$('map'),mutations=[],observer=new w.MutationObserver(records=>mutations.push(...records));observer.observe(map,{attributes:true,subtree:true});
+  map.getScreenCTM=()=>{throw Error('Camera input must not force SVG layout');};
+  w.RedlineApp.refreshLayout();frame();await tick();assert.equal(mutations.length,0,'An unchanged scene does not rewrite SVG geometry, labels, or dots');
+  const read=w.Element.prototype.getBoundingClientRect,write=w.Element.prototype.setAttribute;let activity=[];
+  w.Element.prototype.getBoundingClientRect=function(){activity.push('read');return read.call(this);};
+  w.Element.prototype.setAttribute=function(...args){if(this===map||map.contains(this))activity.push('write');return write.apply(this,args);};
+  $('zoom-in').click();
+  for(let i=0;i<90;i++){
+    activity=[];frame();const firstWrite=activity.indexOf('write');
+    if(firstWrite>=0)assert.ok(!activity.slice(firstWrite).includes('read'),'A zoom frame never forces layout after changing SVG attributes');
+  }
+  await tick();assert.ok(mutations.some(record=>record.target===map&&record.attributeName==='viewBox'));
+  const old=map.getAttribute('viewBox').split(' ').map(Number),anchor=[old[0]+old[2]*.2,old[1]+old[3]*.3];
+  map.dispatchEvent(new w.WheelEvent('wheel',{clientX:288,clientY:270,deltaY:-100,bubbles:true,cancelable:true}));
+  for(let i=0;i<90;i++)frame();await tick();
+  const zoomed=map.getAttribute('viewBox').split(' ').map(Number);
+  assert.ok(Math.abs((anchor[0]-zoomed[0])/zoomed[2]-.2)<1e-6&&Math.abs((anchor[1]-zoomed[1])/zoomed[3]-.3)<1e-6,'Wheel zoom preserves the point beneath the cursor');
+  const before=map.getAttribute('viewBox');mutations.length=0;
+  $('photo-panel').showModal();await tick();$('zoom-in').click();
+  for(let i=0;i<90;i++)frame();await tick();
+  assert.equal(mutations.length,0,'The open album has the rendering budget; camera state can advance without painting the dimmed map');
+  assert.equal(map.getAttribute('viewBox'),before);
+  $('photo-panel').close();await tick();frame();await tick();
+  assert.notEqual(map.getAttribute('viewBox'),before,'Closing immediately paints the current camera position');
+  observer.disconnect();
 });

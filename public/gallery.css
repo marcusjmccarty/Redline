@@ -8,8 +8,8 @@
 .small-button:active:not(:disabled) { transform: scale(.97); }
 .small-button:hover:not(:disabled) { border-color: var(--brass); }
 .small-button.primary-button { display: inline-flex; align-items: center; gap: 7px; border-color: var(--red); background: var(--red); color: var(--mat); }
-#choose-photos { border-color: var(--route-red); background: var(--route-red); transition: filter .15s ease; }
-#choose-photos:hover:not(:disabled) { border-color: var(--route-red); background: var(--route-red); filter: brightness(.96); }
+#choose-photos { border-color: #a3342b; background: #a3342b; color: #fff8ed; }
+#choose-photos:hover:not(:disabled) { border-color: #892b24; background: #892b24; }
 .small-button.primary-button:hover:not(:disabled) { border-color: var(--red-dark); background: var(--red-dark); }
 .primary-button svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
 .album select, #photo-viewer select {
@@ -72,7 +72,7 @@
 .album-pages.single { grid-template-columns: 1fr; translate: none; box-shadow: 2px 0 0 var(--paper-low), 4px 0 0 var(--paper-low), 5px 0 0 var(--paper); }
 :is(.closed-front, .closed-back) .album-pages.single { box-shadow: none; }
 .album-pages.single::after { left: 0; width: 22px; transform: none; background: linear-gradient(90deg, #51433040, #0000); }
-.album-page { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 6% 6.5% 7.5%; color: var(--page-ink); background-color: var(--page); background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.07'/%3E%3C/svg%3E"), radial-gradient(120% 90% at 50% 40%, #0000 60%, #8a6a3c14); }
+.album-page { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 6% 6.5% 7.5%; color: var(--page-ink); background-color: var(--page); background-image: var(--paper-grain), radial-gradient(120% 90% at 50% 40%, #0000 60%, #8a6a3c14); }
 .album-page.left { border-radius: 3px 0 0 3px; box-shadow: inset -26px 0 34px -28px #5143308c; }
 .album-page.right { border-radius: 0 3px 3px 0; box-shadow: inset 26px 0 34px -28px #5143308c; }
 .album-page.single { border-radius: 0 3px 3px 0; box-shadow: inset 18px 0 26px -22px #51433080; }
@@ -118,6 +118,7 @@
 .album-snapshot.album-pages { perspective: none; }
 .album-snapshot .gallery-city-heading { -webkit-backdrop-filter: none; backdrop-filter: none; }
 .album-view-layer { position: absolute; z-index: 4; inset: var(--pad) calc(var(--pad) + 2px); isolation: isolate; pointer-events: none; }
+.album-view-guard { z-index: 4; }
 .album-view-surface { contain: layout paint; position: absolute; top: 0; bottom: 0; left: 0; width: 50%; overflow: hidden; }
 .album-view-surface.right { left: 50%; }
 .album-view-surface > .album-snapshot { position: absolute; top: 0; bottom: auto; right: auto; height: 100%; margin: 0; transform: none; }
@@ -129,7 +130,6 @@
 .album-frozen-gallery, .album-frozen-group, .album-frozen-grid { position: absolute; inset: 0; }
 :is(#photo-gallery, .album-copy-photo-gallery) .album-frozen-grid { display: block; padding: 0; }
 .album-frozen-scroll .gallery-city-heading { position: absolute; }
-.album-view-preparation { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
 .album-view-hinge { position: absolute; z-index: 3; inset: 0; perspective: 2800px; }
 .album-view-leaf { position: absolute; top: 0; bottom: 0; width: 50%; transform-style: preserve-3d; will-change: transform; }
 .album-view-leaf.forward { left: 50%; transform-origin: left center; }
@@ -141,6 +141,7 @@
 .album-view-layer.single > .album-view-surface, .album-view-layer.single .album-view-leaf { left: 0; width: 100%; transform-origin: left center; }
 .album-view-layer .album-pages::after { opacity: var(--view-crease); }
 .album-book[data-view-motion] :is(.album-pages, .album-tabs) { transition: none; }
+.album-book[data-view-motion] > :is(.album-pages, .album-sheet) * { transition: none !important; animation: none !important; }
 .album-book[data-view-motion]::before { transition: opacity .32s ease; }
 /* Settle hidden layout transitions before taking or releasing a spread. */
 .album-book:is([data-cover-preparing], [data-preparing], [data-cover-motion]) :is(.album-pages, .album-sheet, .album-tabs),

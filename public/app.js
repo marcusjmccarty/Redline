@@ -49,6 +49,9 @@
   const WORLD_W=1440,WORLD_H=720,MAX_ZOOM=(4/3)**9;
   let view={x:0,y:0,w:WORLD_W,h:WORLD_H};
   let baseView={...view},viewFrame=0,zoomLevel=1,activeStopId=null;
+  let atlas=null,lastLayout='',lastLayoutGeometry=null,mapOccluded=false,viewportBounds=null;
+  const changed=(node,name,value)=>{const text=String(value);if(node.getAttribute(name)!==text)node.setAttribute(name,text);};
+  const mapMatrix=bounds=>({a:bounds.width/view.w,b:0,c:0,d:bounds.height/view.h,e:bounds.left-view.x*bounds.width/view.w,f:bounds.top-view.y*bounds.height/view.h});
   stops=stops.map(p=>({...p,id:p.id||crypto.randomUUID()}));
   const undoStack=[],redoStack=[];
   const copyRoute=()=>stops.map(stop=>({...stop}));
@@ -72,8 +75,10 @@
   persist();
   const project=p=>RedlineLayout.project([p.longitude,p.latitude]);
   const backgroundPoints=window.MAP_CITIES.map(project);
-  let hiddenMapCities=new Set(),routeIndex=null,routeIndexGeometry=null,routeIndexKey='';
+  let hiddenMapCities=new Set(),stopPeers=[],routeIndex=null,routeIndexGeometry=null,routeIndexKey='';
   function rebuildGeometry(){
+    const names=stops.map(stop=>normalize(stop.name));
+    stopPeers=stops.map((a,index)=>stops.flatMap((b,i)=>Math.abs(a.latitude-b.latitude)<.15&&Math.abs(a.longitude-b.longitude)<.15&&names[index]===names[i]?[i]:[]));
     hiddenMapCities=new Set(window.MAP_CITIES.flatMap((p,i)=>stops.some(s=>Math.abs(s.latitude-p.latitude)<.15&&Math.abs(s.longitude-p.longitude)<.15)?[i]:[]));
     geometry=stops.slice(1).map((place,i)=>{
       const interpolate=RedlineGeo.geoInterpolate([stops[i].longitude,stops[i].latitude],[place.longitude,place.latitude]);
@@ -90,20 +95,20 @@
   }
   const stopShown=i=>!(activeLeg?.destination===i&&Math.abs(progress-i)>1e-7)&&(progress===null||i<=progress+1e-7||activeLeg?.origin===i);
   // A city visited twice (same name, close by: sources differ slightly) is named once, by the active visit or else the first one shown; its dot goes there too.
-  const samePlace=(a,b)=>a===b||Math.abs(a.latitude-b.latitude)<.15&&Math.abs(a.longitude-b.longitude)<.15&&normalize(a.name)===normalize(b.name);
-  function labelOwner(index){const visit=(p,i)=>stopShown(i)&&samePlace(p,stops[index]),active=stops.findIndex((p,i)=>p.id===activeStopId&&visit(p,i)),first=stops.findIndex(visit);return active>=0?active:first>=0?first:index;}
+  function labelOwner(index){const peers=stopPeers[index]||[index];return peers.find(i=>stops[i].id===activeStopId&&stopShown(i))??peers.find(stopShown)??index;}
   function paintProgress(){
     lines.forEach((path,i)=>{
       const amount=progress===null?1:Math.max(0,Math.min(1,progress-i));
-      path.style.visibility=amount===0?'hidden':'';
       // Reveal the cached arc by screen distance for a steady drawing speed.
       if(path._amount!==amount){
+        path.style.visibility=amount===0?'hidden':'';
         path.setAttribute('d',geometry[i].pathAt(amount));
         path._amount=amount;
       }
     });
     [...$('route-stops').children].forEach((node,i)=>{
       const visible=stopShown(i);
+      if(node._shown===visible)return;node._shown=visible;
       node.style.opacity=visible?'1':'0';node.setAttribute('aria-hidden',String(!visible));
       node.setAttribute('tabindex',visible?'0':'-1');node.style.pointerEvents=visible?'':'none';
     });
@@ -115,7 +120,7 @@
       const [x,y]=project(place),group=svg('g',{'data-index':index,transform:`translate(${x} ${y})`}),dot=svg('circle',{cx:0,cy:0,r:4.5,class:'stop-dot'});
       const label=svg('text',{x:10,y:-12,class:'stop-label label-hidden'});
       label.textContent=place.name.toUpperCase();
-      group.append(dot,label);$('route-stops').append(group);
+      group.append(dot,label);group._point=[x,y];group._label=label;$('route-stops').append(group);
       group.setAttribute('role','button');group.setAttribute('aria-label',`Go to ${place.name}, stop ${index+1}`);
       group.addEventListener('pointerdown',event=>event.stopPropagation());
       // A mouse click focuses the city without leaving a keyboard focus ring on its dot, and keys then act on the map.
@@ -334,7 +339,7 @@
   // Place names avoid the route's dots, its chosen label boxes, and the dock.
   function renderLabels(matrix,bounds,occupied,routes) {
     const layer=$('place-labels'),width=bounds.width,height=bounds.height;
-    layer.setAttribute('viewBox',`0 0 ${width} ${height}`);
+    changed(layer,'viewBox',`0 0 ${width} ${height}`);
     const visible=new Set();
     const screen=(x,y)=>[x*matrix.a+matrix.e-bounds.left,y*matrix.d+matrix.f-bounds.top];
     function placeLabel(key,name,x,y,isCity) {
@@ -346,7 +351,7 @@
       occupied.push(box);visible.add(key);
       let node=labelNodes.get(key);
       if(!node){node=svg('g',{class:isCity?'city-label':'country-label'});if(isCity)node.append(svg('circle',{r:2}));const text=svg('text',{'font-size':font,'text-anchor':isCity?'start':'middle',x:isCity?7:0,y:isCity?-4:4});text.textContent=name;node.append(text);labelNodes.set(key,node);layer.append(node);}
-      node.setAttribute('transform',`translate(${sx.toFixed(1)} ${sy.toFixed(1)})`);
+      changed(node,'transform',`translate(${sx.toFixed(1)} ${sy.toFixed(1)})`);
     }
     if(zoomLevel>=1.3){
       for(let i=0;i<window.MAP_COUNTRIES.length;i++){
@@ -380,20 +385,29 @@
   function paintView() {
     if(viewFrame)cancelAnimationFrame(viewFrame);viewFrame=0;
     view=constrainView(view);
-    map.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);
-    const bounds=map.getBoundingClientRect(),matrix=map.getScreenCTM();if(!matrix||!bounds.width||!bounds.height)return;
-    // Read every overlay box before writing, so a frame forces at most one layout.
+    // A full-screen album owns the frame budget. Playback still advances its
+    // model; reveal its current position when the album is dismissed.
+    if(mapOccluded)return;
+    const bounds=map.getBoundingClientRect();if(!bounds.width||!bounds.height)return;viewportBounds=bounds;
+    const matrix=mapMatrix(bounds);
+    // All geometry reads precede writes. Asking SVG for its CTM after changing
+    // viewBox used to force layout on every zoom / trace frame.
     const local=(el,pad)=>{const r=el.getBoundingClientRect();return {x:r.left-bounds.left-pad,y:r.top-bounds.top-pad,w:r.width+pad*2,h:r.height+pad*2};};
     const controls=!document.body.classList.contains('map-only'),dock=controls?local($('route-dock'),8):null,obstacles=[];
     if(controls){obstacles.push({x:dock.x+4,y:dock.y+4,w:dock.w-8,h:dock.h-8});if(zoomControls)obstacles.push(local(zoomControls,4));if(!$('trip-panel').hidden)obstacles.push(local($('trip-panel'),8));}
-    paintAntarctica(matrix,bounds);
-    zoomLevel=baseView.w/view.w;
-    $('zoom-in').disabled=zoomLevel>=MAX_ZOOM-.001;$('zoom-out').disabled=zoomLevel<=1.001;
-    map.classList.toggle('zoomed-out',zoomLevel<=1.001);$('regions').style.display=zoomLevel>=1.6?'':'none';
     // Route geometry stays in map coordinates. Camera motion transforms only
     // each queried label box instead of re-projecting and re-indexing every arc.
     const amounts=geometry.map((leg,i)=>progress===null||activeLeg&&Math.min(activeLeg.origin,activeLeg.destination)===i?1:Math.max(0,Math.min(1,progress-i)));
     const key=amounts.join(',');
+    const layout=JSON.stringify([view,bounds.width,bounds.height,bounds.left,bounds.top,obstacles,key,activeStopId,stops.map((_,i)=>stopShown(i))]);
+    if(layout===lastLayout&&lastLayoutGeometry===geometry){paintProgress();return;}
+    lastLayout=layout;lastLayoutGeometry=geometry;
+    changed(map,'viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);
+    paintAntarctica(matrix,bounds);
+    zoomLevel=baseView.w/view.w;
+    $('zoom-in').disabled=zoomLevel>=MAX_ZOOM-.001;$('zoom-out').disabled=zoomLevel<=1.001;
+    map.classList.toggle('zoomed-out',zoomLevel<=1.001);
+    atlas?.paint(view,zoomLevel>=1.6);
     if(window.RedlineLabels&&(routeIndexGeometry!==geometry||routeIndexKey!==key)){
       routeIndex=RedlineLabels.indexLines(geometry.flatMap((leg,i)=>leg.segmentsAt(amounts[i])),{width:WORLD_W,height:WORLD_H});
       routeIndexGeometry=geometry;routeIndexKey=key;
@@ -401,8 +415,7 @@
     const routes=routeIndex&&RedlineLabels.projectIndex(routeIndex,matrix,bounds);
     const occupied=paintStops(matrix,bounds,obstacles,routes);
     for(const label of $('map-labels').children){
-      label.setAttribute('x','0');label.setAttribute('y','0');
-      label.setAttribute('transform',`translate(${label.dataset.mapX} ${label.dataset.mapY}) scale(${1/matrix.a} ${1/matrix.d}) rotate(${label.dataset.mapRotation})`);
+      changed(label,'transform',`translate(${label.dataset.mapX} ${label.dataset.mapY}) scale(${1/matrix.a} ${1/matrix.d}) rotate(${label.dataset.mapRotation})`);
     }
     if(dock)occupied.push(...obstacles);
     renderLabels(matrix,bounds,occupied,routes);paintProgress();
@@ -410,10 +423,9 @@
   function paintStops(matrix,bounds,obstacles,routes){
     const items=[],texts=[],occupied=[];
     [...$('route-stops').children].forEach((group,index)=>{
-      const [x,y]=project(stops[index]),dot=group.querySelector('circle'),text=group.querySelector('text');
+      const [x,y]=group._point,text=group._label;
       // Keep dots and labels at a fixed screen size while zooming.
-      group.setAttribute('transform',`translate(${x} ${y}) scale(${1/matrix.a} ${1/matrix.d})`);
-      dot.setAttribute('cx','0');dot.setAttribute('cy','0');dot.setAttribute('r','4.5');text.style.fontSize='13px';text.style.strokeWidth='4px';text.style.letterSpacing='.5px';
+      changed(group,'transform',`translate(${x} ${y}) scale(${1/matrix.a} ${1/matrix.d})`);
       // Unreached stops stay out of the layout while a trace reveals them.
       if(!stopShown(index))return;
       const sx=x*matrix.a+matrix.e-bounds.left,sy=y*matrix.d+matrix.f-bounds.top,id=stops[index].id;
@@ -433,7 +445,7 @@
   }
   function scheduleView(){if(!viewFrame)viewFrame=requestAnimationFrame(paintView);}
   function resizeMap(){
-    const bounds=map.getBoundingClientRect();if(!bounds.width||!bounds.height)return;
+    const bounds=map.getBoundingClientRect();if(!bounds.width||!bounds.height)return;viewportBounds=bounds;
     // Fill the viewport with the original full-width map and flush poles.
     const w=WORLD_W,h=WORLD_H;
     const previousZoom=baseView.w/view.w,centerX=view.x+view.w/2,centerY=view.y+view.h/2;
@@ -450,7 +462,7 @@
       return;
     }
     if(playback?.phase==='overview'){stopAnimation();showWorld();}
-    const matrix=map.getScreenCTM(),rx=clientX===undefined ? .5 : Math.max(0,Math.min(1,((clientX-matrix.e)/matrix.a-view.x)/view.w)),ry=clientY===undefined ? .5 : Math.max(0,Math.min(1,((clientY-matrix.f)/matrix.d-view.y)/view.h));
+    const matrix=mapMatrix(viewportBounds||map.getBoundingClientRect()),rx=clientX===undefined ? .5 : Math.max(0,Math.min(1,((clientX-matrix.e)/matrix.a-view.x)/view.w)),ry=clientY===undefined ? .5 : Math.max(0,Math.min(1,((clientY-matrix.f)/matrix.d-view.y)/view.h));
     const width=Math.max(baseView.w/MAX_ZOOM,Math.min(baseView.w,(idleZoom?.width||view.w)*factor));
     const anchor={x:view.x+view.w*rx,y:view.y+view.h*ry,rx,ry};
     if(matchMedia('(prefers-reduced-motion: reduce)').matches){stopAnimation();const height=width*baseView.h/baseView.w;view={x:anchor.x-rx*width,y:anchor.y-ry*height,w:width,h:height};paintView();return;}
@@ -469,9 +481,9 @@
   }
   $('zoom-in').addEventListener('click',()=>zoom(.75));$('zoom-out').addEventListener('click',()=>zoom(4/3));
   $('reset-view').addEventListener('click',()=>showOverview());
-  map.addEventListener('wheel',event=>{event.preventDefault();if(!event.deltaY)return;const units=event.deltaMode===1?16:event.deltaMode===2?map.getBoundingClientRect().height:1;const delta=Math.max(-160,Math.min(160,event.deltaY*units));zoom(Math.exp(delta*(event.ctrlKey?.008:.0018)),event.clientX,event.clientY);},{passive:false});
+  map.addEventListener('wheel',event=>{event.preventDefault();if(!event.deltaY)return;const units=event.deltaMode===1?16:event.deltaMode===2?(viewportBounds||map.getBoundingClientRect()).height:1;const delta=Math.max(-160,Math.min(160,event.deltaY*units));zoom(Math.exp(delta*(event.ctrlKey?.008:.0018)),event.clientX,event.clientY);},{passive:false});
   let drag=null;
-  map.addEventListener('pointerdown',event=>{if(event.button!==0||baseView.w/view.w<=1.001)return;stopAnimation();const m=map.getScreenCTM();drag={x:event.clientX,y:event.clientY,vx:view.x,vy:view.y,scaleX:m.a,scaleY:m.d,id:event.pointerId};map.setPointerCapture(event.pointerId);map.classList.add('dragging');});
+  map.addEventListener('pointerdown',event=>{if(event.button!==0||baseView.w/view.w<=1.001)return;stopAnimation();const m=mapMatrix(viewportBounds||map.getBoundingClientRect());drag={x:event.clientX,y:event.clientY,vx:view.x,vy:view.y,scaleX:m.a,scaleY:m.d,id:event.pointerId};map.setPointerCapture(event.pointerId);map.classList.add('dragging');});
   map.addEventListener('pointermove',event=>{if(!drag||event.pointerId!==drag.id||baseView.w/view.w<=1.001)return;view.x=drag.vx-(event.clientX-drag.x)/drag.scaleX;view.y=drag.vy-(event.clientY-drag.y)/drag.scaleY;scheduleView();});
   const endDrag=()=>{drag=null;map.classList.remove('dragging');};map.addEventListener('pointerup',endDrag);map.addEventListener('pointercancel',endDrag);map.addEventListener('lostpointercapture',endDrag);
   function updateActiveStop(){
@@ -624,16 +636,15 @@
   document.addEventListener('keyup',event=>{held.delete(event.key);if(event.key===' '&&event.target.id==='play')event.preventDefault();});
   window.addEventListener('blur',()=>held.clear());
   document.addEventListener('visibilitychange',()=>{if(document.hidden){held.clear();lastTick=null;}});
-  const fragment=document.createDocumentFragment(),landClip=document.createDocumentFragment();
-  for(const d of window.WORLD_PATHS){
-    const path=svg('path',{d});fragment.append(path);landClip.append(path.cloneNode());
-  }
-  // Direct shapes keep the regional washes clipped to the same coastlines
-  // and lake holes in every browser, without a repeating raster texture.
-  $('land').append(fragment);$('atlas-land-clip').append(landClip);
+  atlas=RedlineAtlas.create($('land'),$('regions'),window.WORLD_PATHS,window.REGION_PATHS);
   for(const polygon of window.ANTARCTICA_POLYGONS)$('antarctica').append(svg('path'));
-  const regionFragment=document.createDocumentFragment();for(const d of REGION_PATHS)if(d)regionFragment.append(svg('path',{d}));$('regions').append(regionFragment);
-  for(const label of $('map-labels').children){label.dataset.mapX=label.getAttribute('x');label.dataset.mapY=label.getAttribute('y');label.dataset.mapRotation=label.getAttribute('transform')?.match(/rotate\(([-\d.]+)/)?.[1]||'0';}
+  for(const label of $('map-labels').children){label.dataset.mapX=label.getAttribute('x');label.dataset.mapY=label.getAttribute('y');label.dataset.mapRotation=label.getAttribute('transform')?.match(/rotate\(([-\d.]+)/)?.[1]||'0';label.setAttribute('x','0');label.setAttribute('y','0');}
+  const photoVisibility=new MutationObserver(()=>{
+    const hidden=$('photo-panel').open||$('photo-viewer').open;
+    if(hidden===mapOccluded)return;mapOccluded=hidden;
+    if(!hidden){lastLayout='';scheduleView();}
+  });
+  for(const id of ['photo-panel','photo-viewer'])photoVisibility.observe($(id),{attributes:true,attributeFilter:['open']});
   window.RedlineApp={
     showControls:()=>setMapOnly(false),
     closeSearch,

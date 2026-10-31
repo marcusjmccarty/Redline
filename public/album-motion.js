@@ -5,7 +5,7 @@
   const done=animations=>Promise.all(animations.map(animation=>animation.finished.catch(()=>{})));
   // Retain decoded thumbnails while the album is open. Throwaway Image
   // objects did not keep the next view ready and only warmed a dozen photos.
-  const previews=new Map(),previewQueue=[];
+  const previews=new Map(),previewQueue=[],idleWaiters=new Set();
   let decoding=0,previewHolds=0;
   function pumpPreviews(){
     while(!previewHolds&&decoding<3&&previewQueue.length){
@@ -40,8 +40,14 @@
   }
   function holdPreviews(){
     previewHolds++;let released=false;
-    return ()=>{if(released)return;released=true;previewHolds--;pumpPreviews();};
+    return ()=>{
+      if(released)return;released=true;previewHolds--;
+      // A view turn may hand directly to a closing cover in this same task.
+      // Let that next owner acquire its hold before starting queued work.
+      queueMicrotask(()=>{if(previewHolds)return;for(const resolve of idleWaiters)resolve();idleWaiters.clear();pumpPreviews();});
+    };
   }
+  const idle=()=>previewHolds?new Promise(resolve=>idleWaiters.add(resolve)):Promise.resolve();
   function snapshots(source){
     const scroll=source.querySelector('.photo-scroll'),viewport=scroll?.getBoundingClientRect();
     const positions=[...source.querySelectorAll('.photo-scroll')].map(node=>[node.scrollTop,node.scrollLeft]);
@@ -183,6 +189,7 @@
     return animations;
   }
   function create({book,source,cover,two,closed='',opening=false}){
+    const resumePreviews=holdPreviews();
     const arrival=make('album-arrival'),scene=make('album-cover-scene'),hinge=make('album-cover-hinge'),leaf=make('album-cover-leaf'),front=make('album-cover-front'),back=make('album-cover-back');
     const tabs=document.getElementById('gallery-filter'),tabParent=tabs.parentElement,tabNext=tabs.nextSibling;
     const tabHeight=tabs.getBoundingClientRect().height,tabMaxHeight=tabs.style.maxHeight,tabScroll=[tabs.scrollTop,tabs.scrollLeft];
@@ -260,6 +267,7 @@
         tabs.style.maxHeight=tabMaxHeight;[tabs.scrollTop,tabs.scrollLeft]=tabScroll;
         arrival.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.coverMotion;delete book.dataset.coverPreparing;
         [book.style.width,book.style.height,book.style.flex]=savedSize;
+        resumePreviews();
       }
     };
   }
@@ -290,10 +298,23 @@
     book.dataset.viewMotion='true';
     const incoming=apply(),visibility=incoming.style.visibility;incoming.style.visibility='hidden';
     const newLeft=surface(incoming),newRight=two?surface(incoming,true):null;
-    // Keep incoming copies in the laid-out scene while decoding, without
-    // revealing them or resetting their nested scrolling containers.
-    const preparation=make('album-view-preparation');preparation.append(newLeft);if(newRight)preparation.append(newRight);
-    layer.append(preparation);copies.forEach(copy=>copy.restore());
+    const frontShade=make('page-shade album-view-shade'),backShade=make('page-shade album-view-shade'),cast=make('page-shade cast');
+    front.classList.add(forward?'right':'left');back.classList.add(forward?'left':'right');
+    // Build the final 3D stack before decoding. At zero degrees the outgoing
+    // face covers the next spread. No moving images are reparented at takeoff;
+    // the browser has the entire preparation window to rasterize these layers.
+    if(two){
+      const underLeft=forward?oldLeft:newLeft,underRight=forward?newRight:oldRight;
+      front.append(forward?oldRight:oldLeft,frontShade);back.append(forward?newLeft:newRight,backShade);
+      (forward?underRight:underLeft).append(cast);leaf.append(front,back);hinge.append(leaf);layer.replaceChildren(underLeft,underRight,hinge);
+    }else{
+      const under=forward?newLeft:oldLeft;front.append(forward?oldLeft:newLeft);leaf.append(front);hinge.append(leaf);layer.replaceChildren(under,hinge);
+      leaf.classList.add('single-leaf');
+      // A backward single-page turn starts partly folded. Keep the old page
+      // above it during preparation, then remove only this stationary guard.
+      if(!forward){const guard=oldLeft.cloneNode(true);guard.classList.add('album-view-guard');layer.append(guard);}
+    }
+    copies.forEach(copy=>copy.restore());
     const after=tabs.getBoundingClientRect(),shift=`${before.left-after.left}px ${before.top-after.top}px`;
     const tabsMove=before.left!==after.left||before.top!==after.top;if(tabsMove)tabs.style.translate=shift;
     let disposed=false,started=false,animations=[],readyTimer,cancelReady;
@@ -304,21 +325,11 @@
         if(disposed)return;
         await Promise.race([ready,cancelled,new Promise(resolve=>{readyTimer=setTimeout(resolve,240);})]);
         clearTimeout(readyTimer);if(disposed)return;
-        const frontShade=make('page-shade album-view-shade'),backShade=make('page-shade album-view-shade'),cast=make('page-shade cast');
-        front.classList.add(forward?'right':'left');back.classList.add(forward?'left':'right');
-        if(two){
-          const underLeft=forward?oldLeft:newLeft,underRight=forward?newRight:oldRight;
-          front.append(forward?oldRight:oldLeft,frontShade);back.append(forward?newLeft:newRight,backShade);
-          (forward?underRight:underLeft).append(cast);leaf.append(front,back);hinge.append(leaf);layer.replaceChildren(underLeft,underRight,hinge);
-        }else{
-          const under=forward?newLeft:oldLeft;front.append(forward?oldLeft:newLeft);leaf.append(front);hinge.append(leaf);layer.replaceChildren(under,hinge);
-          leaf.classList.add('single-leaf');
-        }
-        copies.forEach(copy=>copy.restore());
         // Give the browser a paint opportunity with the finished leaf in its
         // final stacking order. Uploads and scroll restoration precede motion.
         await Promise.race([cancelled,new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))]);
         if(disposed)return;started=true;
+        layer.querySelector('.album-view-guard')?.remove();
         animations=turnLeaf({leaf,frontShade,backShade,cast,forward,two});
         if(tabsMove)animations.push(tabs.animate([{translate:shift},{translate:tabTranslate||'0px 0px'}],{duration:two?744:560,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}));
         await done(animations);
@@ -326,5 +337,5 @@
       dispose(){disposed=true;clearTimeout(readyTimer);cancelReady();incoming.style.visibility=visibility;tabs.style.translate=tabTranslate;layer.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.viewMotion;[book.style.width,book.style.height,book.style.flex]=savedSize;resumePreviews();}
     };
   }
-  window.RedlineAlbumMotion={create,changeView,turnLeaf,preload,clearPreloads};
+  window.RedlineAlbumMotion={create,changeView,turnLeaf,preload,clearPreloads,idle};
 })();
