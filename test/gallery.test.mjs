@@ -149,7 +149,11 @@ test('the divider tabs are coloured book cloth with readable labels',()=>{
   assert.match(rule,/var\(--tab\b/,'Each tab takes its colour from its --tab index');
   const colours=rule.match(/linear-gradient\(([^;]*)\)/)[1].match(/#[0-9a-f]{6}/gi);assert.equal(colours.length,6);
   const luminance=hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(c=>c<=.03928?c/12.92:((c+.055)/1.055)**2.4).reduce((sum,c,i)=>sum+c*[.2126,.7152,.0722][i],0);
-  for(const colour of colours)assert.ok((luminance('#fbf4e6')+.05)/(luminance(colour)+.05)>=4.5,`${colour} keeps the tab label readable`);
+  const foreground=source('public/style.css').match(/--mat:\s*(#[0-9a-f]{6})/)[1];
+  for(const colour of colours){
+    const active='#'+[1,3,5].map(i=>Math.min(255,Math.round(parseInt(colour.slice(i,i+2),16)*1.06)).toString(16).padStart(2,'0')).join('');
+    assert.ok((luminance(foreground)+.05)/(luminance(active)+.05)>=4.5,`${colour} keeps its label readable even when highlighted`);
+  }
   assert.doesNotMatch(css,/--tab-color|\.at-(start|end)|^\.eyebrow /m,'No dead colour fallback, duplicate classes, or second .eyebrow');
 });
 
@@ -1165,4 +1169,23 @@ test('regional atlas washes use direct coastline shapes and preserve the map hol
   assert.equal(clip.getAttribute('clip-rule'),'evenodd');assert.equal(clip.children.length,land.length);
   assert.ok([...clip.children].every((path,i)=>path.tagName.toLowerCase()==='path'&&path.getAttribute('d')===land[i].getAttribute('d')));
   assert.equal($('land-washes').getAttribute('clip-path'),'url(#atlas-land-clip)');
+});
+
+test('photo-view turns pause background thumbnail work and resume it after settling or dismissal',async t=>{
+  const {w,$,press}=await setup(t),motion=controlledMotion(w),cache=w.RedlineAlbumMotion;
+  for(const dismiss of [false,true]){
+    cache.clearPreloads();const releases=[];let started=0;
+    w.HTMLImageElement.prototype.decode=function(){
+      return this.src.includes('/idle-')?new Promise(resolve=>{started++;releases.push(resolve);}):Promise.resolve();
+    };
+    const warmed=cache.preload(Array.from({length:6},(_,i)=>`https://redline.test/idle-${dismiss}-${i}.jpg`));
+    await tick();assert.equal(started,3);
+    $(dismiss?'album-view':'sheet-view').click();await wait(()=>motion.running.size===4);
+    releases.splice(0).forEach(resolve=>resolve());await tick();
+    assert.equal(started,3,'No new background decode competes with the moving leaf');
+    if(dismiss){press('Escape');await wait(()=>motion.running.size===3);}
+    else await motion.finish();
+    await wait(()=>started===6);releases.splice(0).forEach(resolve=>resolve());await warmed;
+    if(dismiss){await motion.finish();await wait(()=>!$('photo-panel').open);}
+  }
 });
