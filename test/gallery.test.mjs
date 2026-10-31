@@ -149,9 +149,10 @@ test('the divider tabs are coloured book cloth with readable labels',()=>{
   assert.match(rule,/var\(--tab\b/,'Each tab takes its colour from its --tab index');
   const colours=rule.match(/linear-gradient\(([^;]*)\)/)[1].match(/#[0-9a-f]{6}/gi);assert.equal(colours.length,6);
   const luminance=hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(c=>c<=.03928?c/12.92:((c+.055)/1.055)**2.4).reduce((sum,c,i)=>sum+c*[.2126,.7152,.0722][i],0);
-  const foreground=source('public/style.css').match(/--mat:\s*(#[0-9a-f]{6})/)[1];
+  const foreground=rule.match(/color:\s*(#[0-9a-f]{6})/)[1];
+  const brightness=Number(css.match(/\.album-tab\[aria-current=true\][^{]*\{[^}]*brightness\(([\d.]+)\)/)[1]);
   for(const colour of colours){
-    const active='#'+[1,3,5].map(i=>Math.min(255,Math.round(parseInt(colour.slice(i,i+2),16)*1.06)).toString(16).padStart(2,'0')).join('');
+    const active='#'+[1,3,5].map(i=>Math.min(255,Math.round(parseInt(colour.slice(i,i+2),16)*brightness)).toString(16).padStart(2,'0')).join('');
     assert.ok((luminance(foreground)+.05)/(luminance(active)+.05)>=4.5,`${colour} keeps its label readable even when highlighted`);
   }
   assert.doesNotMatch(css,/--tab-color|\.at-(start|end)|^\.eyebrow /m,'No dead colour fallback, duplicate classes, or second .eyebrow');
@@ -1039,16 +1040,18 @@ test('contact-sheet turns freeze sticky headings and visible prints at their exa
   };});
   const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===4);
   const snapshots=[...$('album-book').querySelectorAll('.album-frozen-sheet')];assert.equal(snapshots.length,2);
-  const captured=[...snapshots[0].querySelectorAll('.photo-tile')],indices=captured.map(tile=>all.findIndex(original=>original.dataset.photoId===tile.dataset.photoId));
-  assert.deepEqual(indices,Array.from({length:20},(_,index)=>index+136));
+  const captured=snapshots.flatMap(snapshot=>[...snapshot.querySelectorAll('.photo-tile')]),indices=[...new Set(captured.map(tile=>all.findIndex(original=>original.dataset.photoId===tile.dataset.photoId)))].sort((a,b)=>a-b);
+  assert.deepEqual(indices,Array.from({length:20},(_,index)=>index+136),'The two halves retain every visible print');
+  assert.equal(captured.length,25,'Only the five prints crossing the gutter are copied onto both faces');
   assert.ok(reads.size<35,'Work is bounded by the visible rows rather than all 300 photos');
   assert.ok([...reads.values()].every(count=>count===1),'No duplicate geometry reads or read/write layout loop');
   for(const snapshot of snapshots){
+    const side=parseFloat(snapshot.style.left)<0;
     assert.equal(snapshot.querySelector('.album-copy-photo-scroll').scrollTop,0,'Moving paper has no active scroller');
     assert.equal(snapshot.querySelector('.gallery-city-heading').style.top,'0px','The pinned heading is frozen at the viewport top');
     const first=snapshot.querySelector('.photo-tile');
-    assert.equal(first.style.left,'28px');assert.equal(first.style.top,'-80px');assert.equal(first.style.width,'150px');
-    assert.equal(snapshot.querySelectorAll('.photo-tile').length,20);
+    assert.equal(first.style.left,side?'380px':'28px');assert.equal(first.style.top,'-80px');assert.equal(first.style.width,'150px');
+    assert.equal(snapshot.querySelectorAll('.photo-tile').length,side?10:15);
     assert.equal(snapshot.querySelectorAll('[id]').length,0);
   }
   assert.equal(scroll.scrollTop,0,'The hidden live sheet can reset without moving the captured prints');
@@ -1188,4 +1191,31 @@ test('photo-view turns pause background thumbnail work and resume it after settl
     await wait(()=>started===6);releases.splice(0).forEach(resolve=>resolve());await warmed;
     if(dismiss){await motion.finish();await wait(()=>!$('photo-panel').open);}
   }
+});
+
+test('opening a cover carries its binding on the turning leaf and cleans up on reversal, resize, and dismissal',async t=>{
+  const {w,$,press,pages}=await setup(t);press('Home');
+  const motion=controlledMotion(w),book=$('album-book'),root=$('album-pages');
+  $('album-next').click();assert.equal(motion.running.size,4);
+  const leaf=root.querySelector('.cover-turn');assert.ok(leaf);
+  assert.equal(leaf.querySelector('.leaf-front > .album-page').dataset.type,'cover');
+  assert.equal(leaf.querySelector('.leaf-back > .album-page').dataset.type,'inside');
+  assert.equal(root.querySelectorAll('.album-bound-page').length,4,'Backing is local to both stationary pages and both rotating faces');
+  assert.equal(root.children[0].dataset.type,'void','No stationary board is exposed to the left of the opening cover');
+  await motion.finish();assert.equal(pages(),'left:inside right:title');assert.equal(root.querySelector('.album-bound-page'),null);
+  $('album-previous').click();assert.equal(root.querySelector('.leaf-back > .album-page').dataset.type,'cover');
+  $('album-next').click();assert.equal(motion.running.size,4,'Reversal discards the previous leaf');
+  await motion.finish();assert.equal(pages(),'left:inside right:title');
+  press('End');await motion.finish();assert.equal(pages(),'left:back right:void');
+  $('album-previous').click();assert.equal(root.querySelector('.leaf-front > .album-page').dataset.type,'back');
+  w.dispatchEvent(new w.Event('resize'));await wait(()=>!root.querySelector('.cover-turn'));
+  assert.equal(root.querySelector('.album-bound-page'),null);assert.equal(motion.running.size,0);
+  press('Home');press('Escape');await wait(()=>motion.running.size===3);
+  assert.equal(root.querySelector('.cover-turn'),null,'Closing the album settles a turning cover before capturing it');
+  await motion.finish();await wait(()=>!$('photo-panel').open);assert.equal(book.querySelector('.album-bound-page'),null);
+  Object.defineProperty(w,'innerWidth',{configurable:true,writable:true,value:700});
+  $('photos-button').click();await wait(()=>motion.running.size===3);await motion.finish();
+  assert.equal(pages(),'single:cover');$('album-next').click();assert.equal(motion.running.size,1);
+  assert.ok(root.querySelector('.cover-turn.album-bound-page.single > .album-cover'));
+  await motion.finish();assert.equal(pages(),'single:inside');assert.equal(root.querySelector('.album-bound-page'),null);
 });

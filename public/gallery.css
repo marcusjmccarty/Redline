@@ -8,6 +8,8 @@
 .small-button:active:not(:disabled) { transform: scale(.97); }
 .small-button:hover:not(:disabled) { border-color: var(--brass); }
 .small-button.primary-button { display: inline-flex; align-items: center; gap: 7px; border-color: var(--red); background: var(--red); color: var(--mat); }
+#choose-photos { border-color: var(--route-red); background: var(--route-red); transition: filter .15s ease; }
+#choose-photos:hover:not(:disabled) { border-color: var(--route-red); background: var(--route-red); filter: brightness(.96); }
 .small-button.primary-button:hover:not(:disabled) { border-color: var(--red-dark); background: var(--red-dark); }
 .primary-button svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
 .album select, #photo-viewer select {
@@ -157,7 +159,7 @@
 .album-leaf { position: absolute; z-index: 3; top: 0; bottom: 0; width: 50%; transform-style: preserve-3d; will-change: transform; }
 .album-leaf.turn-forward { left: 50%; transform-origin: left center; }
 .album-leaf.turn-back { left: 0; transform-origin: right center; }
-.album-page.leaf-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.leaf-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 .leaf-front { transform: translateZ(.1px); }
 .leaf-back { transform: rotateY(180deg) translateZ(.1px); }
 .page-shade { position: absolute; z-index: 6; inset: 0; opacity: 0; pointer-events: none; }
@@ -166,6 +168,23 @@
 :is(.album-page, .album-view-surface).right > .page-shade.cast { background: linear-gradient(90deg, #30271e99, #0000 45%); }
 :is(.album-page, .album-view-surface).left > .page-shade.cast { background: linear-gradient(270deg, #30271e99, #0000 45%); }
 .single-leaf { position: absolute; z-index: 3; inset: 0; transform-origin: left center; box-shadow: 10px 0 30px #30271e40; will-change: transform, opacity; }
+
+/* During a cover turn, each board belongs to its own page. The full-width
+   backing must not materialize behind a cover that is still upright. */
+.album-book:has(> .album-pages .cover-turn)::before,
+.album-book:has(> .album-pages .cover-turn)::after { visibility: hidden; transition: none; }
+.album-pages:has(.cover-turn) { box-shadow: none; }
+.album-pages:has(.cover-turn)::after { visibility: hidden; }
+.album-bound-page { position: relative; min-width: 0; min-height: 0; }
+.album-bound-page:is(.leaf-face, .single-leaf) { position: absolute; inset: 0; }
+.album-bound-page > .album-page { height: 100%; }
+.album-bound-page::before { content: ''; position: absolute; top: calc(-1 * var(--pad)); bottom: calc(-1 * var(--pad)); left: 0; right: 0; background: var(--leather); box-shadow: 0 26px 70px #0008, inset 0 1px 0 #ffffff14; }
+.album-bound-page.left::before { left: calc(-1 * var(--pad) - 2px); border-radius: 9px 0 0 9px; }
+.album-bound-page:is(.right, .single)::before { right: calc(-1 * var(--pad) - 2px); border-radius: 0 14px 14px 0; }
+.album-bound-page.single::before { left: calc(-1 * var(--pad) - 2px); border-radius: 9px 14px 14px 9px; }
+.album-bound-page:is([data-type=cover], [data-type=back], [data-type=void])::before { display: none; }
+.album-bound-page[data-type=void] { visibility: hidden; }
+.album-bound-page:not(.leaf-face).right::after { content: ''; position: absolute; z-index: 2; right: calc(-1 * var(--page-depth, 6px)); top: 2px; bottom: 2px; width: var(--page-depth, 6px); background: repeating-linear-gradient(90deg, var(--paper-low) 0 1px, var(--paper-edge) 1px 2px); }
 
 /* Covers, endpapers, title, and contents. These pages are size containers, so their type and spacing shrink with a short page. */
 .album-page:is(.album-cover, .page-inside, .page-title, .page-contents, .page-empty) { container-type: size; }
@@ -248,9 +267,9 @@
 .album-tabs { clip-path: inset(0 0 0 calc(16px + var(--page-depth, 6px))); overflow-x: hidden; position: absolute; z-index: 1; left: calc(100% - var(--pad) - 18px); top: 50%; transform: translateY(-50%); flex: none; display: flex; flex-direction: column; gap: 5px; max-height: 76%; margin: 0; padding: 4px 8px 4px 0; overflow-y: auto; scrollbar-width: none; transition: left var(--turn-duration) var(--turn-ease), opacity .2s; }
 .album-tabs::-webkit-scrollbar { display: none; }
 /* Book-cloth colours (oxblood, bottle green, navy, ochre, plum, slate) in one strip; --tab picks one, with half a colour to spare on each side. */
-.album-tab { display: flex; align-items: center; gap: 7px; width: calc(var(--tab-width) + 16px); padding: 8px 10px 8px 30px; border: 0; border-radius: 0 7px 7px 0; background: linear-gradient(90deg, #755b46 0 16.667%, #4e6358 0 33.333%, #4a6070 0 50%, #756446 0 66.667%, #6b5861 0 83.333%, #5c665d 0) calc((var(--tab, 0) * 2 + .5) * 100% / 11) 0 / 1200% 100%; color: var(--mat); font: 13px Georgia, serif; text-align: left; box-shadow: 2px 2px 6px #0006, inset 0 1px 0 #ffffff26; transform: none; transition: transform .3s var(--ease-out), filter .3s, box-shadow .3s; }
-.album-tab:hover:not(:disabled) { transform: translateX(2px); filter: brightness(1.04); }
-.album-tab[aria-current=true] { transform: translateX(0); filter: brightness(1.06); box-shadow: 3px 3px 10px #0008, inset 0 1px 0 #ffffff33; }
+.album-tab { display: flex; align-items: center; gap: 7px; width: calc(var(--tab-width) + 16px); padding: 8px 10px 8px 30px; border: 0; border-radius: 0 7px 7px 0; background: linear-gradient(90deg, #6b2c2a 0 16.667%, #2f4b3b 0 33.333%, #2d3c58 0 50%, #6c4f1e 0 66.667%, #583450 0 83.333%, #465360 0) calc((var(--tab, 0) * 2 + .5) * 100% / 11) 0 / 1200% 100%; color: #fbf4e6; font: 13px Georgia, serif; text-align: left; box-shadow: 2px 2px 6px #0006, inset 0 1px 0 #ffffff26; transform: none; transition: transform .3s var(--ease-out), filter .3s, box-shadow .3s; }
+.album-tab:hover:not(:disabled) { transform: translateX(2px); filter: brightness(1.08); }
+.album-tab[aria-current=true] { transform: translateX(0); filter: brightness(1.15); box-shadow: 3px 3px 10px #0008, inset 0 1px 0 #ffffff33; }
 .album-tab .chip-stop { flex: none; min-width: 12px; font: 9px Georgia, serif; opacity: .8; }
 .album-tab .tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .album-tab .chip-count { flex: none; font: 10px Arial, sans-serif; opacity: .85; }
