@@ -1,10 +1,10 @@
 /* Redline: the map, the voyage planner, and printing. The album and viewer live in gallery.css. */
-:root { color-scheme: light; --paper: #ecdfc5; --ink: #443527; --muted: #79664f; --red: #a13d2e; --dock: #f7f0e2; --chart: #f4ead4; --sepia: #4a3a26; --ease-out: cubic-bezier(.2, .85, .25, 1); --ease-in-out: cubic-bezier(.645, .045, .355, 1); }
+:root { color-scheme: light; --paper: #dcd0b6; --ink: #403428; --muted: #71614e; --red: #a13d2e; --route-red: #d93620; --dock: #ece3d1; --chart: #e5d8be; --sepia: #453728; --ease-out: cubic-bezier(.2, .85, .25, 1); --ease-in-out: cubic-bezier(.645, .045, .355, 1); }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; width: 100%; }
 body { height: 100svh; overflow: hidden; background: var(--paper); color: var(--ink); font-family: Arial, Helvetica, sans-serif; }
 body::before { content: ""; position: fixed; inset: 0; z-index: 5; pointer-events: none; opacity: .14; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%239b8867' opacity='.33' filter='url(%23noise)' d='M0 0h180v180H0z'/%3E%3C/svg%3E"); }
-body::after { content: ""; position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 150px #8d603021; }
+body::after { content: ""; position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 150px #624d3329; }
 button, input { font: inherit; }
 button { cursor: pointer; }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
@@ -27,27 +27,27 @@ input::placeholder { color: #8b8070; }
 
 /* The map */
 main { position: relative; width: 100%; height: 100%; }
-.map-shell { position: absolute; inset: 0; overflow: hidden; --water: #99b4b8; background: radial-gradient(ellipse at 45% 38%, #c3d2ce 0%, #afc4c3 48%, var(--water) 100%); }
+.map-shell { position: absolute; inset: 0; overflow: hidden; --water: #8a9fa4; background: radial-gradient(ellipse at 45% 38%, #afbcba 0%, #9eafb1 48%, var(--water) 100%); }
 #map { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 #map.dragging { cursor: grabbing; }
 #map.zoomed-out, #map.zoomed-out.dragging { cursor: default; }
 #map:focus { outline: none; }
-#land path, #antarctica path { fill: url(#land-wash); stroke: #a48761; stroke-width: .7; stroke-linejoin: round; fill-rule: evenodd; vector-effect: non-scaling-stroke; }
-#regions path { fill: none; stroke: #a08a65; stroke-width: .5; stroke-opacity: .65; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; pointer-events: none; }
-.continent { font-family: Georgia, serif; font-size: 15px; letter-spacing: 4px; text-anchor: middle; fill: #765b3b; opacity: .78; }
-.ocean { font-family: Georgia, serif; font-size: 15px; letter-spacing: 1px; font-style: italic; text-anchor: middle; fill: #4c6b71; opacity: .88; }
-.route-path { fill: none; stroke: var(--red); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.stop-dot { fill: var(--red); stroke: none; }
-.stop-label { font: bold 13px 'Courier New', monospace; letter-spacing: .5px; fill: #702e26; paint-order: stroke; stroke: #ede3cf; stroke-width: 4; stroke-linejoin: round; transition: opacity .15s ease; }
+#land path, #antarctica path { fill: url(#land-wash); stroke: #8e785a; stroke-width: .7; stroke-linejoin: round; fill-rule: evenodd; vector-effect: non-scaling-stroke; }
+#regions path { fill: none; stroke: #907e61; stroke-width: .5; stroke-opacity: .65; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+.continent { font-family: Georgia, serif; font-size: 15px; letter-spacing: 4px; text-anchor: middle; fill: #69563e; opacity: .82; }
+.ocean { font-family: Georgia, serif; font-size: 15px; letter-spacing: 1px; font-style: italic; text-anchor: middle; fill: #405b62; opacity: .9; }
+.route-path { fill: none; stroke: var(--route-red); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.stop-dot { fill: var(--route-red); stroke: none; }
+.stop-label { font: bold 13px 'Courier New', monospace; letter-spacing: .5px; fill: #702e26; paint-order: stroke; stroke: #ded1b9; stroke-width: 4; stroke-linejoin: round; transition: opacity .15s ease; }
 .stop-label.label-hidden { opacity: 0; pointer-events: none; }
 #route-stops [role=button] { cursor: pointer; }
 #route-stops [role=button]:focus-visible { outline: none; }
 #route-stops [role=button]:focus-visible .stop-dot { stroke: #a3342b59; stroke-width: 7; paint-order: stroke; }
 #place-labels { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; }
-#place-labels text { paint-order: stroke; stroke: #e9dfc9; stroke-width: 3px; stroke-linejoin: round; }
+#place-labels text { paint-order: stroke; stroke: #d9ccb3; stroke-width: 3px; stroke-linejoin: round; }
 .country-label text { font-family: Georgia, serif; letter-spacing: 1px; fill: #65533e; }
 .city-label text { font-family: Arial, sans-serif; fill: #605544; }
-.city-label circle { fill: var(--red); stroke: none; }
+.city-label circle { fill: var(--route-red); stroke: none; }
 .zoom-controls { position: absolute; right: 24px; bottom: 32px; display: flex; flex-direction: column; border: 1px solid #b1a08366; background: #f4ecdc7a; transition: opacity .3s ease, translate .4s var(--ease-out); }
 .zoom-controls button { display: grid; place-items: center; width: 34px; height: 34px; border: 0; background: transparent; color: #675a46; font-size: 22px; transition: color .15s ease, background-color .15s ease; }
 .zoom-controls button + button { border-top: 1px solid #b1a08355; }
@@ -66,7 +66,7 @@ body.sheet-open :is(.route-dock, .zoom-controls) { opacity: 0; translate: 0 18px
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M6 0 7.2 4.8 12 6 7.2 7.2 6 12 4.8 7.2 0 6 4.8 4.8Z' fill='%23b08d57'/%3E%3C/svg%3E"),
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M6 0 7.2 4.8 12 6 7.2 7.2 6 12 4.8 7.2 0 6 4.8 4.8Z' fill='%23b08d57'/%3E%3C/svg%3E"),
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M6 0 7.2 4.8 12 6 7.2 7.2 6 12 4.8 7.2 0 6 4.8 4.8Z' fill='%23b08d57'/%3E%3C/svg%3E"),
-    radial-gradient(130% 120% at 50% 0%, #fbf4e2 0%, #f4ead4 55%, #e9dbbd 100%);
+    radial-gradient(130% 120% at 50% 0%, #eee4d0 0%, #e5d8be 55%, #d6c6a7 100%);
   background-size: 9px 9px, 9px 9px, 9px 9px, 9px 9px, auto;
   background-position: 3px 3px, calc(100% - 3px) 3px, 3px calc(100% - 3px), calc(100% - 3px) calc(100% - 3px), 0 0;
   background-repeat: no-repeat;
@@ -178,10 +178,10 @@ form[aria-busy=true] .add-button { opacity: .45; }
 .route-log .logbook-foot { margin-top: 14px; }
 .trip-map { position: relative; overflow: hidden; aspect-ratio: 2 / 1; border-radius: 2px; background: #ebe0c7; box-shadow: inset 0 0 0 1px #b4a58b55; }
 .trip-map .route-map { display: block; width: 100%; height: 100%; transition: transform .6s var(--ease-out); }
-.route-map-sea { fill: #afc4c3; }
-.route-map-land path { fill: #e4cfa8; stroke: #a48761; stroke-width: .6; vector-effect: non-scaling-stroke; }
-.route-map-line { fill: none; stroke: var(--red); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.route-map-stop { fill: var(--red); }
+.route-map-sea { fill: #9eafb1; }
+.route-map-land path { fill: #cbbc9f; stroke: #8e785a; stroke-width: .6; vector-effect: non-scaling-stroke; }
+.route-map-line { fill: none; stroke: var(--route-red); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.route-map-stop { fill: var(--route-red); }
 .eyebrow { margin: 0 0 5px; color: var(--red); font: 9px Georgia, serif; letter-spacing: 2.2px; text-transform: uppercase; }
 #trip-name-form { display: flex; border: 0; border-bottom: 1.5px solid #b39b72; background: none; transition: border-color .2s ease; }
 #trip-name-form:focus-within { border-bottom-color: var(--red); }
