@@ -1,6 +1,7 @@
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import './build-atlas.mjs';
+await import('./build-atlas-tones.mjs');
 const root=new URL('../',import.meta.url),out=new URL('dist/',root);
 await rm(out,{recursive:true,force:true});
 await mkdir(out,{recursive:true});

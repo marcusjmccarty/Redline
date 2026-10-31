@@ -1186,7 +1186,11 @@ test('the atlas paints connected landmasses once and keeps country borders out o
   assert.ok(land.every((path,i)=>path.getAttribute('d')===w.ATLAS_LAND[i]));
   assert.equal($('country-borders').children.length,w.ATLAS_BORDERS.length);
   assert.ok(land.every(path=>!path.style.fill),'Plain vector fills never invoke an image-backed pattern for each landmass');
-  assert.equal($('map').querySelectorAll('image').length,0,'The map has no raster wash or image-backed colour effects');
+  assert.equal($('map').querySelectorAll('image').length,1,'One shared colour image serves the entire map');
+  assert.equal($('atlas-tones').getAttribute('href'),'atlas-tones.png');
+  const colour=readFileSync(new URL('../public/atlas-tones.png',import.meta.url));
+  assert.ok(colour.length<256*1024,'The complete map shading stays below 256 KB');
+  assert.ok(colour.readUInt32BE(16)*colour.readUInt32BE(20)*4<=2*1024*1024,'Decoded shading uses at most 2 MB, independent of zoom');
   assert.equal($('map').querySelectorAll('pattern image, filter, mask').length,0,'Zoom cannot allocate world-sized image pattern tiles or nested SVG documents');
   assert.equal($('atlas-land-clip'),null);assert.equal($('land-washes'),null,'Camera frames have no full-world gradient clipping passes');
 });
@@ -1322,6 +1326,7 @@ test('map frames read layout before painting, skip unchanged scenes, and defer h
   for(let i=0;i<90;i++)frame();await tick();
   const zoomed=map.getAttribute('viewBox').split(' ').map(Number);
   assert.ok(Math.abs((anchor[0]-zoomed[0])/zoomed[2]-.2)<1e-6&&Math.abs((anchor[1]-zoomed[1])/zoomed[3]-.3)<1e-6,'Wheel zoom preserves the point beneath the cursor');
+  assert.ok(mutations.every(record=>record.target!==$('atlas-tones')),'Camera motion never rebuilds or resizes the colour image');
   const before=map.getAttribute('viewBox');mutations.length=0;
   $('photo-panel').showModal();await tick();$('zoom-in').click();
   for(let i=0;i<90;i++)frame();await tick();
