@@ -163,3 +163,23 @@ test('backup history records downloads and imported copies without overwriting c
   const all=await store.exportArchive();await store.recordBackup(all);
   assert.ok((await library(indexedDB).store.api('/trips')).trips.every(trip=>trip.backedUpAt),'Export history survives reopening');
 });
+
+
+test('captions save independently of postcards, reject stale edits, and survive backups',async()=>{
+  const {store,indexedDB}=library(),trip=await create(store),photo=await upload(store,trip),other=library(indexedDB).store;
+  assert.equal(photo.caption,'');assert.equal(photo.captionRevision,1);
+  await Promise.all([
+    store.api(`/photos/${photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption:'  A morning in Paris.  ',revision:1})}),
+    other.api(`/photos/${photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:card,revision:1})})
+  ]);
+  const saved=(await other.api(`/trips/${trip.id}`)).photos[0];
+  assert.equal(saved.caption,'A morning in Paris.');assert.deepEqual(plain(saved.postcard),card);
+  assert.equal(saved.captionRevision,2);assert.equal(saved.postcardRevision,2);
+  await assert.rejects(other.api(`/photos/${photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption:'Stale',revision:1})}),e=>e.status===409);
+  for(const caption of ['x'.repeat(181),123])await assert.rejects(store.api(`/photos/${photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption,revision:2})}));
+  const target=library().store;await target.importArchive(await store.exportArchive(trip.id));
+  const restored=(await target.api(`/trips/${(await target.api('/trips')).trips[0].id}`)).photos[0];
+  assert.equal(restored.caption,saved.caption);assert.deepEqual(plain(restored.postcard),card);
+  await store.api(`/photos/${photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption:'',revision:2})});
+  const cleared=(await store.api(`/trips/${trip.id}`)).photos[0];assert.equal(cleared.caption,'');assert.deepEqual(plain(cleared.postcard),card);
+});

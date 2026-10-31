@@ -84,7 +84,7 @@ test('the album opens from its cover, turns like a book, and its contents and ta
   assert.equal($('photo-panel').querySelector('.album-name').textContent,'A summer away');
   assert.equal($('photo-panel').querySelector('.title-route').textContent,'Paris → Madrid');
   assert.equal($('album-position').textContent,'Title page');
-  assert.deepEqual([...$('gallery-filter').children].map(el=>el.textContent),['01Paris2','02Madrid1']);
+  assert.deepEqual([...$('gallery-filter').children].map(el=>el.textContent),['03Paris2','04Madrid1']);
   $('album-next').click();
   assert.equal(pages(),'left:contents right:city');
   assert.deepEqual([...$('album-pages').querySelectorAll('.contents-list button')].map(el=>el.textContent),['01Paris3','02Madrid4']);
@@ -213,7 +213,7 @@ test('navigation saves postcard edits before moving; failed saves keep the photo
   const records=await w.RedlineArchive.unpack(await storage.exportArchive(trip.id));
   assert.equal(records[0].photos.filter(p=>p.photo.postcard.message==='A memory worth keeping.').length,1);
   await w.RedlinePostcards.close();$('album-view').click();tab(paris.id).click();
-  assert.equal($('album-pages').querySelector('figcaption').textContent,'A memory worth keeping.','The album captions a print with its postcard');
+  assert.equal($('album-pages').querySelector('figcaption'),null,'Postcard messages never become album captions');
 });
 
 test('import review supports bulk assignment, previews, and saving only assigned photos',async t=>{
@@ -614,6 +614,7 @@ test('album and All Photos fold a stable spread into the front cover, pause, the
     $(view+'-view').click();if(view==='sheet')$('photo-scroll').scrollTop=180;
     const paper=$('photo-gallery').firstElementChild,spread=$('album-pages').firstElementChild;
     press('Escape');
+    await wait(()=>motion.running.size===2);
     assert.equal($('photo-panel').dataset.motion,'closing');assert.equal($('album-book').dataset.mode,view);
     const scene=$('album-book').querySelector('.album-cover-scene');
     assert.ok(scene.querySelector('.album-cover-front .album-cover'),'The entire front cover folds over this view');
@@ -623,10 +624,10 @@ test('album and All Photos fold a stable spread into the front cover, pause, the
     assert.equal(motion.running.size,2);assert.equal([...motion.running][0].options.duration,660);
     press('Escape');await motion.finish();
     assert.equal($('photo-panel').open,true,'The front cover stays visible after the fold');
-    assert.equal([...motion.running][0].options.duration,130,'A short beat separates folding from departure');
+    assert.equal([...motion.running][0].options.duration,40,'A short beat separates folding from departure');
     assert.equal($('photo-panel').dataset.departing,undefined);
     await motion.finish();assert.equal($('photo-panel').dataset.departing,'true');
-    assert.equal([...motion.running][0].options.duration,190);
+    assert.equal([...motion.running][0].options.duration,120);
     await motion.finish();assert.equal($('photo-panel').open,false);
     assert.equal($('album-pages').children.length,0);assert.equal($('album-book').querySelector('.album-cover-scene'),null);
     assert.equal($('gallery-filter').parentElement,$('album-book'));
@@ -661,7 +662,7 @@ test('dismissal while storage is loading never reveals late pages or reopens the
   const motion=controlledMotion(w);let release;
   storage.api=async(path,options)=>{await new Promise(resolve=>release=resolve);return api(path,options);};
   $('photos-button').click();await wait(()=>!!release);assert.ok($('album-book').querySelector('.album-loading-cover'));
-  press('Escape');await tick();await motion.finish();await motion.finish();
+  press('Escape');await wait(()=>motion.running.size===1);await motion.finish();await motion.finish();
   assert.equal($('photo-panel').open,false);release();await tick();
   assert.equal($('photo-panel').open,false);assert.equal($('album-book').querySelector('.album-cover-scene'),null);
   assert.equal($('album-book').querySelector('.album-loading-cover'),null);
@@ -675,7 +676,7 @@ test('single-page opening and All Photos use the same cover lifecycle and defer 
   w.dispatchEvent(new w.Event('redline:routechange'));w.dispatchEvent(new w.Event('resize'));await new Promise(resolve=>setTimeout(resolve,25));
   assert.equal(scene.querySelector('.album-snapshot'),copy,'Background updates cannot replace moving surfaces');
   await motion.finish();assert.equal($('album-pages').classList.contains('single'),true);
-  $('sheet-view').click();$('photo-scroll').scrollTop=240;press('Escape');
+  $('sheet-view').click();$('photo-scroll').scrollTop=240;press('Escape');await wait(()=>motion.running.size===2);
   const scroll=$('album-book').querySelector('.album-cover-scene .photo-scroll');assert.equal(scroll.scrollTop,240,'Closing keeps the visible scroll position');
   await motion.finish();await motion.finish();await motion.finish();assert.equal($('photo-panel').open,false);
 });
@@ -777,7 +778,7 @@ test('route undo restores cleared and edited stops, survives saving, and never c
 
 test('photo arrows rest after pointer inactivity and return on movement, without hiding keyboard controls',async t=>{
   const {w,$,tiles}=await setup(t);const realTimeout=w.setTimeout.bind(w),realClear=w.clearTimeout.bind(w),timers=new Map();let next=50000;
-  w.setTimeout=(fn,delay,...args)=>{if(delay!==450)return realTimeout(fn,delay,...args);timers.set(++next,fn);return next;};
+  w.setTimeout=(fn,delay,...args)=>{if(delay!==700)return realTimeout(fn,delay,...args);timers.set(++next,fn);return next;};
   w.clearTimeout=id=>{timers.delete(id);realClear(id);};
   tiles()[0].click();const frame=$('full-photo').parentElement;
   const move=pointerType=>{const event=new w.Event('pointermove',{bubbles:true});Object.defineProperty(event,'pointerType',{value:pointerType});frame.dispatchEvent(event);};
@@ -792,7 +793,7 @@ test('photo arrows rest after pointer inactivity and return on movement, without
 test('front and back cover bookmarks close cleanly and return to the same cover',async t=>{
   for(const end of ['Home','End']){
     const {w,$,press,pages}=await setup(t);press(end);const bookmark=pages(),motion=controlledMotion(w);
-    press('Escape');await tick();
+    press('Escape');await wait(()=>motion.running.size>0);
     const scene=$('album-book').querySelector('.album-cover-scene');assert.ok(scene.classList.contains('closed-book'));
     await motion.finish();await motion.finish();await motion.finish();assert.equal($('photo-panel').open,false);
     $('photos-button').click();await wait(()=>motion.running.size===2);await motion.finish();assert.equal(pages(),bookmark);
@@ -803,12 +804,68 @@ test('front and back cover bookmarks close cleanly and return to the same cover'
 test('cover snapshots omit offscreen photos while retaining sheet layout and scroll',async t=>{
   const {w,$,tiles}=await setup(t);tiles();const source=$('album-sheet'),scroll=$('photo-scroll'),all=[...source.querySelectorAll('.photo-tile')];
   const rect=(top,height)=>({top,bottom:top+height,left:0,right:600,width:600,height});
-  source.getBoundingClientRect=()=>rect(0,600);scroll.getBoundingClientRect=()=>rect(50,500);scroll.scrollTop=123;
+  source.getBoundingClientRect=()=>({...rect(0,600),width:600.5});scroll.getBoundingClientRect=()=>rect(50,500);scroll.scrollTop=123;
   source.querySelectorAll('.gallery-city').forEach(section=>section.getBoundingClientRect=()=>rect(0,1000));
   all.forEach((tile,i)=>tile.getBoundingClientRect=()=>rect(i===0?80:900,100));
   const cover=w.document.createElement('section');cover.className='album-cover';
   const scene=w.RedlineAlbumMotion.create({book:$('album-book'),source,cover,two:true});
   const copies=$('album-book').querySelectorAll('.album-snapshot');assert.equal(copies.length,2);
-  for(const copy of copies){assert.equal(copy.querySelectorAll('img').length,1);assert.equal(copy.querySelectorAll('.photo-tile').length,all.length);assert.equal(copy.querySelector('.photo-scroll').scrollTop,123);}
+  for(const copy of copies){assert.equal(copy.style.width,'600.5px');assert.equal(copy.querySelectorAll('img').length,1);assert.equal(copy.querySelectorAll('.photo-tile').length,all.length);assert.equal(copy.querySelector('.photo-scroll').scrollTop,123);}
   scene.dispose();assert.equal(source.querySelectorAll('img').length,all.length,'Original photos stay intact');
+});
+
+
+test('caption editing stays on the photo front, persists separately, and updates the album print',async t=>{
+  const {w,$,tab,prints,api,trip,press,storage}=await setup(t);
+  tab(paris.id).click();const print=prints()[0].closest('.print'),id=print.dataset.photoId;prints()[0].click();
+  const input=$('caption-input'),type=text=>{input.value=text;input.dispatchEvent(new w.Event('input',{bubbles:true}));};
+  $('edit-caption').click();assert.equal($('caption-form').hidden,false);assert.equal(w.document.activeElement,input);
+  assert.equal($('photo-viewer').classList.contains('flipped'),false);
+  type('Sunrise by the river.');$('save-caption').click();await wait(()=>$('caption-form').hidden);
+  assert.equal(print.querySelector('figcaption').textContent,'Sunrise by the river.');
+  $('flip-postcard').click();$('postcard-message').value='Dear family, this message is private.';$('postcard-message').dispatchEvent(new w.Event('input'));$('save-postcard').click();
+  await wait(()=>$('postcard-save-status').textContent==='Postcard saved.');
+  assert.equal(print.querySelector('figcaption').textContent,'Sunrise by the river.');
+  const photo=(await api(`/trips/${trip.id}`)).photos.find(p=>p.id===id);assert.equal(photo.caption,'Sunrise by the river.');assert.match(photo.postcard.message,/Dear family/);
+  $('unflip-postcard').click();$('edit-caption').click();type('The next morning.');
+  let fail=true;storage.api=async(path,options)=>{if(fail&&path.endsWith('/caption'))throw Error('Caption could not be saved.');return api(path,options);};
+  $('viewer-next').click();await wait(()=>$('postcard-error').textContent==='Caption could not be saved.');
+  assert.equal($('photo-position').textContent,'1 / 2');assert.equal(input.value,'The next morning.');
+  assert.equal(print.querySelector('figcaption').textContent,'Sunrise by the river.','Failed drafts do not overwrite the saved album caption');
+  fail=false;$('save-caption').click();await wait(()=>$('caption-form').hidden);
+  await w.RedlinePostcards.close();prints()[0].click();$('edit-caption').click();assert.equal(input.value,'The next morning.');
+  type('');$('save-caption').click();await wait(()=>$('caption-form').hidden);assert.equal(print.querySelector('figcaption'),null);
+  assert.match((await api(`/trips/${trip.id}`)).photos.find(p=>p.id===id).postcard.message,/Dear family/);
+  $('edit-caption').click();assert.equal($('save-caption').disabled,false,'Save can finish an editor whose caption already autosaved');type('A final caption.');press('Escape',input);await wait(()=>$('caption-form').hidden);assert.equal($('photo-viewer').open,true);
+});
+
+test('city tabs identify their actual chapter page in both album layouts',async t=>{
+  const {w,$,tab}=await setup(t);
+  for(const city of [paris,madrid]){
+    const button=tab(city.id);button.click();
+    const page=[...$('album-pages').children].find(el=>el.querySelector('.city-name')?.textContent===city.name);
+    assert.equal(Number(button.querySelector('.chip-stop').textContent),Number(page.querySelector('.folio').textContent));
+    assert.match(button.getAttribute('aria-label'),/page \d+/);
+  }
+  w.innerWidth=480;w.innerHeight=800;w.dispatchEvent(new w.Event('resize'));await new Promise(resolve=>setTimeout(resolve,30));
+  for(const city of [paris,madrid]){
+    tab(city.id).click();assert.equal(Number(tab(city.id).querySelector('.chip-stop').textContent),Number($('album-pages').querySelector('.folio').textContent));
+  }
+});
+
+test('cover motion waits for decoded snapshots and can close before its first moving frame',async t=>{
+  const {w,$,press,tab}=await setup(t);tab(paris.id).click();press('Escape');
+  const motion=controlledMotion(w),originalDecode=w.HTMLImageElement.prototype.decode,releases=[];
+  w.HTMLImageElement.prototype.decode=function(){return this.closest('.album-snapshot')?new Promise(resolve=>releases.push(resolve)):Promise.resolve();};
+  $('photos-button').click();await wait(()=>releases.length>0);
+  assert.equal(motion.running.size,0,'No moving frame precedes the decoded spread');
+  assert.ok($('album-book').querySelector('.album-loading-cover'),'The original closed cover stays visible during preparation');
+  const scene=$('album-book').querySelector('.album-cover-scene');assert.equal(scene.style.visibility,'hidden');
+  // Release every pending decode, including a second snapshot of the spread.
+  w.HTMLImageElement.prototype.decode=originalDecode;
+  press('Escape');assert.equal($('photo-panel').dataset.motion,'closing');
+  releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===1);
+  assert.equal([...motion.running][0].options.duration,40,'A still-closed cover needs only its brief departure');
+  await motion.finish();await motion.finish();assert.equal($('photo-panel').open,false);
+  assert.equal($('album-book').querySelector('.album-cover-scene'),null);
 });
