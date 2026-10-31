@@ -79,6 +79,8 @@
     // The card lifts slightly off the table while it turns over.
     if(motion(viewer)){viewer.classList.remove('flip-motion');void viewer.offsetWidth;viewer.classList.add('flip-motion');clearTimeout(flip.timer);flip.timer=setTimeout(()=>viewer.classList.remove('flip-motion'),950);}
     $('photo-viewer').classList.toggle('flipped',back);
+    if(back&&!shareFile)queueShare();
+    else if(!back){clearTimeout(shareTimer);shareGeneration++;}
     $('postcard-front').inert=back;$('postcard-front').setAttribute('aria-hidden',String(back));
     $('postcard-back').inert=!back;$('postcard-back').setAttribute('aria-hidden',String(!back));
     if(document.activeElement!==document.body)closer().focus({preventScroll:true});
@@ -186,7 +188,6 @@
     }
     // A new photo always shows its front, so focus on the back moves to the front's paper.
     if(!wasOpen||onBack)$('postcard-front').focus({preventScroll:true});
-    prepareShare();
   }
   async function navigate(direction){
     if(navigating||changing||closing||printing||!$('photo-viewer').open)return;
@@ -212,14 +213,14 @@
   fields.forEach(key=>$(`postcard-${key}`).addEventListener('input',()=>{
     if(!active)return;active.value[key]=$(`postcard-${key}`).value;active.photo.postcard={...active.value};
     status();clearTimeout(timer);const state=active;timer=setTimeout(()=>save(state).catch(()=>{}),600);
-    shareGeneration++;shareFile=null;$('share-postcard').disabled=true;clearTimeout(shareTimer);shareTimer=setTimeout(prepareShare,180);
+    shareGeneration++;shareFile=null;$('share-postcard').disabled=true;clearTimeout(shareTimer);shareTimer=setTimeout(prepareShare,350);
   }));
   function updateOrientation(){
     const photo=$('full-photo');
     $('postcard-stage').classList.toggle('portrait',photo.naturalHeight>photo.naturalWidth);
   }
   $('full-photo').draggable=false;
-  $('full-photo').addEventListener('load',()=>{updateOrientation();prepareShare();});
+  $('full-photo').addEventListener('load',()=>{updateOrientation();if($('photo-viewer').classList.contains('flipped'))queueShare();});
   $('viewer-previous').addEventListener('click',()=>navigate(-1));
   $('viewer-next').addEventListener('click',()=>navigate(1));
   // A held Return on an edge would keep clicking it, and focus hands over to the other edge at the end of the port.
@@ -263,7 +264,11 @@
     if(!['ArrowLeft','ArrowRight'].includes(event.key))return;
     event.preventDefault();if(!event.repeat)navigate(event.key==='ArrowLeft'?-1:1);
   });
+  // The 4.4-megapixel share export is only needed on the back. Browsing photos
+  // should not rebuild it, and typing waits for a pause before drawing again.
+  function queueShare(){clearTimeout(shareTimer);shareTimer=setTimeout(prepareShare,250);}
   async function prepareShare(){
+    if(closing||!$('photo-viewer').open||!$('photo-viewer').classList.contains('flipped'))return;
     const generation=++shareGeneration,state=active;
     shareFile=null;$('share-postcard').disabled=true;
     if(!state||state.preview)return;

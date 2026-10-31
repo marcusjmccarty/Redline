@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
-import {IDBFactory, IDBObjectStore} from 'fake-indexeddb';
+import {IDBFactory, IDBObjectStore, IDBIndex} from 'fake-indexeddb';
 
 const jpeg=readFileSync(new URL('./fixtures/gps.jpg',import.meta.url));
 const paris={id:'city-paris-01',name:'Paris',country:'France',latitude:48.8566,longitude:2.3522};
@@ -228,4 +228,20 @@ test('upgrading an existing library keeps original photos and text, then exports
   const target=library().store;await target.importArchive(await store.exportArchive(trip.id));
   const restored=(await target.api(`/trips/${(await target.api('/trips')).trips[0].id}`)).photos[0];
   assert.equal(restored.caption,'A new caption');assert.deepEqual(plain(restored.postcard),updated);
+});
+
+
+test('trip listing and a single-trip backup never read unrelated photo collections',async t=>{
+  const {store}=library(),first=await create(store),second=await create(store);
+  for(let i=0;i<6;i++)await upload(store,first);
+  for(let i=0;i<3;i++)await upload(store,second);
+  const getAll=IDBObjectStore.prototype.getAll,get=IDBIndex.prototype.get;
+  let covers=0;
+  IDBObjectStore.prototype.getAll=function(...args){assert.notEqual(this.name,'photos','No library-wide Blob read');return getAll.apply(this,args);};
+  IDBIndex.prototype.get=function(...args){if(this.name==='tripId')covers++;return get.apply(this,args);};
+  t.after(()=>{IDBObjectStore.prototype.getAll=getAll;IDBIndex.prototype.get=get;});
+  const {trips}=await store.api('/trips');assert.equal(covers,2,'Only one cover photo is read per trip');
+  assert.equal(trips.find(trip=>trip.id===first.id).photoCount,6);assert.equal(trips.find(trip=>trip.id===second.id).photoCount,3);
+  const target=library();await target.store.importArchive(await store.exportArchive(first.id));
+  const restored=(await target.store.api('/trips')).trips;assert.equal(restored.length,1);assert.equal(restored[0].photoCount,6);
 });

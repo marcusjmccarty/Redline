@@ -130,16 +130,13 @@
     if (typeof body==='string') { try { body=JSON.parse(body); } catch { fail('Invalid trip data.'); } }
     if (parts[0]==='trips' && parts.length===1) {
       if (method==='GET') return transaction(['trips','photos'],'readonly',async stores=>{
-        const trips=await request(stores.trips.getAll()),photos=await request(stores.photos.getAll());
-        const counts=new Map(),covers=new Map();
-        for (const photo of photos) {
-          counts.set(photo.tripId,(counts.get(photo.tripId)||0)+1);
-          const cover=covers.get(photo.tripId);
-          if (!cover || photo.createdAt.localeCompare(cover.createdAt)<0) covers.set(photo.tripId,photo);
-        }
-        // Each listed trip carries a light route outline and the first photo, for its card.
-        return {trips:trips.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).map(({stops,...trip})=>({...trip,stopCount:stops.length,photoCount:counts.get(trip.id)||0,
-          points:stops.map(stop=>[Math.round(stop.longitude*100)/100,Math.round(stop.latitude*100)/100]),coverUrl:covers.has(trip.id)?coverUrl(covers.get(trip.id)):null}))};
+        const trips=await request(stores.trips.getAll()),index=stores.photos.index('tripId');
+        // Count through the index and fetch one stable cover per trip. Listing
+        // the logbook must not deserialize the library's full photo collection.
+        return {trips:await Promise.all(trips.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).map(async ({stops,...trip})=>{
+          const [photoCount,cover]=await Promise.all([request(index.count(trip.id)),request(index.get(trip.id))]);
+          return {...trip,stopCount:stops.length,photoCount,points:stops.map(stop=>[Math.round(stop.longitude*100)/100,Math.round(stop.latitude*100)/100]),coverUrl:cover?coverUrl(cover):null};
+        }))};
       });
       if (method==='POST') {
         const data=tripData(body); persist();
@@ -245,7 +242,7 @@
     const records=await transaction(['trips','photos','photoNotes'],'readonly',async stores=>{
       const trips=tripId?[await ownTrip(stores.trips,tripId)]:await request(stores.trips.getAll());
       if (!trips.length) fail('Save a trip before exporting a backup.');
-      const photos=await withNotes(stores,await request(stores.photos.getAll()));
+      const photos=await withNotes(stores,await request(tripId?stores.photos.index('tripId').getAll(tripId):stores.photos.getAll()));
       return trips.map(trip=>({trip,photos:photos.filter(photo=>photo.tripId===trip.id).map(photo=>({photo,blob:photo.blob}))}));
     });
     const blob=window.RedlineArchive.pack(records);

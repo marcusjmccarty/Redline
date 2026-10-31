@@ -46,6 +46,9 @@
       return false;
     }};
   }
+  function projectIndex(index,matrix,bounds){
+    return {hits(rect,pad=5){return index.hits({x:(rect.x-pad+bounds.left-matrix.e)/matrix.a,y:(rect.y-pad+bounds.top-matrix.f)/matrix.d,w:(rect.w+pad*2)/matrix.a,h:(rect.h+pad*2)/matrix.d},0);}};
+  }
   function place(items,{width=Infinity,height=Infinity,obstacles=[],previous,edge=4,gap=5,dot=DOT,segments=[],routes=indexLines(segments,{width,height})}={}){
     const dots=items.map(item=>({x:item.x-dot,y:item.y-dot,w:dot*2,h:dot*2})),result=items.map(()=>null);
     const before=key=>typeof previous?.get==='function'?previous.get(key):previous?.[key];
@@ -74,5 +77,5 @@
     }
     return result;
   }
-  globalThis.RedlineLabels=Object.freeze({place,estimate,overlaps,slots,crosses,indexLines});
+  globalThis.RedlineLabels=Object.freeze({place,estimate,overlaps,slots,crosses,indexLines,projectIndex});
 })();

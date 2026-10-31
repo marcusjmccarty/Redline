@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const context={};vm.createContext(context);
 vm.runInContext(readFileSync(new URL('../public/labels.js',import.meta.url),'utf8'),context);
-const {place,estimate,overlaps,slots,crosses,indexLines}=context.RedlineLabels;
+const {place,estimate,overlaps,slots,crosses,indexLines,projectIndex}=context.RedlineLabels;
 
 const item=(id,x,y,priority)=>({id,x,y,width:estimate(id),height:14,priority});
 const dot=({x,y})=>({x:x-4.5,y:y-4.5,w:9,h:9});
@@ -122,4 +122,15 @@ test('nearby city labels clear route strokes and retain their positions as a cam
   const moved=items.map(city=>({...city,x:city.x+2,y:city.y+1})),lines=segments.map(segment=>segment.map(([x,y])=>[x+2,y+1]));
   const previous=new Map(result.map((slot,i)=>[items[i].id,slot.name]));
   assert.deepEqual(place(moved,{...view,segments:lines,previous}).map(slot=>slot?.name),result.map(slot=>slot.name));
+});
+
+
+test('a cached map-coordinate route index matches screen-space clearance at every zoom',()=>{
+  const segments=Array.from({length:80},(_,i)=>[[100+i*13,120+Math.sin(i/7)*100],[113+i*13,120+Math.sin((i+1)/7)*100]]);
+  const indexed=indexLines(segments,{width:1440,height:720}),bounds={left:14,top:22};
+  for(const zoom of [1,1.5,3,7,13]){
+    const matrix={a:zoom,d:zoom*1.3,e:14-200*(zoom-1),f:22-100*(zoom-1)},projected=projectIndex(indexed,matrix,bounds);
+    const screen=segments.map(segment=>segment.map(([x,y])=>[x*matrix.a+matrix.e-bounds.left,y*matrix.d+matrix.f-bounds.top]));
+    for(let x=10;x<1000;x+=37)for(let y=10;y<600;y+=43){const box={x,y,w:82,h:20};assert.equal(projected.hits(box,5),screen.some(segment=>crosses(segment,box,5)));}
+  }
 });

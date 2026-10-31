@@ -3,27 +3,46 @@
   'use strict';
   const make=className=>{const el=document.createElement('div');el.className=className;return el;};
   const done=animations=>Promise.all(animations.map(animation=>animation.finished.catch(()=>{})));
-  function snapshot(source){
-    const scroll=source.querySelector('.photo-scroll'),viewport=scroll?.getBoundingClientRect(),scrolls=[];
+  function snapshots(source){
+    const scroll=source.querySelector('.photo-scroll'),viewport=scroll?.getBoundingClientRect();
+    const positions=[...source.querySelectorAll('.photo-scroll')].map(node=>[node.scrollTop,node.scrollLeft]);
+    // Measure the live sheet once, then create both halves from a detached
+    // template. Reading scroll/layout on every copied descendant was costly.
+    const omitted=new WeakMap();
+    function measure(node){
+      if(node.nodeType!==1)return;
+      if(viewport?.height&&node.matches('.gallery-city,.photo-tile')){
+        const rect=node.getBoundingClientRect();
+        if(rect.bottom<viewport.top||rect.top>viewport.bottom){omitted.set(node,rect.height);return;}
+      }
+      for(const child of node.children)measure(child);
+    }
+    measure(source);
     function copy(node){
       if(node.nodeType!==1)return node.cloneNode();
       const clone=node.cloneNode(false);
       if(clone.id){clone.classList.add(`album-copy-${clone.id}`);clone.removeAttribute('id');}
       clone.removeAttribute('autofocus');
-      // Large albums only duplicate the visible prints. Empty spacers preserve
-      // scroll position and the grid without decoding offscreen photographs.
-      if(viewport?.height&&node.matches('.gallery-city,.photo-tile')){
-        const rect=node.getBoundingClientRect();
-        if(rect.bottom<viewport.top||rect.top>viewport.bottom){
-          clone.style.height=`${rect.height}px`;clone.style.visibility='hidden';return clone;
-        }
-      }
+      if(omitted.has(node)){clone.style.height=`${omitted.get(node)}px`;clone.style.visibility='hidden';return clone;}
       for(const child of node.childNodes)clone.append(copy(child));
-      if(node.scrollTop||node.scrollLeft)scrolls.push([clone,node.scrollTop,node.scrollLeft]);
       return clone;
     }
-    const el=copy(source);el.classList.add('album-snapshot');el.hidden=false;
-    return {el,restore:()=>scrolls.forEach(([node,top,left])=>{node.scrollTop=top;node.scrollLeft=left;})};
+    const template=copy(source);template.classList.add('album-snapshot');template.hidden=false;
+    return ()=>{
+      const el=template.cloneNode(true),scrolls=[...el.querySelectorAll('.photo-scroll')];
+      return {el,restore:()=>scrolls.forEach((node,i)=>{[node.scrollTop,node.scrollLeft]=positions[i];})};
+    };
+  }
+  async function decodeImages(images){
+    const groups=new Map();
+    for(const image of images){const key=image.currentSrc||image.src;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(image);}
+    await Promise.all([...groups.values()].map(async group=>{
+      const image=group[0];image.loading='eager';
+      try{
+        if(!image.complete||!image.naturalWidth)await image.decode?.();
+        for(const copy of group){copy.loading='eager';copy.closest('.photo-image')?.classList.add('loaded');}
+      }catch{}
+    }));
   }
   function create({book,source,cover,two,closed='',opening=false}){
     const arrival=make('album-arrival'),scene=make('album-cover-scene'),hinge=make('album-cover-hinge'),leaf=make('album-cover-leaf'),front=make('album-cover-front'),back=make('album-cover-back');
@@ -35,11 +54,11 @@
     // An orientation change is applied after the cover settles, never halfway
     // through a frozen spread. Only transforms run during the fold.
     if(size.width&&size.height){book.style.width=`${size.width}px`;book.style.height=`${size.height}px`;book.style.flex='none';}
-    const copies=[];
+    const copies=[],capture=snapshots(source);
     scene.classList.toggle('single',!two);scene.classList.toggle('closed-book',!!closed);
     scene.setAttribute('aria-hidden','true');scene.inert=true;
     function half(className,right=false){
-      const holder=make(className),copy=snapshot(source);copies.push(copy);
+      const holder=make(className),copy=capture();copies.push(copy);
       copy.el.style.width=`${width}px`;copy.el.style.left=right?`${-width/2}px`:'0';
       holder.append(copy.el);return holder;
     }
@@ -62,7 +81,7 @@
     let animations=[],direction=opening?'opening':'closing',disposed=false,started=false;
     const pose=state=>{leaf.style.transform=state.leaf;scene.style.transform=state.scene;};
     pose(opening?closedFrames:openFrames);
-    const ready=Promise.all([...scene.querySelectorAll('img')].map(img=>{img.loading='eager';return img.decode?.().catch(()=>{});}))
+    const ready=decodeImages([...scene.querySelectorAll('img')])
       .then(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
       .then(()=>{
         if(disposed)return;
@@ -117,8 +136,10 @@
     if(size.width&&size.height){book.style.width=`${size.width}px`;book.style.height=`${size.height}px`;book.style.flex='none';}
     const forward=direction<0;layer.classList.toggle('single',!two);leaf.classList.add(forward?'forward':'backward');
     layer.inert=true;layer.setAttribute('aria-hidden','true');
+    const captures=new Map(),styles=new Map();
     function surface(element,right=false){
-      const holder=make(`album-view-surface ${right?'right':'left'}`),copy=snapshot(element),style=getComputedStyle(element);
+      if(!captures.has(element)){captures.set(element,snapshots(element));styles.set(element,getComputedStyle(element));}
+      const holder=make(`album-view-surface ${right?'right':'left'}`),copy=captures.get(element)(),style=styles.get(element);
       copy.el.style.width=`${width}px`;copy.el.style.left=right&&two?`${-width/2}px`:'0';
       copy.el.style.translate=style.translate||'none';copy.el.style.boxShadow=style.boxShadow;copy.el.style.visibility='visible';
       holder.style.setProperty('--view-crease',element.classList.contains('album-pages')&&(book.classList.contains('closed-front')||book.classList.contains('closed-back'))?'0':'1');
@@ -138,14 +159,12 @@
     let disposed=false,animations=[];
     const scroll=incoming.querySelector('.photo-scroll'),viewport=(scroll||incoming).getBoundingClientRect();
     const images=[...incoming.querySelectorAll('img')].filter(img=>{const rect=img.getBoundingClientRect();return !viewport.height||rect.bottom>=viewport.top&&rect.top<=viewport.bottom;});
-    const ready=Promise.all([...layer.querySelectorAll('img'),...images].map(async img=>{
-      img.loading='eager';try{await img.decode?.();img.closest('.photo-image')?.classList.add('loaded');}catch{}
-    }));
+    const ready=decodeImages([...images,...layer.querySelectorAll('img')]);
     return {
       async play(){
         await ready;if(disposed)return;
         const frontShade=make('album-view-shade'),backShade=make('album-view-shade'),cast=make('album-view-cast');
-        const timing={duration:two?820:720,easing:'cubic-bezier(.37,0,.63,1)',fill:'both'};
+        const timing={duration:two?660:580,easing:'cubic-bezier(.3,0,.25,1)',fill:'both'};
         for(const shade of [frontShade,backShade,cast])shade.style.opacity='0';
         let channels=[];
         if(two){

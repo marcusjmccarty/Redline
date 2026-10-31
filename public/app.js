@@ -71,7 +71,10 @@
   // Give a fresh or legacy draft stable stop identities before it can be saved.
   persist();
   const project=p=>RedlineLayout.project([p.longitude,p.latitude]);
+  const backgroundPoints=window.MAP_CITIES.map(project);
+  let hiddenMapCities=new Set(),routeIndex=null,routeIndexGeometry=null,routeIndexKey='';
   function rebuildGeometry(){
+    hiddenMapCities=new Set(window.MAP_CITIES.flatMap((p,i)=>stops.some(s=>Math.abs(s.latitude-p.latitude)<.15&&Math.abs(s.longitude-p.longitude)<.15)?[i]:[]));
     geometry=stops.slice(1).map((place,i)=>{
       const interpolate=RedlineGeo.geoInterpolate([stops[i].longitude,stops[i].latitude],[place.longitude,place.latitude]);
       return RedlineTrace.measure(RedlineLayout.route(interpolate));
@@ -356,8 +359,8 @@
         const p=window.MAP_CITIES[i];
         const threshold=p.population>=8000000?1.8:(p.capital||p.population>=2000000)?2.5:p.population>=500000?3.8:p.population>=100000?4.5:5.3;
         if(zoomLevel<threshold)continue;
-        if(stops.some(s=>Math.abs(s.latitude-p.latitude)<.15&&Math.abs(s.longitude-p.longitude)<.15))continue;
-        placeLabel(`city-${i}`,p.name,...project(p),true);
+        if(hiddenMapCities.has(i))continue;
+        placeLabel(`city-${i}`,p.name,...backgroundPoints[i],true);
       }
     }
     for(const [key,node] of labelNodes)if(!visible.has(key)){node.remove();labelNodes.delete(key);}
@@ -375,7 +378,7 @@
     [...$('antarctica').children].forEach((path,i)=>path.setAttribute('d',window.ANTARCTICA_POLYGONS[i].map(ring=>ring.map(([x,y],j)=>`${j?'L':'M'}${x},${y===WORLD_H?bottom:y}`).join('')+'Z').join('')));
   }
   function paintView() {
-    viewFrame=0;
+    if(viewFrame)cancelAnimationFrame(viewFrame);viewFrame=0;
     view=constrainView(view);
     map.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);
     const bounds=map.getBoundingClientRect(),matrix=map.getScreenCTM();if(!matrix||!bounds.width||!bounds.height)return;
@@ -387,15 +390,15 @@
     zoomLevel=baseView.w/view.w;
     $('zoom-in').disabled=zoomLevel>=MAX_ZOOM-.001;$('zoom-out').disabled=zoomLevel<=1.001;
     map.classList.toggle('zoomed-out',zoomLevel<=1.001);$('regions').style.display=zoomLevel>=1.6?'':'none';
-    const toScreen=point=>[point[0]*matrix.a+matrix.e-bounds.left,point[1]*matrix.d+matrix.f-bounds.top];
-    const segments=geometry.flatMap((leg,i)=>{
-      // Reserve the current arc before its tracer reaches a label, keeping
-      // names from hopping out of the way midway through an animation.
-      const current=activeLeg&&Math.min(activeLeg.origin,activeLeg.destination)===i;
-      const amount=progress===null||current?1:Math.max(0,Math.min(1,progress-i));
-      return leg.segmentsAt(amount).map(segment=>segment.map(toScreen));
-    });
-    const routes=window.RedlineLabels?.indexLines(segments,{width:bounds.width,height:bounds.height});
+    // Route geometry stays in map coordinates. Camera motion transforms only
+    // each queried label box instead of re-projecting and re-indexing every arc.
+    const amounts=geometry.map((leg,i)=>progress===null||activeLeg&&Math.min(activeLeg.origin,activeLeg.destination)===i?1:Math.max(0,Math.min(1,progress-i)));
+    const key=amounts.join(',');
+    if(window.RedlineLabels&&(routeIndexGeometry!==geometry||routeIndexKey!==key)){
+      routeIndex=RedlineLabels.indexLines(geometry.flatMap((leg,i)=>leg.segmentsAt(amounts[i])),{width:WORLD_W,height:WORLD_H});
+      routeIndexGeometry=geometry;routeIndexKey=key;
+    }
+    const routes=routeIndex&&RedlineLabels.projectIndex(routeIndex,matrix,bounds);
     const occupied=paintStops(matrix,bounds,obstacles,routes);
     for(const label of $('map-labels').children){
       label.setAttribute('x','0');label.setAttribute('y','0');
@@ -470,7 +473,7 @@
   let drag=null;
   map.addEventListener('pointerdown',event=>{if(event.button!==0||baseView.w/view.w<=1.001)return;stopAnimation();const m=map.getScreenCTM();drag={x:event.clientX,y:event.clientY,vx:view.x,vy:view.y,scaleX:m.a,scaleY:m.d,id:event.pointerId};map.setPointerCapture(event.pointerId);map.classList.add('dragging');});
   map.addEventListener('pointermove',event=>{if(!drag||event.pointerId!==drag.id||baseView.w/view.w<=1.001)return;view.x=drag.vx-(event.clientX-drag.x)/drag.scaleX;view.y=drag.vy-(event.clientY-drag.y)/drag.scaleY;scheduleView();});
-  const endDrag=()=>{drag=null;map.classList.remove('dragging');};map.addEventListener('pointerup',endDrag);map.addEventListener('pointercancel',endDrag);
+  const endDrag=()=>{drag=null;map.classList.remove('dragging');};map.addEventListener('pointerup',endDrag);map.addEventListener('pointercancel',endDrag);map.addEventListener('lostpointercapture',endDrag);
   function updateActiveStop(){
     const step=activeStopId?stops.findIndex(p=>p.id===activeStopId)+1:0;
     map.dataset.tripStep=String(Math.max(0,step));

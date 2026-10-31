@@ -162,7 +162,7 @@ test('the album keeps its place when it changes between one page and two',async 
   await width(700,'single:back');assert.ok($('album-book').classList.contains('closed-back'));
   assert.equal($('album-pages').querySelector('.page-corner'),null,'The closed back cover has nothing to turn');
   press('ArrowLeft');assert.equal(pages(),'single:inside');assert.equal($('album-position').textContent,'Endpapers');
-  await width(1024,'left:blank right:inside');assert.equal($('album-book').classList.contains('closed-back'),false,'The endpapers stay open');
+  await width(1024,'left:city right:inside');assert.equal($('album-book').classList.contains('closed-back'),false,'The endpapers stay open');
   await width(700,'single:inside');
   press('End');press('Escape');assert.equal($('photo-panel').open,false);
   // Another voyage is drawn side by side in between, so only the remembered place can reopen this one closed.
@@ -727,7 +727,7 @@ test('the left log edits the actual map route with drag, keyboard reorder, delet
   grip.dispatchEvent(pointer('pointerup',150,250));assert.deepEqual(order(),['Rome','Madrid','Paris']);assert.equal(w.document.querySelector('.stop-drag-preview'),null);
   $('stop-list').children[1].querySelector('.remove-stop').click();assert.deepEqual(order(),['Rome','Paris']);
   assert.equal($('save-trip').classList.contains('dirty'),true);
-  $('save-trip').click();await wait(()=>$('save-trip-label').textContent==='Saved');
+  $('save-trip').click();await wait(()=>$('save-trip-label').textContent==='Saved'&&$('trip-list').querySelector('.trip-card.active .trip-meta')?.textContent.startsWith('2 stops'));
   assert.ok($('save-trip').querySelector('svg'),'Saving preserves the floppy icon');
   assert.deepEqual((await api(`/trips/${trip.id}`)).trip.stops.map(stop=>stop.name),['Rome','Paris']);
   assert.deepEqual(JSON.parse(w.localStorage.getItem('redline-route-v1')).map(stop=>stop.name),['Rome','Paris']);
@@ -970,4 +970,83 @@ test('single-page view changes turn paper in both directions and settle safely o
   Object.defineProperty(w,'innerWidth',{configurable:true,writable:true,value:1024});w.dispatchEvent(new w.Event('resize'));
   await wait(()=>!$('album-book').dataset.viewMotion);assert.equal(motion.running.size,0);assert.equal($('album-sheet').style.visibility,'');
   assert.equal($('album-book').querySelector('.album-view-layer'),null);assert.equal($('album-book').inert,false);
+});
+
+
+test('long chapters intersperse three-print pages among mostly four-print pages without losing photos',async t=>{
+  const {w,$,tab,press,api,trip}=await setup(t,{route:[paris],seedStops:Array.from({length:75},()=>paris)});
+  Object.defineProperty(w,'innerWidth',{configurable:true,writable:true,value:700});w.dispatchEvent(new w.Event('resize'));await wait(()=>$('album-pages').classList.contains('single'));
+  const ids=[],counts=[];tab(paris.id).click();
+  for(let i=0;i<40&&!$('album-next').disabled;i++){
+    const prints=[...$('album-pages').querySelectorAll('.print')];
+    if(prints.length){counts.push(prints.length);ids.push(...prints.map(print=>print.dataset.photoId));}
+    press('ArrowRight');
+  }
+  assert.equal(ids.length,75);assert.equal(new Set(ids).size,75);
+  assert.ok(counts.filter(n=>n===4).length>counts.length/2,'Four prints remain the majority');
+  assert.ok(counts.slice(3,-1).includes(3),'Three-print pages recur inside the chapter');
+  assert.ok(counts.every(n=>n>=2&&n<=4),'No stray single-photo tail in this chapter');
+  assert.deepEqual(new Set(ids),new Set(Array.from((await api(`/trips/${trip.id}`)).photos,photo=>photo.id)));
+});
+
+test('returning to All Photos reuses its images and refreshes notes changed in another tab',async t=>{
+  const {w,$,api,trip,tiles,storage,press}=await setup(t);
+  const first=tiles()[0],id=first.closest('.photo-tile').dataset.photoId;
+  $('album-view').click();$('sheet-view').click();assert.equal(tiles()[0],first,'Unchanged images and handlers are retained');
+  const {photos}=await api(`/trips/${trip.id}`),photo=photos.find(photo=>photo.id===id);
+  await api(`/photos/${id}/caption`,{method:'PUT',body:JSON.stringify({caption:'Changed elsewhere',revision:photo.captionRevision})});
+  press('Escape');$('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);
+  const replacement=tiles().find(button=>button.closest('.photo-tile').dataset.photoId===id);
+  assert.notEqual(replacement,first,'Changed notes invalidate the retained gallery');replacement.click();
+  assert.equal($('photo-note').textContent,'Changed elsewhere');
+});
+
+test('a large All Photos turn measures each tile once and decodes each visible image once',async t=>{
+  const {w,$,tiles}=await setup(t,{route:[paris],seedStops:Array.from({length:80},()=>paris)});tiles();
+  const source=$('album-sheet'),scroll=$('photo-scroll'),all=[...source.querySelectorAll('.photo-tile')];
+  const rect=(top,height)=>({top,bottom:top+height,left:0,right:600,width:600,height});
+  source.getBoundingClientRect=()=>rect(0,600);scroll.getBoundingClientRect=()=>rect(50,500);scroll.scrollTop=140;
+  let reads=0;const decodes=new Map();
+  source.querySelectorAll('.gallery-city').forEach(section=>section.getBoundingClientRect=()=>rect(0,4000));
+  all.forEach((tile,i)=>tile.getBoundingClientRect=()=>{reads++;return rect(i<6?80:900+i*100,100);});
+  w.HTMLImageElement.prototype.decode=function(){decodes.set(this.src,(decodes.get(this.src)||0)+1);return Promise.resolve();};
+  const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===4);
+  assert.equal(reads,80,'Both turning halves share one geometry measurement');
+  assert.equal(decodes.size,6,'Only visible photos need decoding');
+  assert.ok([...decodes.values()].every(count=>count===1),'Copies share a decode request');
+  assert.equal($('album-book').querySelectorAll('.album-view-layer img').length,12,'Offscreen photographs are absent from moving surfaces');
+  await motion.finish();assert.equal(source.querySelectorAll('img').length,80);
+});
+
+
+test('back up all saves the current route first and refuses to omit pending imports',async t=>{
+  const {w,$,storage,trip,choose,press}=await setup(t,{seed:false});press('Escape');$('trips-button').click();
+  let backup=null,downloads=0;const exportArchive=storage.exportArchive;
+  storage.exportArchive=async id=>{backup=await exportArchive(id);return backup;};
+  w.HTMLAnchorElement.prototype.click=()=>downloads++;
+  w.RedlineApp.setStops([madrid,paris]);w.dispatchEvent(new w.Event('redline:routechange'));
+  $('backup-trips').click();await wait(()=>$('backup-list').querySelectorAll('button').length===1);
+  const records=await w.RedlineArchive.unpack(backup);assert.deepEqual(Array.from(records[0].trip.stops,stop=>stop.id),[madrid.id,paris.id]);assert.equal(downloads,1);
+  $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);choose(['pending.jpg']);await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+  press('Escape');$('trip-list').replaceChildren();$('trips-button').click();await wait(()=>$('trip-list').querySelector('.trip-card'));$('backup-trips').click();await wait(()=>$('trip-message').textContent==='Save the pending photos before exporting.');assert.equal(downloads,1);
+});
+
+test('browsing photos does not render large share exports until the postcard back is needed',async t=>{
+  const {w,$,tiles}=await setup(t);let rendered=0;
+  w.RedlinePostcardExport.render=()=>{rendered++;return {toBlob:callback=>callback(new Blob([jpeg],{type:'image/jpeg'}))};};
+  tiles()[0].click();await tick();assert.equal(rendered,0);
+  $('viewer-next').click();await wait(()=>$('photo-position').textContent==='2 / 2');assert.equal(rendered,0);
+  $('flip-postcard').click();await wait(()=>!$('share-postcard').disabled);assert.equal(rendered,1);
+  $('unflip-postcard').click();$('flip-postcard').click();await tick();assert.equal(rendered,1,'An unchanged postcard reuses its ready share file');
+});
+
+
+test('importing a batch appends new prints without rebuilding earlier previews',async t=>{
+  const {w,$,choose}=await setup(t,{seed:false});const releases=[];
+  w.createImageBitmap=()=>new Promise(resolve=>releases.push(()=>resolve({width:1600,height:1000,close(){}})));
+  choose(['one.jpg','two.jpg','three.jpg']);await wait(()=>releases.length===1);releases.shift()();
+  await wait(()=>$('photo-review').children.length===1&&releases.length===1);const first=$('photo-review').firstElementChild;
+  releases.shift()();await wait(()=>$('photo-review').children.length===2&&releases.length===1);
+  assert.equal($('photo-review').firstElementChild,first,'The first preview remains mounted while later files process');
+  releases.shift()();await wait(()=>$('photo-review').children.length===3&&!$('choose-photos').disabled);
 });
