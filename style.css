@@ -136,28 +136,28 @@ form[aria-busy=true] .add-button { opacity: .45; }
 .search-credit a { color: var(--muted); text-decoration: none; }
 
 /* A loose, ruled sheet on the left, independent of the planner. */
-.route-log { position: fixed; z-index: 6; top: 24px; left: 24px; width: min(380px, calc(100vw - 48px)); max-height: calc(100svh - 48px); color: var(--sepia); background-color: #f7efdd; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 140 140' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.045'/%3E%3C/svg%3E"), radial-gradient(ellipse at 45% 40%, #fffaf033 30%, #b9945814 100%); border: 1px solid #cbbda3; border-radius: 2px; box-shadow: 0 18px 60px #3b2a1833, 0 2px 5px #3b2a1822; transform-origin: 30% 20%; transition: opacity .16s ease, translate .16s ease, rotate .16s ease, display .16s allow-discrete; }
-.route-log[hidden] { opacity: 0; translate: -8px 10px; rotate: -1deg; }
-.route-log:not([hidden]) { animation: paper-settle .42s var(--ease-out); }
-@keyframes paper-settle { from { opacity: 0; transform: translate(-24px, 14px) rotate(-2deg) scale(.98); } 70% { opacity: 1; transform: translate(2px, -1px) rotate(.25deg); } to { transform: none; } }
+.route-log { position: fixed; z-index: 6; top: 24px; left: 24px; width: min(380px, calc(100vw - 48px)); max-height: calc(100svh - 48px); color: var(--sepia); background-color: #f7efdd; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 140 140' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.045'/%3E%3C/svg%3E"), radial-gradient(ellipse at 45% 40%, #fffaf033 30%, #b9945814 100%); border: 1px solid #cbbda3; border-radius: 2px; box-shadow: 0 18px 60px #3b2a1833, 0 2px 5px #3b2a1822; transform-origin: 30% 20%; transition: translate .24s cubic-bezier(.4,0,.2,1), display .24s allow-discrete; }
+.route-log[hidden] { translate: calc(-100% - 32px) 0; }
+.route-log:not([hidden]) { transition-duration: .44s; transition-timing-function: cubic-bezier(.22,.7,.18,1); }
+@starting-style { .route-log:not([hidden]) { translate: calc(-100% - 32px) 0; } }
 .logbook:focus { outline: none; }
 .logbook-inner { min-height: 0; overflow: hidden; }
-.route-log .logbook-scroll { max-height: calc(100svh - 50px); overflow: auto; overscroll-behavior: contain; padding: 20px 24px; scrollbar-width: thin; scrollbar-color: #c2ab84 transparent; }
-.logbook-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 18px; }
+.route-log .logbook-scroll { max-height: calc(100svh - 50px); overflow: auto; overscroll-behavior: contain; padding: 10px 24px 18px; scrollbar-width: thin; scrollbar-color: #c2ab84 transparent; }
+.logbook-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
 .logbook-head h2 { margin: 0; color: #8a7350; font: 11px Georgia, serif; letter-spacing: 1.8px; text-transform: uppercase; }
 #trips-summary { display: none; }
-.route-log .current-trip { display: block; margin: 0 0 24px; padding: 0; border: 0; background: none; }
-.route-log #trip-name-form input { font-size: 24px; padding-block: 8px; }
+.route-log .current-trip { display: block; margin: 0 0 10px; padding: 0; border: 0; background: none; }
+.route-log #trip-name-form input { font-size: 24px; padding-block: 5px; }
 .log-route-heading { display: flex; align-items: center; justify-content: space-between; color: #8a7350; font: 11px Georgia, serif; }
 .log-route-heading .text-button { padding: 8px 0; }
 .log-route-heading > span { flex: 1; }
 .log-route-heading { gap: 16px; }
-.route-log #stop-list { display: block; max-height: min(46svh, 430px); margin: 0; border-top: 1px solid #b4a58b55; scrollbar-width: thin; scrollbar-color: #c2ab84 transparent; }
-.route-log #stop-list li { min-height: 48px; border-bottom: 1px solid #b4a58b55; border-radius: 0; font: 17px Georgia, serif; }
+.route-log #stop-list { display: block; max-height: min(64svh, 640px); margin: 0; border-top: 1px solid #b4a58b55; scrollbar-width: thin; scrollbar-color: #c2ab84 transparent; }
+.route-log #stop-list li { min-height: 42px; border-bottom: 1px solid #b4a58b55; border-radius: 0; font: 17px Georgia, serif; }
 .route-log #stop-list li::after { display: none; }
-.route-log .stop-grip { flex: 1; min-width: 0; min-height: 47px; text-align: left; white-space: normal; }
+.route-log .stop-grip { flex: 1; min-width: 0; min-height: 41px; text-align: left; white-space: normal; }
 .route-log .stop-number { flex: none; width: 22px; margin-right: 12px; border: 0; border-radius: 0; background: none !important; color: var(--red) !important; font: 11px Georgia, serif; }
-.route-log .remove-stop { flex: none; width: 36px; height: 44px; padding: 0; }
+.route-log .remove-stop { flex: none; width: 36px; height: 42px; padding: 0; }
 .route-log #empty-hint { padding: 14px 0; font-size: 14px; }
 #saved-trips { margin-top: 24px; padding-top: 16px; border-top: 1px solid #b4a58b55; }
 #saved-trips > summary { cursor: pointer; color: #7a6544; font: 13px Georgia, serif; }
@@ -165,7 +165,7 @@ form[aria-busy=true] .add-button { opacity: .45; }
 #trip-switcher .trip-list-heading:has(.trip-search[hidden]) { display: none; }
 #trip-switcher .trip-list-heading { margin-top: 12px; }
 #trip-switcher .trip-search, #trip-switcher .trip-search input { width: 100%; }
-.trip-switcher { margin: -4px 0 18px; }
+.trip-switcher { margin: -4px 0 8px; }
 .trip-switcher > summary { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; list-style: none; color: #8a7350; font: 12px Georgia, serif; cursor: pointer; }
 .trip-switcher > summary::-webkit-details-marker { display: none; }
 .trip-switcher > summary span { transition: rotate .2s ease; }
@@ -254,7 +254,7 @@ form[aria-busy=true] .add-button { opacity: .45; }
   .voyage-title { flex-basis: 100%; }
   .voyage-actions { width: 100%; justify-content: space-between; }
   .route-log { top: 12px; left: 12px; width: min(380px, calc(100vw - 24px)); max-height: calc(100svh - 24px); }
-  .route-log .logbook-scroll { max-height: calc(100svh - 26px); padding: 18px 20px; }
+  .route-log .logbook-scroll { max-height: calc(100svh - 26px); padding: 10px 20px 16px; }
   .voyage-tab { padding: 0 9px; }
   .suggestion-panel { left: 14px; right: 14px; }
   #stop-list li { font-size: 14px; }

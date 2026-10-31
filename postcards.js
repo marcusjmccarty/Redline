@@ -7,7 +7,7 @@
   function wakeArrows(pointer='mouse'){
     const frame=$('full-photo').parentElement;clearTimeout(arrowTimer);frame.classList.remove('arrows-idle');
     if(pointer==='touch')return;
-    arrowTimer=setTimeout(()=>{if($('photo-viewer').open)frame.classList.add('arrows-idle');},1800);
+    arrowTimer=setTimeout(()=>{if($('photo-viewer').open)frame.classList.add('arrows-idle');},450);
   }
   const empty=()=>Object.fromEntries(fields.map(key=>[key,'']));
   const motion=el=>typeof el?.animate==='function'&&'finished' in (window.Animation?.prototype||{})&&!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
