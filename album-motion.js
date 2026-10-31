@@ -57,8 +57,8 @@
     const shift=two&&!closed?'-25%':'0%';
     const closedFrames={leaf:'rotateY(0deg)',scene:`translateX(${shift})`};
     const openFrames={leaf:`rotateY(${angle}deg)`,scene:'translateX(0%)'};
-    const outside=`translateX(-${Math.ceil(size.right||innerWidth)+Math.ceil(tabs.getBoundingClientRect().width||160)+96}px)`;
-    arrival.style.transform=opening?outside:'translateX(0px)';
+    const outside=`translateY(${Math.ceil(innerHeight-size.top)+96}px)`;
+    arrival.style.transform=opening?outside:'translateY(0px)';
     let animations=[],direction=opening?'opening':'closing',disposed=false,started=false,reversed=false;
     const pose=state=>{leaf.style.transform=state.leaf;scene.style.transform=state.scene;};
     pose(opening?closedFrames:openFrames);
@@ -80,7 +80,7 @@
       async open(){
         direction='opening';await ready;if(disposed||direction!=='opening')return;started=true;
         run(closedFrames,openFrames,620);
-        animations.push(arrival.animate([{transform:outside},{transform:'translateX(0px)',offset:.6},{transform:'translateX(0px)'}],{duration:620,easing:'cubic-bezier(.22,.7,.18,1)',fill:'both'}));
+        animations.push(arrival.animate([{transform:outside},{transform:'translateY(0px)',offset:.6},{transform:'translateY(0px)'}],{duration:620,easing:'cubic-bezier(.22,.7,.18,1)',fill:'both'}));
         return done(animations);
       },
       close(){
@@ -96,7 +96,7 @@
         // Let the complete front cover register before it leaves the map.
         const hold=scene.animate([{opacity:1},{opacity:1}],{duration:40,fill:'both'});animations.push(hold);await done([hold]);
         if(disposed)return;onDepart();
-        const slide=arrival.animate([{transform:'translateX(0px)'},{transform:outside}],{duration:240,easing:'cubic-bezier(.4,0,1,1)',fill:'forwards'});
+        const slide=arrival.animate([{transform:'translateY(0px)'},{transform:outside}],{duration:240,easing:'cubic-bezier(.4,0,1,1)',fill:'forwards'});
         animations.push(slide);await done([slide]);
       },
       dispose(){
@@ -108,5 +108,37 @@
       }
     };
   }
-  window.RedlineAlbumMotion={create};
+  // Keep the binding and tabs still while the paper views overlap. There is
+  // always a complete spread onscreen, including while new prints decode.
+  function changeView({book,source,apply,direction}){
+    const copy=snapshot(source),layer=make('album-view-layer'),style=getComputedStyle(source);
+    const tabs=document.getElementById('gallery-filter'),before=tabs.getBoundingClientRect(),tabTranslate=tabs.style.translate;
+    copy.el.style.translate=style.translate||'none';copy.el.style.boxShadow=style.boxShadow;
+    layer.style.setProperty('--view-crease',book.classList.contains('closed-front')||book.classList.contains('closed-back')?'0':'1');
+    layer.inert=true;layer.setAttribute('aria-hidden','true');layer.append(copy.el);book.append(layer);copy.restore();
+    book.dataset.viewMotion='true';
+    const incoming=apply(),visibility=incoming.style.visibility;incoming.style.visibility='hidden';
+    const after=tabs.getBoundingClientRect(),shift=`${before.left-after.left}px ${before.top-after.top}px`;
+    const tabsMove=before.left!==after.left||before.top!==after.top;if(tabsMove)tabs.style.translate=shift;
+    let disposed=false,animations=[];
+    const scroll=incoming.querySelector('.photo-scroll'),viewport=(scroll||incoming).getBoundingClientRect();
+    const images=[...incoming.querySelectorAll('img')].filter(img=>{
+      const rect=img.getBoundingClientRect();return !viewport.height||rect.bottom>=viewport.top&&rect.top<=viewport.bottom;
+    });
+    const ready=Promise.all([...copy.el.querySelectorAll('img'),...images].map(img=>{img.loading='eager';return img.decode?.().catch(()=>{});}));
+    return {
+      async play(){
+        await ready;if(disposed)return;
+        const timing={duration:320,easing:'cubic-bezier(.22,.7,.25,1)',fill:'both'};
+        animations=[
+          layer.animate([{opacity:1,transform:'translateX(0px)'},{opacity:0,transform:`translateX(${direction*10}px)`}],timing),
+          incoming.animate([{opacity:0,transform:`translateX(${-direction*10}px)`},{opacity:1,transform:'translateX(0px)',offset:.75},{opacity:1,transform:'translateX(0px)'}],timing)
+        ];
+        if(tabsMove)animations.push(tabs.animate([{translate:shift},{translate:tabTranslate||'0px 0px'}],timing));
+        incoming.style.visibility=visibility;await done(animations);
+      },
+      dispose(){disposed=true;incoming.style.visibility=visibility;tabs.style.translate=tabTranslate;layer.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.viewMotion;}
+    };
+  }
+  window.RedlineAlbumMotion={create,changeView};
 })();
