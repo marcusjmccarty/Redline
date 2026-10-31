@@ -23,19 +23,23 @@
 .away { opacity: 0 !important; pointer-events: none !important; }
 
 /* Dialogs ease in and out; their open state still changes at once. */
-.album, #info-dialog { transition: opacity .3s ease, transform .45s var(--ease-out), overlay .45s allow-discrete, display .45s allow-discrete; }
-.album::backdrop, #info-dialog::backdrop, #photo-viewer::backdrop { transition: background-color .35s ease, overlay .45s allow-discrete, display .45s allow-discrete; }
+#info-dialog { transition: opacity .3s ease, transform .45s var(--ease-out), overlay .45s allow-discrete, display .45s allow-discrete; }
+#info-dialog::backdrop, #photo-viewer::backdrop { transition: background-color .35s ease, overlay .45s allow-discrete, display .45s allow-discrete; }
 #info-dialog:not([open]) { opacity: 0; transform: translateY(26px) scale(.985); }
 .album:not([open]) { opacity: 0; }
-.album:not([open]) .album-book { transform: translateY(30px) scale(.96); }
+
 @starting-style {
   #info-dialog[open] { opacity: 0; transform: translateY(26px) scale(.985); }
   .album[open] { opacity: 0; }
-  .album[open] .album-book { transform: translateY(40px) scale(.94); }
+  .album[open] .album-book { transform: translateY(18px) scale(.98); }
   .album[open]::backdrop, #info-dialog[open]::backdrop, #photo-viewer[open]::backdrop { background-color: #211c1600; }
 }
 #info-dialog::backdrop { background-color: #211c1670; }
-.album::backdrop { background-color: #1d1712c4; }
+.album { transition: opacity .18s ease; }
+.album::backdrop { background-color: #1d1712c4; transition: background-color .18s ease; }
+.album[data-motion=closing]::backdrop { background-color: #1d171200; transition-duration: .52s; }
+.album[data-motion=closing] :is(.album-top, .album-foot, #photo-message) { opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.album:not([open]) { display: none; }
 .album:not([open])::backdrop, #info-dialog:not([open])::backdrop { background-color: #211c1600; }
 
 /* The album: a leather-bound book over the dimmed map. */
@@ -55,11 +59,11 @@
 .album .close-panel { color: #efe5d2; }
 .album .close-panel:hover { background: #ffffff1f; color: #fff; }
 .album .small-button { min-height: 34px; padding: 7px 13px; font-size: 12px; }
-.album-stage { container-type: size; position: relative; display: flex; align-items: center; justify-content: center; gap: 0; min-height: 0; height: 100%; padding: 4px 174px 4px 24px; }
-.album-book { --pad: clamp(10px, 1.4cqh, 16px); position: relative; flex: none; height: min(100cqh - 8px, 100cqw / 1.5, 840px); aspect-ratio: 1.5; padding: var(--pad) calc(var(--pad) + 2px); transition: transform .55s var(--ease-out); transform-origin: 50% 60%; }
+.album-stage { container-type: size; position: relative; display: flex; align-items: center; justify-content: center; gap: 0; min-height: 0; height: 100%; padding: 4px 24px; }
+.album-book { --tab-width: clamp(90px, 12vw, 150px); --turn-duration: 900ms; --turn-ease: cubic-bezier(.4,0,.2,1); --pad: clamp(10px, 1.4cqh, 16px); position: relative; flex: none; height: min(100cqh - 8px, (100cqw - clamp(180px, 24vw, 300px)) / 1.5, 840px); aspect-ratio: 1.5; padding: var(--pad) calc(var(--pad) + 2px); transition: transform .32s var(--ease-out); transform-origin: 50% 60%; }
 .album-book::before { content: ''; position: absolute; inset: 0; border-radius: 9px 14px 14px 9px; background: var(--leather); box-shadow: 0 34px 90px #000a, 0 0 0 1px #0007, inset 0 1px 0 #ffffff14, inset 0 0 0 6px #00000014; transition: opacity .45s ease .25s; }
 .album-book:is(.closed-front, .closed-back)::before { opacity: 0; transition-delay: 0s; }
-.album-pages { --read: 0; position: relative; display: grid; grid-template-columns: 1fr 1fr; height: 100%; perspective: 2800px; border-radius: 3px; transition: translate .85s var(--ease-in-out), box-shadow .4s ease;
+.album-pages { --read: 0; position: relative; display: grid; grid-template-columns: 1fr 1fr; height: 100%; perspective: 2800px; border-radius: 3px; transition: translate var(--turn-duration) var(--turn-ease), box-shadow .25s ease;
   box-shadow: calc(-.6px - var(--read) * 3px) 0 0 #e7dcc6, calc(-1.4px - var(--read) * 5px) 0 0 #d4c6ab, calc(-2px - var(--read) * 6px) 0 0 #ece2cf, calc(.6px + (1 - var(--read)) * 3px) 0 0 #e7dcc6, calc(1.4px + (1 - var(--read)) * 5px) 0 0 #d4c6ab, calc(2px + (1 - var(--read)) * 6px) 0 0 #ece2cf; }
 .album-pages::after { content: ''; position: absolute; z-index: 2; top: 0; bottom: 0; left: 50%; width: 46px; transform: translateX(-50%); pointer-events: none; background: linear-gradient(90deg, #0000, #5a3d1e1c 40%, #5a3d1e40 50%, #5a3d1e1c 60%, #0000); transition: opacity .4s; }
 .closed-front .album-pages { translate: -25% 0; box-shadow: none; }
@@ -84,11 +88,12 @@
 .leaf-face .page-corner { display: none; }
 
 /* Turning leaves */
-.album-leaf { position: absolute; z-index: 3; top: 0; bottom: 0; width: 50%; transform-style: preserve-3d; will-change: transform; }
+.album-leaf { position: absolute; z-index: 3; top: 0; bottom: 0; width: 50%; transform-style: preserve-3d; will-change: transform; isolation: isolate; }
 .album-leaf.turn-forward { left: 50%; transform-origin: left center; }
 .album-leaf.turn-back { left: 0; transform-origin: right center; }
 .album-page.leaf-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
-.leaf-back { transform: rotateY(180deg); }
+.leaf-front { transform: translateZ(.1px); }
+.leaf-back { transform: rotateY(180deg) translateZ(.1px); }
 .page-shade { position: absolute; z-index: 6; inset: 0; opacity: 0; pointer-events: none; }
 .album-page.right > .page-shade { background: linear-gradient(90deg, #2a180a 0%, #2a180a66 35%, #0000 80%); }
 .album-page.left > .page-shade { background: linear-gradient(270deg, #2a180a 0%, #2a180a66 35%, #0000 80%); }
@@ -105,6 +110,7 @@
 .album-page.album-cover::before { left: 0; }
 .album-page.album-back::before { right: 0; transform: scaleX(-1); }
 .cover-plate { display: flex; flex-direction: column; align-items: center; gap: clamp(4px, 2cqh, 8px); width: 70%; padding: clamp(12px, 7cqh, 28px) clamp(10px, 4.5cqh, 18px) clamp(10px, 6cqh, 24px); border: 1px solid #d8b87866; border-radius: 3px; text-align: center; background: #00000014; }
+.album-cover .cover-plate { align-self: start; margin-top: clamp(18px, 12cqh, 90px); }
 .cover-emblem { width: clamp(24px, 11.5cqh, 46px); height: clamp(24px, 11.5cqh, 46px); margin-bottom: 4px; }
 .cover-kicker { margin: 0; font: 10px Georgia, serif; letter-spacing: 3.4px; text-transform: uppercase; }
 .cover-title { margin: 0; font: italic clamp(15px, 6cqh, clamp(22px, 2.6svh - 3.5px, 34px))/1.15 Georgia, serif; overflow-wrap: anywhere; text-shadow: 0 1px 0 #0008, 0 -1px 0 #fff2; }
@@ -173,17 +179,17 @@
 .print-photo:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
 
 /* Divider tabs and page controls */
-.album-tabs { position: absolute; z-index: 4; left: calc(100% - var(--pad) - 5px); top: 50%; transform: translateY(-50%); flex: none; display: flex; flex-direction: column; gap: 5px; max-height: 76%; margin: 0; padding: 4px 8px 4px 0; overflow-y: auto; scrollbar-width: none; transition: left .85s var(--ease-in-out), opacity .25s; }
+.album-tabs { position: absolute; z-index: 4; left: calc(100% - var(--pad) - 5px); top: 50%; transform: translateY(-50%); flex: none; display: flex; flex-direction: column; gap: 5px; max-height: 76%; margin: 0; padding: 4px 8px 4px 0; overflow-y: auto; scrollbar-width: none; transition: left var(--turn-duration) var(--turn-ease), opacity .2s; }
 .album-tabs::-webkit-scrollbar { display: none; }
 /* Book-cloth colours (oxblood, bottle green, navy, ochre, plum, slate) in one strip; --tab picks one, with half a colour to spare on each side. */
-.album-tab { display: flex; align-items: center; gap: 7px; width: 150px; padding: 8px 12px 8px 16px; border: 0; border-radius: 0 7px 7px 0; background: linear-gradient(90deg, #6b2c2a 0 16.667%, #2f4b3b 0 33.333%, #2d3c58 0 50%, #6c4f1e 0 66.667%, #583450 0 83.333%, #465360 0) calc((var(--tab, 0) * 2 + .5) * 100% / 11) 0 / 1200% 100%; color: #fbf4e6; font: 13px Georgia, serif; text-align: left; box-shadow: 2px 2px 6px #0006, inset 0 1px 0 #ffffff26; transform: translateX(-12px); transition: transform .3s var(--ease-out), filter .3s, box-shadow .3s; }
+.album-tab { display: flex; align-items: center; gap: 7px; width: var(--tab-width); padding: 8px 10px 8px 14px; border: 0; border-radius: 0 7px 7px 0; background: linear-gradient(90deg, #6b2c2a 0 16.667%, #2f4b3b 0 33.333%, #2d3c58 0 50%, #6c4f1e 0 66.667%, #583450 0 83.333%, #465360 0) calc((var(--tab, 0) * 2 + .5) * 100% / 11) 0 / 1200% 100%; color: #fbf4e6; font: 13px Georgia, serif; text-align: left; box-shadow: 2px 2px 6px #0006, inset 0 1px 0 #ffffff26; transform: translateX(-12px); transition: transform .3s var(--ease-out), filter .3s, box-shadow .3s; }
 .album-tab:hover:not(:disabled) { transform: translateX(-5px); filter: brightness(1.08); }
 .album-tab[aria-current=true] { transform: translateX(0); filter: brightness(1.15); box-shadow: 3px 3px 10px #0008, inset 0 1px 0 #ffffff33; }
 .album-tab .chip-stop { font: 9px Georgia, serif; opacity: .8; }
 .album-tab .tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .album-tab .chip-count { font: 10px Arial, sans-serif; opacity: .85; }
 .album-tab:focus-visible { outline: 2px solid #f4ecdb; outline-offset: 2px; }
-.album-book[data-mode=album]:is(.closed-front, .closed-back) .album-tabs { left: calc(75% - var(--pad) / 2 - 6px); }
+.album-book[data-mode=album]:is(.closed-front, .closed-back) .album-tabs { left: calc(75% - var(--pad) / 2 - 4px); }
 .album-foot { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 4px 20px calc(14px + env(safe-area-inset-bottom)); transition: opacity .3s, transform .3s var(--ease-out); }
 .album-foot.away { transform: translateY(10px); }
 .album-turn { display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 1px solid #ffffff38; border-radius: 50%; background: #ffffff0f; color: #f3eadb; transition: background-color .2s, transform .2s var(--ease-out), opacity .2s; }
@@ -306,7 +312,8 @@
 .viewer-edge.next { right: 0; justify-content: flex-end; }
 .viewer-edge svg { width: 36px; height: 36px; padding: 8px; border-radius: 50%; background: #1d1812a6; fill: none; stroke: #fff; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: transform .2s var(--ease-out); }
 .viewer-edge:hover svg { transform: scale(1.08); }
-.viewer-photo:hover .viewer-edge, .viewer-edge:focus-visible { opacity: 1; }
+.viewer-photo:not(.arrows-idle):hover .viewer-edge, .viewer-edge:focus-visible { opacity: 1; }
+.viewer-photo.arrows-idle .viewer-edge:not(:focus-visible) { opacity: 0; pointer-events: none; }
 .viewer-edge:focus-visible { outline: none; }
 .viewer-edge:focus-visible svg { outline: 2px solid #fff; outline-offset: 2px; }
 @media (hover: none), (any-pointer: coarse) { .viewer-edge { width: 18%; padding: 0 8px; opacity: .8; } .viewer-edge svg { width: 30px; height: 30px; padding: 7px; } }
@@ -348,7 +355,7 @@
 /* One page at a time: the same rule as twoPage() in trips.js. */
 @media (max-width: 599px), (max-width: 899px) and (orientation: portrait) {
   .album-stage { flex-direction: column; align-items: stretch; gap: 8px; padding: 36px 12px 4px; }
-  .album-book { --pad: 10px; width: 100%; height: auto; flex: 1; min-height: 0; aspect-ratio: auto; }
+  .album-book { --tab-width: clamp(90px, 12vw, 150px); --turn-duration: 900ms; --turn-ease: cubic-bezier(.4,0,.2,1); --pad: 10px; width: 100%; height: auto; flex: 1; min-height: 0; aspect-ratio: auto; }
   .album-tabs, .album-book[data-mode=album]:is(.closed-front, .closed-back) .album-tabs { left: 10px; right: 10px; top: -26px; transform: none; flex-direction: row; gap: 4px; max-height: none; margin: 0; padding: 3px 2px 0; overflow-x: auto; }
   .album-tab { flex: none; width: auto; max-width: 180px; padding: 7px 12px; border-radius: 5px 5px 0 0; box-shadow: 0 -1px 4px #0003; transform: none; }
   .album-tab:hover:not(:disabled) { transform: none; }

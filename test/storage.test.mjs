@@ -145,3 +145,21 @@ test('renaming changes only the title and refuses a stale revision',async()=>{
   assert.equal(renamed.title,'Paris in spring');assert.equal(renamed.revision,2);assert.equal(renamed.stops,undefined);
   const saved=(await store.api(`/trips/${trip.id}`)).trip;assert.deepEqual(plain(saved.stops),plain(trip.stops));assert.equal(saved.revision,2);
 });
+
+test('backup history records downloads and imported copies without overwriting concurrent trip edits',async()=>{
+  const {store,indexedDB}=library(),trip=await create(store),other=await create(store);
+  const blob=await store.exportArchive(trip.id);
+  assert.equal((await store.api(`/trips/${trip.id}`)).trip.backedUpAt,undefined,'Packing alone is not a completed export');
+  const second=library(indexedDB).store;
+  await second.api(`/trips/${trip.id}`,{method:'PUT',body:JSON.stringify({...trip,title:'Updated elsewhere'})});
+  await store.recordBackup(blob);
+  const result=(await second.api(`/trips/${trip.id}`)).trip;
+  assert.ok(Number.isFinite(Date.parse(result.backedUpAt)));assert.equal(result.backupSource,'export');
+  assert.equal(result.title,'Updated elsewhere');assert.equal(result.revision,2);
+  assert.equal((await store.api(`/trips/${other.id}`)).trip.backedUpAt,undefined,'A single-trip export never marks other trips');
+  await assert.rejects(store.recordBackup(new Blob(['unknown'])),/Unknown backup/);
+  const target=library().store;await target.importArchive(blob);
+  const imported=(await target.api('/trips')).trips[0];assert.equal(imported.backupSource,'import');assert.ok(imported.backedUpAt);
+  const all=await store.exportArchive();await store.recordBackup(all);
+  assert.ok((await library(indexedDB).store.api('/trips')).trips.every(trip=>trip.backedUpAt),'Export history survives reopening');
+});

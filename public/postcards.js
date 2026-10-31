@@ -3,7 +3,12 @@
   const $=id=>document.getElementById(id),fields=['message','recipient','address','sender'],states=new Map();
   let active=null,request=null,timer=null,closing=false,printing=false,restoreAfterPrint=false;
   let shareFile=null,shareGeneration=0,shareTimer=null,sharing=false;
-  let sequence=[],navigating=false,navigationVersion=0,returnFocus=null,swipe=null,suppressClickUntil=0,actions=null,changing=false;
+  let sequence=[],navigating=false,navigationVersion=0,returnFocus=null,swipe=null,suppressClickUntil=0,actions=null,changing=false,arrowTimer=null;
+  function wakeArrows(pointer='mouse'){
+    const frame=$('full-photo').parentElement;clearTimeout(arrowTimer);frame.classList.remove('arrows-idle');
+    if(pointer==='touch')return;
+    arrowTimer=setTimeout(()=>{if($('photo-viewer').open)frame.classList.add('arrows-idle');},1800);
+  }
   const empty=()=>Object.fromEntries(fields.map(key=>[key,'']));
   const motion=el=>typeof el?.animate==='function'&&'finished' in (window.Animation?.prototype||{})&&!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const settle=animation=>animation?.finished?.catch(()=>{});
@@ -26,7 +31,7 @@
   }
   function flip(){
     if(active?.preview)return;
-    const back=!$('photo-viewer').classList.contains('flipped'),viewer=$('photo-viewer');
+    const back=!$('photo-viewer').classList.contains('flipped'),viewer=$('photo-viewer');wakeArrows();
     // The card lifts slightly off the table while it turns over.
     if(motion(viewer)){viewer.classList.remove('flip-motion');void viewer.offsetWidth;viewer.classList.add('flip-motion');clearTimeout(flip.timer);flip.timer=setTimeout(()=>viewer.classList.remove('flip-motion'),950);}
     $('photo-viewer').classList.toggle('flipped',back);
@@ -128,7 +133,7 @@
     $('postcard-front').inert=false;$('postcard-front').setAttribute('aria-hidden','false');$('postcard-back').inert=true;$('postcard-back').setAttribute('aria-hidden','true');
     $('print-postcard').disabled=active.preview;$('flip-postcard').hidden=active.preview;
     $('photo-viewer').classList.toggle('preview',active.preview);
-    status();updateOrientation();updateNavigation();renderCity();
+    status();updateOrientation();updateNavigation();renderCity();wakeArrows(window.matchMedia?.('(hover: none)').matches?'touch':'mouse');
     if(!wasOpen){
       const viewer=$('photo-viewer');viewer.getAnimations?.().forEach(animation=>animation.cancel());viewer.showModal();
       if(motion(viewer)&&origin){viewer.style.opacity='0';decode(photo.url).then(()=>{viewer.style.opacity='';if(active?.photo===photo)zoomFrom(origin);});}
@@ -151,7 +156,7 @@
     }catch{}finally{navigating=false;updateNavigation();}
   }
   async function close(){
-    if(closing)return;closing=true;navigationVersion++;clearTimeout(timer);
+    if(closing)return;closing=true;navigationVersion++;clearTimeout(timer);clearTimeout(arrowTimer);
     const photoId=active?.photo.id;
     try{
       let leave=true;try{await save(active);}catch{leave=confirm('Close without saving? Your draft will stay in this tab.');}
@@ -193,6 +198,8 @@
   });
   // A swipe can start anywhere on the photo, its edge arrows included.
   const frame=$('full-photo').parentElement;
+  for(const type of ['pointerenter','pointermove','pointerdown'])frame.addEventListener(type,event=>wakeArrows(event.pointerType||'mouse'));
+  frame.addEventListener('focusin',()=>wakeArrows());
   frame.addEventListener('pointerdown',event=>{
     swipe=event.pointerType==='touch'&&!$('photo-viewer').classList.contains('flipped')?{x:event.clientX,y:event.clientY,id:event.pointerId}:null;
   });

@@ -33,7 +33,7 @@
     $('photo-count').textContent=photos.length?String(photos.length):'';
     $('save-trip').disabled=busy;$('new-trip').disabled=busy;$('choose-photos').disabled=busy;$('trips-button').disabled=busy;
     $('export-trip').disabled=busy||!current;$('backup-trips').disabled=busy;$('import-trips').disabled=busy;
-    document.querySelectorAll('#photo-gallery button,#album-pages button,#photo-review button,#photo-review input,#photo-review select,#gallery-filter button,#gallery-actions button,#gallery-actions select,#trip-list button,#trip-list input').forEach(el=>el.disabled=busy);
+    document.querySelectorAll('#photo-gallery button,#album-pages button,#photo-review button,#photo-review input,#photo-review select,#gallery-filter button,#gallery-actions button,#gallery-actions select,#trip-list button,#trip-list input,#backup-list button').forEach(el=>el.disabled=busy);
     $('cancel-photo-import').disabled=busy;$('select-photos').disabled=busy;
     updateCurrentTrip();updateBulkSelection();updateUploadButton();updateChosen();renderPhotoMode();
   }
@@ -81,6 +81,9 @@
   function finishAlbumClose(focus){
     $('photos-button').setAttribute('aria-expanded','false');
     if($('photo-panel').open)$('photo-panel').close();
+    // Native close hides immediately; animation cleanup cannot flash into view.
+    if(turning){const token=turning;turning=null;token.animations.forEach(animation=>animation.cancel());}
+    $('album-pages').replaceChildren();
     albumMotion=null;photosRequested=false;dragDepth=0;$('photo-drop-hint').hidden=true;
     setSelecting(false);renderPhotoMode();document.body.classList.remove('sheet-open');
     if(!focus&&!$('trip-panel').hidden)$('trip-panel').focus({preventScroll:true});
@@ -88,7 +91,7 @@
   }
   function closePanel(id,{focus=false}={}){
     if(id==='trip-panel'){
-      $(id).hidden=true;closeTripMenus();app.refreshLayout?.();
+      $(id).hidden=true;$('trip-switcher').open=false;closeTripMenus();app.refreshLayout?.();
       $(triggers[id]).setAttribute('aria-expanded','false');restorePanelFocus(id,focus);return;
     }
     if(albumMotion?.phase==='closing')return;
@@ -100,18 +103,24 @@
       if(turning){const token=turning;turning=null;token.animations.forEach(a=>a.cancel());}
       finishAlbumClose(focus);return;
     }
-    const token={phase:'closing',place};albumMotion=token;
-    // The same pages and cover fold shut in both Album and All Photos.
-    renderGallery();
-    (async()=>{
-      await turnTo(0);
-      if(albumMotion!==token)return;
-      const book=$('album-book'),fade=book.animate([{opacity:1,transform:'translateY(0) scale(1)'},{opacity:0,transform:'translateY(24px) scale(.96)'}],{duration:220,easing:'ease-in',fill:'forwards'});
-      await fade.finished.catch(()=>{});
+    const displayMode=mode(),token={phase:'closing',place,displayMode};albumMotion=token;
+    // All Photos and import review keep their visible paper; swapping to a chapter here flashes unrelated photos.
+    if(displayMode==='album')renderGallery();else renderPhotoMode();
+    // Keep the finished leaf in place until the modal is gone. Rebuilding here used
+    // to expose old pages during the browser's delayed display transition.
+    const folding=displayMode==='album'&&albumPage>0&&albumPage<lastPage();
+    const fold=folding?turnTo(0,{duration:420,settle:false}):Promise.resolve();
+    const fade=$('album-book').animate([
+      {opacity:1,transform:'translateY(0) scale(1)'},
+      {opacity:1,transform:'translateY(0) scale(1)',offset:.65},
+      {opacity:0,transform:'translateY(10px) scale(.98)'}
+    ],{duration:folding?520:280,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'});
+    Promise.all([fold,fade.finished.catch(()=>{})]).finally(()=>{
       if(albumMotion===token)finishAlbumClose(focus);
       fade.cancel();
-    })();
+    });
   }
+
   function openPanel(id){
     if(!isOpen(id)){const at=document.activeElement;openedFrom[id]=clickOpened||!at||at===document.body?$('map'):at;}
     for(const other of Object.keys(triggers))if(other!==id&&isOpen(other))closePanel(other);
@@ -202,8 +211,18 @@
     try{
       const {trips}=await api('/trips');tripCache=trips;
       $('trips-summary').textContent=trips.length?`${plural(trips.length,'trip')} kept in this browser`:'No saved trips yet';
-      $('trip-search-label').hidden=trips.length<7;if(trips.length<7)$('trip-search').value='';renderTripCards(focus);
+      renderBackups();$('trip-search-label').hidden=trips.length<7;if(trips.length<7)$('trip-search').value='';renderTripCards(focus);
     }catch(error){showError('trip-message',error);}
+  }
+  function renderBackups(){
+    const list=$('backup-list'),backed=tripCache.filter(trip=>trip.backedUpAt).sort((a,b)=>b.backedUpAt.localeCompare(a.backedUpAt));list.replaceChildren();
+    for(const trip of backed){
+      const row=document.createElement('li'),button=document.createElement('button'),name=document.createElement('span'),date=document.createElement('span');
+      button.type='button';button.disabled=busy;name.textContent=trip.title;
+      date.textContent=`${trip.backupSource==='import'?'Imported':'Exported'} ${tripDate(trip.backedUpAt)}`;
+      button.append(name,date);button.addEventListener('click',event=>trip.id===current?.id?closePanel('trip-panel',{focus:event.detail?'map':true}):loadTrip(trip.id,{keyboard:!event.detail}));row.append(button);list.append(row);
+    }
+    if(!backed.length){const row=document.createElement('li');row.className='trip-empty';row.textContent='Export a trip or import a backup to list it here.';list.append(row);}
   }
   $('trip-search').addEventListener('input',()=>renderTripCards());
   function startRename(item,trip){
@@ -254,7 +273,7 @@
     // Persist the canonical saved route, but never replace edits made during the request.
     if(fingerprint()===JSON.stringify(route)&&JSON.stringify(data.trip.stops)!==JSON.stringify(route)){
       const sameRoute=routeContent(route)===routeContent(data.trip.stops)&&route.every((stop,i)=>stop.id===data.trip.stops[i].id);
-      suppress=true;try{app.setStops(data.trip.stops,{preserveView:sameRoute});}finally{suppress=false;}
+      suppress=true;try{app.setStops(data.trip.stops,{preserveView:sameRoute,preserveHistory:true});}finally{suppress=false;}
     }
     current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:JSON.stringify(data.trip.stops)};dirty=fingerprint()!==current.hash;remember();update();return data.trip;
   }
@@ -319,7 +338,9 @@
       const cityPage=city?pages.findIndex(page=>page.type==='city'&&page.first&&page.group.id===city):-1;
       const target=clampPage(cityPage>=0?cityPage:pageAt(place));
       token.place=placeAt(target,twoPage());
-      // Every visit starts at the cover and opens straight to the reader's bookmark.
+      // Give the cover a painted frame before rotating it into the remembered spread.
+      if(canAnimate($('album-pages')))await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      if(version!==photoPanelRequest||albumMotion!==token)return;
       await turnTo(target);
       if(version!==photoPanelRequest||albumMotion!==token)return;
       albumMotion=null;renderGallery();
@@ -343,13 +364,13 @@
       if(event.key in turns){event.preventDefault();turnTo(shownPage()+turns[event.key]);return;}
       if(event.key==='Home'||event.key==='End'){event.preventDefault();turnTo(event.key==='Home'?0:lastPage());return;}
     }
-    const key=event.key.toLowerCase(),button={t:'trips-button',s:'save-trip',p:'photos-button'}[key];
+    const key=event.key.toLowerCase(),button={l:'trips-button',s:'save-trip',a:'photos-button'}[key];
     if(!button||info)return;
-    if(viewer){if(key==='p'){event.preventDefault();if(!event.repeat){await window.RedlinePostcards.close();if(!$('photo-viewer').open)closePanel('photo-panel',{focus:true});}}return;}
+    if(viewer){if(key==='a'){event.preventDefault();if(!event.repeat){await window.RedlinePostcards.close();if(!$('photo-viewer').open)closePanel('photo-panel',{focus:true});}}return;}
     event.preventDefault();if(event.repeat)return;
     if(document.body.classList.contains('map-only'))window.RedlineApp.showControls();
-    if(key==='p'&&$('photo-panel').open){closePanel('photo-panel',{focus:true});return;}
-    if(key==='t'&&isOpen('trip-panel')){closePanel('trip-panel',{focus:true});return;}
+    if(key==='a'&&$('photo-panel').open){closePanel('photo-panel',{focus:true});return;}
+    if(key==='l'&&isOpen('trip-panel')){closePanel('trip-panel',{focus:true});return;}
     $(button).click();
   });
 
@@ -442,7 +463,7 @@
     if(busy||!pending.length)return;
     if(confirm(`Discard ${photoLabel(pending.length)} from this import?`)){discardPending();message('photo-message','');$('choose-photos').focus({preventScroll:true});}
   });
-  const mode=()=>albumMotion?'album':pending.length||importing?'review':view;
+  const mode=()=>albumMotion?(albumMotion.displayMode||'album'):pending.length||importing?'review':view;
   function renderPhotoMode(){
     const current_=mode(),reviewing=current_==='review',moving=!!albumMotion;
     $('photo-panel').dataset.motion=albumMotion?.phase||'';
@@ -766,7 +787,7 @@
     (tab&&!$('gallery-filter').inert?tab:$('album-next').disabled?$('album-previous'):$('album-next')).focus({preventScroll:true});
   }
   // A page turns over its spine: the leaf carries the old page on its front and the next on its back.
-  async function turnTo(target,{instant=false}={}){
+  async function turnTo(target,{instant=false,duration=null,settle=true}={}){
     if(!pages.length)pages=albumPages();
     // A second press toward the page already turning to lets that turn finish.
     if(turning&&!instant&&clampPage(target)===turning.target)return;
@@ -776,6 +797,9 @@
     if(target===albumPage){renderAlbum();keepAlbumFocus(had);return;}
     const from=albumPage,forward=target>from,root=$('album-pages');
     if(instant||!canAnimate(root)||!$('photo-panel').open){albumPage=target;renderAlbum();keepAlbumFocus(had);preload(target+(forward?1:-1)*step());return;}
+    const coverTurn=[from,target].some(index=>index===0||index===lastPage());
+    const timing={duration:duration??(coverTurn?900:Math.min(1000,720+Math.abs(target-from)*12)),easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'};
+    $('album-book').style.setProperty('--turn-duration',`${timing.duration}ms`);
     const token={target,animations:[],had};turning=token;
     if(twoPage()){
       const left=forward?from-1:target-1,right=forward?target:from,frontIndex=forward?from:from-1,backIndex=forward?target-1:target;
@@ -784,8 +808,6 @@
       leaf.className=`album-leaf ${forward?'turn-forward':'turn-back'}`;front.classList.add('leaf-face','leaf-front');back.classList.add('leaf-face','leaf-back');
       const frontShade=shade(),backShade=shade(),cast=shade('cast');front.append(frontShade);back.append(backShade);under[forward?1:0].append(cast);
       leaf.append(front,back);root.replaceChildren(...under,leaf);stateClasses(target);updateAlbumNav(target);
-      const cover=[pages[frontIndex]?.type,pages[backIndex]?.type].some(type=>type==='cover'||type==='back');
-      const timing={duration:cover?1050:Math.min(1100,780+Math.abs(target-from)*12),easing:'cubic-bezier(.645,.045,.355,1)',fill:'forwards'};
       token.animations.push(
         leaf.animate([{transform:'rotateY(0deg)'},{transform:`rotateY(${forward?-180:180}deg)`}],timing),
         frontShade.animate([{opacity:0},{opacity:.42,offset:.5},{opacity:.42}],timing),
@@ -795,10 +817,10 @@
       const below=pageElement(pages[forward?target:from],forward?target:from,'single'),above=pageElement(pages[forward?from:target],forward?from:target,'single');
       above.classList.add('single-leaf');root.replaceChildren(below,above);stateClasses(target);updateAlbumNav(target);
       const out=[{transform:'perspective(1600px) rotateY(0deg)',opacity:1},{transform:'perspective(1600px) rotateY(-82deg)',opacity:.2}];
-      token.animations.push(above.animate(forward?out:[...out].reverse(),{duration:560,easing:'cubic-bezier(.45,.05,.25,1)',fill:'forwards'}));
+      token.animations.push(above.animate(forward?out:[...out].reverse(),{...timing,duration:duration??560}));
     }
     await Promise.all(token.animations.map(animation=>animation.finished)).catch(()=>{});
-    if(turning!==token)return;turning=null;albumPage=target;renderGallery();keepAlbumFocus(had);preload(target+(forward?1:-1)*step());
+    if(turning!==token)return;albumPage=target;if(!settle)return;turning=null;renderGallery();keepAlbumFocus(had);preload(target+(forward?1:-1)*step());
   }
   $('album-previous').addEventListener('click',()=>turnTo(shownPage()-step()));
   $('album-next').addEventListener('click',()=>turnTo(shownPage()+step()));
@@ -914,7 +936,9 @@
       if(!all&&!tripId)throw Error('Name and save this trip before exporting.');
       const blob=await window.RedlineStorage.exportArchive(all?null:tripId);
       const title=all?'Redline-backup':(tripCache.find(trip=>trip.id===tripId)?.title||current?.title||'Redline-trip');
-      downloadBackup(blob,`${title.replace(/[^a-zA-Z0-9_-]+/g,'-')}.redline`);message('trip-message','Backup downloaded. Keep it somewhere private.');
+      downloadBackup(blob,`${title.replace(/[^a-zA-Z0-9_-]+/g,'-')}.redline`);
+      try{await window.RedlineStorage.recordBackup(blob);saved=true;message('trip-message','Backup downloaded. Keep it somewhere private.');}
+      catch{message('trip-message','Backup downloaded, but its date could not be recorded in the logbook.',true);}
     }catch(error){showError('trip-message',error);}finally{busy=false;update();if(saved)await refreshLogbook(focus);}
   }
   $('export-trip').addEventListener('click',()=>exportTrips(false));
