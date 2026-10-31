@@ -333,6 +333,12 @@
         animations=turnLeaf({leaf,frontShade,backShade,cast,forward,two});
         if(tabsMove)animations.push(tabs.animate([{translate:shift},{translate:tabTranslate||'0px 0px'}],{duration:two?744:560,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}));
         await done(animations);
+        if(disposed)return;
+        // Paint the live page under the opaque, finished spread before retiring
+        // its 3D layers. Revealing it only as those layers disappeared could
+        // leave a compositor frame without the ready gallery underneath.
+        incoming.style.visibility=visibility;layer.dataset.handoff='true';
+        await Promise.race([cancelled,new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))]);
       },
       dispose(){disposed=true;clearTimeout(readyTimer);cancelReady();incoming.style.visibility=visibility;tabs.style.translate=tabTranslate;layer.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.viewMotion;[book.style.width,book.style.height,book.style.flex]=savedSize;resumePreviews();}
     };

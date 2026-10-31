@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="gallery.css">
   <script src="vendor/geo.js" defer></script>
   <script src="map-layout.js" defer></script>
-  <script src="world.js" defer></script>
+  <script src="atlas-geography.js" defer></script>
   <script src="trace.js" defer></script>
   <script src="labels.js" defer></script>
   <script src="map-paint.js" defer></script>
@@ -28,17 +28,15 @@
     <div class="map-shell" id="map-shell">
       <svg id="map" viewBox="0 0 1440 720" preserveAspectRatio="none" aria-label="World map showing your travel route" role="img" tabindex="-1">
         <defs>
-          <radialGradient id="atlas-americas" gradientUnits="userSpaceOnUse" cx="290" cy="190" r="360"><stop stop-color="#f6e7be"/><stop offset=".48" stop-color="#f6e7be"/><stop offset="1" stop-color="#dec38f"/></radialGradient>
-          <radialGradient id="atlas-south" gradientUnits="userSpaceOnUse" cx="470" cy="465" r="265"><stop stop-color="#f2e3b7"/><stop offset=".48" stop-color="#f2e3b7"/><stop offset="1" stop-color="#d9be88"/></radialGradient>
-          <radialGradient id="atlas-europe" gradientUnits="userSpaceOnUse" cx="770" cy="165" r="210"><stop stop-color="#f7e9c7"/><stop offset=".48" stop-color="#f7e9c7"/><stop offset="1" stop-color="#e2c994"/></radialGradient>
-          <radialGradient id="atlas-africa" gradientUnits="userSpaceOnUse" cx="805" cy="355" r="255"><stop stop-color="#f3dfae"/><stop offset=".48" stop-color="#f3dfae"/><stop offset="1" stop-color="#d4b17b"/></radialGradient>
-          <radialGradient id="atlas-asia" gradientUnits="userSpaceOnUse" cx="1080" cy="190" r="420"><stop stop-color="#f4e5bd"/><stop offset=".48" stop-color="#f4e5bd"/><stop offset="1" stop-color="#dec694"/></radialGradient>
+          <linearGradient id="atlas-americas" gradientUnits="userSpaceOnUse" x1="300" y1="50" x2="480" y2="670"><stop stop-color="#f7e8c3"/><stop offset=".28" stop-color="#eddaac"/><stop offset=".48" stop-color="#f5e5bd"/><stop offset=".74" stop-color="#e4c38b"/><stop offset="1" stop-color="#f0dfb5"/></linearGradient>
+          <radialGradient id="atlas-oldworld" gradientUnits="userSpaceOnUse" cx="930" cy="215" r="620"><stop stop-color="#f8ebc8"/><stop offset=".32" stop-color="#f1ddb0"/><stop offset=".68" stop-color="#e4c58e"/><stop offset="1" stop-color="#eddaad"/></radialGradient>
           <radialGradient id="atlas-australia" gradientUnits="userSpaceOnUse" cx="1260" cy="490" r="250"><stop stop-color="#f1dba9"/><stop offset=".48" stop-color="#f1dba9"/><stop offset="1" stop-color="#d7b584"/></radialGradient>
           <radialGradient id="polar-wash" cx=".5" cy=".85" r=".8"><stop stop-color="#f2e9d6"/><stop offset="1" stop-color="#e4d6bc"/></radialGradient>
           <pattern id="grid" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse"><path d="M120 0H0V120" fill="none" stroke="#80745e" stroke-width="0.6" opacity="0.24"/></pattern></defs>
         <g id="graticule" aria-hidden="true"><rect x="-2880" y="-1440" width="7200" height="3600" fill="url(#grid)"/></g>
         <g id="land"></g>
         <g id="antarctica" aria-hidden="true"></g>
+        <g id="country-borders" aria-hidden="true"></g>
         <g id="regions" aria-hidden="true"></g>
         <g id="map-labels" aria-hidden="true">
           <text x="280" y="166" class="continent">NORTH AMERICA</text>

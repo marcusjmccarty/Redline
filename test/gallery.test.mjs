@@ -47,7 +47,7 @@ async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,p
     };
     w.SVGElement.prototype.getScreenCTM=function(){const [x,y,width,height]=$('map').getAttribute('viewBox').split(' ').map(Number);return {a:1440/width,b:0,c:0,d:900/height,e:-x*1440/width,f:-y*900/height};};
     w.Element.prototype.setPointerCapture=function(){};w.Element.prototype.hasPointerCapture=()=>false;
-    for(const name of ['vendor/geo','map-layout','world','trace','labels','map-paint','app'])w.eval(source(`public/${name}.js`));
+    for(const name of ['vendor/geo','map-layout','atlas-geography','trace','labels','map-paint','app'])w.eval(source(`public/${name}.js`));
     stops=w.RedlineApp.getStops();
   }
   for(const name of ['jpeg','archive','storage'])w.eval(source(`public/${name}.js`));
@@ -132,7 +132,7 @@ test('a spread names both its cities, and turns keep tab focus and finish when p
   const running=new Set();
   class Turn{constructor(){this.ended=new Promise((resolve,reject)=>{this.finish=()=>{running.delete(this);resolve(this);};this.cancel=()=>{if(running.delete(this))reject(Error('Cancelled'));};});this.ended.catch(()=>{});running.add(this);}get finished(){return this.ended;}}
   w.Animation=Turn;w.Element.prototype.animate=()=>new Turn();
-  const finish=async()=>{[...running].forEach(turn=>turn.finish());await tick();};
+  const finish=async()=>{const layer=$('album-book').querySelector('.album-view-layer');[...running].forEach(turn=>turn.finish());await tick();if(layer)await wait(()=>!layer.isConnected);};
   tab(paris.id).focus();tab(paris.id).click();const turning=[...running];assert.equal(turning.length,4);
   tab(paris.id).click();assert.deepEqual([...running],turning,'A second press toward the same page lets the turn finish');
   await finish();assert.equal(pages(),'left:contents right:city');
@@ -614,7 +614,9 @@ function controlledMotion(w){
   w.Animation=Motion;w.Element.prototype.animate=function(frames,options){const animation=new Motion(this,options);animation.frames=frames;return animation;};
   return {running,finish:async()=>{
     if(!running.size&&w.document.getElementById('album-book').dataset.viewMotion)await wait(()=>running.size||!w.document.getElementById('album-book').dataset.viewMotion);
+    const layer=w.document.querySelector('.album-view-layer');
     [...running].forEach(item=>item.finish());await tick();
+    if(layer)await wait(()=>!layer.isConnected);
   }};
 }
 
@@ -1166,10 +1168,11 @@ test('thumbnail warming limits concurrent decodes so background work cannot floo
   await ready;assert.equal(peak,3);cache.clearPreloads();
 });
 
-test('the atlas paints each coastline once, preserves lake holes, and uses only local warm fills',async t=>{
+test('the atlas paints connected landmasses once and keeps country borders out of its colour fills',async t=>{
   const {w,$}=await setup(t,{realMap:true});
-  const land=[...$('land').children];assert.equal(land.length,w.WORLD_PATHS.length);
-  assert.ok(land.every((path,i)=>path.getAttribute('d')===w.WORLD_PATHS[i]));
+  const land=[...$('land').children];assert.equal(land.length,w.ATLAS_LAND.length);
+  assert.ok(land.every((path,i)=>path.getAttribute('d')===w.ATLAS_LAND[i]));
+  assert.equal($('country-borders').children.length,w.ATLAS_BORDERS.length);
   assert.ok(land.every(path=>/^url\(#atlas-/.test(path.style.fill)));
   assert.equal($('atlas-land-clip'),null);assert.equal($('land-washes'),null,'Camera frames have no full-world gradient clipping passes');
 });
@@ -1234,6 +1237,30 @@ test('view faces stay in the same compositor stack from preparation through the 
   assert.equal(changes.length+observer.takeRecords().length,0,'Starting the turn does not remove, insert, or reparent any moving content');
   assert.ok(images.every((image,i)=>image.parentNode===parents[i]));assert.equal(layer.querySelector('.album-view-leaf'),leaf);
   observer.disconnect();await motion.finish();
+});
+
+test('view turns paint the live destination beneath the finished leaf before removing it, in both directions',async t=>{
+  const {w,$,tab,press}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w),nativeFrame=w.requestAnimationFrame;
+  for(const [button,target] of [['sheet-view','album-sheet'],['album-view','album-pages']]){
+    $(button).click();await wait(()=>motion.running.size===4);
+    const layer=$('album-book').querySelector('.album-view-layer'),frames=[];
+    w.requestAnimationFrame=callback=>{frames.push(callback);return frames.length;};
+    [...motion.running].forEach(animation=>animation.finish());await tick();
+    assert.equal($(target).style.visibility,'','The live destination is ready beneath the last frame');
+    assert.equal(layer.dataset.handoff,'true');assert.equal(layer.isConnected,true);
+    frames.shift()(w.performance.now());await tick();
+    assert.equal(layer.isConnected,true,'The completed leaf covers the live page for a full paint opportunity');
+    frames.shift()(w.performance.now());await wait(()=>!layer.isConnected);
+    assert.equal($('album-book').inert,false);w.requestAnimationFrame=nativeFrame;
+  }
+  $('sheet-view').click();await wait(()=>motion.running.size===4);
+  const layer=$('album-book').querySelector('.album-view-layer'),frames=[];
+  w.requestAnimationFrame=callback=>{frames.push(callback);return frames.length;};
+  [...motion.running].forEach(animation=>animation.finish());await tick();assert.equal(layer.dataset.handoff,'true');
+  w.requestAnimationFrame=nativeFrame;press('Escape');frames.forEach(callback=>callback(w.performance.now()));
+  await wait(()=>motion.running.size===3);await motion.finish();
+  assert.equal($('photo-panel').open,false);assert.equal(layer.isConnected,false);
+  assert.equal($('album-book').querySelector('.album-view-layer'),null,'A late handoff cannot revive a dismissed album');
 });
 
 test('closing releases gallery image elements while reopening restores saved photos and their city',async t=>{
