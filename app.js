@@ -329,7 +329,7 @@
   $('clear').addEventListener('click',()=>{if(!stops.length)return;checkpoint('clear route');stops=[];drawRoute();persist();input.value='';closeSearch();$('undo-route').focus({preventScroll:true});});
   const labelNodes=new Map();
   // Place names avoid the route's dots, its chosen label boxes, and the dock.
-  function renderLabels(matrix,bounds,occupied) {
+  function renderLabels(matrix,bounds,occupied,routes) {
     const layer=$('place-labels'),width=bounds.width,height=bounds.height;
     layer.setAttribute('viewBox',`0 0 ${width} ${height}`);
     const visible=new Set();
@@ -339,6 +339,7 @@
       const box={x:isCity?sx+5:sx-w/2,y:sy-(isCity?13:8),w,h:18};
       if(box.x<30||box.x+w>width-30||box.y<22||box.y+18>height-22)return;
       if(occupied.some(b=>box.x<b.x+b.w+6&&box.x+w+6>b.x&&box.y<b.y+b.h+3&&box.y+21>b.y))return;
+      if(routes?.hits(box,4))return;
       occupied.push(box);visible.add(key);
       let node=labelNodes.get(key);
       if(!node){node=svg('g',{class:isCity?'city-label':'country-label'});if(isCity)node.append(svg('circle',{r:2}));const text=svg('text',{'font-size':font,'text-anchor':isCity?'start':'middle',x:isCity?7:0,y:isCity?-4:4});text.textContent=name;node.append(text);labelNodes.set(key,node);layer.append(node);}
@@ -386,15 +387,24 @@
     zoomLevel=baseView.w/view.w;
     $('zoom-in').disabled=zoomLevel>=MAX_ZOOM-.001;$('zoom-out').disabled=zoomLevel<=1.001;
     map.classList.toggle('zoomed-out',zoomLevel<=1.001);$('regions').style.display=zoomLevel>=1.6?'':'none';
-    const occupied=paintStops(matrix,bounds,obstacles);
+    const toScreen=point=>[point[0]*matrix.a+matrix.e-bounds.left,point[1]*matrix.d+matrix.f-bounds.top];
+    const segments=geometry.flatMap((leg,i)=>{
+      // Reserve the current arc before its tracer reaches a label, keeping
+      // names from hopping out of the way midway through an animation.
+      const current=activeLeg&&Math.min(activeLeg.origin,activeLeg.destination)===i;
+      const amount=progress===null||current?1:Math.max(0,Math.min(1,progress-i));
+      return leg.segmentsAt(amount).map(segment=>segment.map(toScreen));
+    });
+    const routes=window.RedlineLabels?.indexLines(segments,{width:bounds.width,height:bounds.height});
+    const occupied=paintStops(matrix,bounds,obstacles,routes);
     for(const label of $('map-labels').children){
       label.setAttribute('x','0');label.setAttribute('y','0');
       label.setAttribute('transform',`translate(${label.dataset.mapX} ${label.dataset.mapY}) scale(${1/matrix.a} ${1/matrix.d}) rotate(${label.dataset.mapRotation})`);
     }
     if(dock)occupied.push(...obstacles);
-    renderLabels(matrix,bounds,occupied);paintProgress();
+    renderLabels(matrix,bounds,occupied,routes);paintProgress();
   }
-  function paintStops(matrix,bounds,obstacles){
+  function paintStops(matrix,bounds,obstacles,routes){
     const items=[],texts=[],occupied=[];
     [...$('route-stops').children].forEach((group,index)=>{
       const [x,y]=project(stops[index]),dot=group.querySelector('circle'),text=group.querySelector('text');
@@ -409,7 +419,7 @@
       occupied.push({x:sx-7,y:sy-7,w:14,h:14});
     });
     const flip=item=>{const end=item.x>bounds.width-180;return {name:end?'left-above':'right-above',x:end?-10:10,y:-12,anchor:end?'end':'start',box:{x:end?item.x-12-item.width:item.x+8,y:item.y-23,w:item.width+4,h:14}};};
-    const placed=window.RedlineLabels?RedlineLabels.place(items,{width:bounds.width,height:bounds.height,obstacles,previous:labelSlots}):items.map(flip);
+    const placed=window.RedlineLabels?RedlineLabels.place(items,{width:bounds.width,height:bounds.height,obstacles,previous:labelSlots,routes}):items.map(flip);
     labelSlots.clear();
     placed.forEach((slot,i)=>{
       const text=texts[i];text.classList.toggle('label-hidden',!slot);if(!slot)return;

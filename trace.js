@@ -26,11 +26,12 @@
   }
 
   function measure(path){
-    const points=[],commands=[];
+    const points=[],commands=[],segments=[];
     for(const match of path.matchAll(/([ML])([\d.e+-]+),([\d.e+-]+)/gi)){
       const x=Number(match[2]),y=Number(match[3]),previous=points.at(-1),move=match[1]==='M';
       const distance=previous&&!move?Math.hypot(x-previous.x,y-previous.y):0;
       points.push({x,y,distance:(previous?.distance||0)+distance});commands.push(match[0]);
+      if(distance)segments.push({a:[previous.x,previous.y],b:[x,y],start:previous.distance,end:previous.distance+distance});
     }
     const length=points.at(-1)?.distance||0;
     function locate(amount){
@@ -48,7 +49,16 @@
       return commands.slice(0,index+1).join('')+'L'+point.join(',');
     }
     const pointAt=amount=>locate(amount).point;
-    return {length,path,pathAt,pointAt,points:points.map(p=>[p.x,p.y]),crossesSeam:commands.filter(c=>c[0]==='M').length>1};
+    function segmentsAt(amount){
+      const limit=clamp(amount,0,1)*length,result=[];
+      for(const segment of segments){
+        if(segment.start>=limit)break;
+        const t=Math.min(1,(limit-segment.start)/(segment.end-segment.start));
+        result.push([segment.a,t===1?segment.b:segment.a.map((value,i)=>value+(segment.b[i]-value)*t)]);
+      }
+      return result;
+    }
+    return {length,path,pathAt,pointAt,segmentsAt,points:points.map(p=>[p.x,p.y]),crossesSeam:commands.filter(c=>c[0]==='M').length>1};
   }
 
   function pointFrame(point,space,world,zoom){
