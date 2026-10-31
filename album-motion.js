@@ -6,9 +6,9 @@
   // Retain decoded thumbnails while the album is open. Throwaway Image
   // objects did not keep the next view ready and only warmed a dozen photos.
   const previews=new Map(),previewQueue=[];
-  let decoding=0;
+  let decoding=0,previewHolds=0;
   function pumpPreviews(){
-    while(decoding<3&&previewQueue.length){
+    while(!previewHolds&&decoding<3&&previewQueue.length){
       const entry=previewQueue.shift();if(previews.get(entry.url)!==entry||entry.settled)continue;
       entry.running=true;decoding++;
       entry.timer=setTimeout(()=>entry.finish(false),1500);
@@ -37,6 +37,10 @@
   function clearPreloads(){
     const entries=[...previews.values()];previews.clear();previewQueue.length=0;
     for(const entry of entries){entry.finish(false);entry.image.removeAttribute('src');}
+  }
+  function holdPreviews(){
+    previewHolds++;let released=false;
+    return ()=>{if(released)return;released=true;previewHolds--;pumpPreviews();};
   }
   function snapshots(source){
     const scroll=source.querySelector('.photo-scroll'),viewport=scroll?.getBoundingClientRect();
@@ -251,6 +255,9 @@
   // Keep the old spread in place while the next page's bitmaps prepare. Warm
   // thumbnails normally finish immediately; corrupt images cannot block it.
   function changeView({book,source,apply,direction,two}){
+    // The visible leaf gets first use of the decoder and compositor. Queue
+    // background thumbnails until the turn settles, including interrupted turns.
+    const resumePreviews=holdPreviews();
     const layer=make('album-view-layer'),hinge=make('album-view-hinge'),leaf=make('album-view-leaf');
     const front=make('album-view-face album-view-front'),back=make('album-view-face album-view-back');
     const tabs=document.getElementById('gallery-filter'),before=tabs.getBoundingClientRect(),tabTranslate=tabs.style.translate;
@@ -305,7 +312,7 @@
         if(tabsMove)animations.push(tabs.animate([{translate:shift},{translate:tabTranslate||'0px 0px'}],{duration:two?744:560,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}));
         await done(animations);
       },
-      dispose(){disposed=true;clearTimeout(readyTimer);cancelReady();incoming.style.visibility=visibility;tabs.style.translate=tabTranslate;layer.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.viewMotion;[book.style.width,book.style.height,book.style.flex]=savedSize;}
+      dispose(){disposed=true;clearTimeout(readyTimer);cancelReady();incoming.style.visibility=visibility;tabs.style.translate=tabTranslate;layer.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.viewMotion;[book.style.width,book.style.height,book.style.flex]=savedSize;resumePreviews();}
     };
   }
   window.RedlineAlbumMotion={create,changeView,turnLeaf,preload,clearPreloads};
