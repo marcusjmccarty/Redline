@@ -50,6 +50,23 @@
   let view={x:0,y:0,w:WORLD_W,h:WORLD_H};
   let baseView={...view},viewFrame=0,zoomLevel=1,activeStopId=null;
   stops=stops.map(p=>({...p,id:p.id||crypto.randomUUID()}));
+  const undoStack=[],redoStack=[];
+  const copyRoute=()=>stops.map(stop=>({...stop}));
+  function updateUndo(){
+    $('undo-route').disabled=!undoStack.length;
+    $('undo-route').title=undoStack.length?`Undo ${undoStack.at(-1).label} (Ctrl / ⌘ + Z)`:'Undo route edit (Ctrl / ⌘ + Z)';
+  }
+  function checkpoint(label){undoStack.push({route:copyRoute(),label});if(undoStack.length>100)undoStack.shift();redoStack.length=0;updateUndo();}
+  function undoRoute(redo=false){
+    const from=redo?redoStack:undoStack,to=redo?undoStack:redoStack,entry=from.pop();if(!entry)return;
+    to.push({route:copyRoute(),label:entry.label});stops=entry.route.map(stop=>({...stop}));drawRoute();persist();updateUndo();
+    if($('undo-route').disabled&&document.activeElement===$('undo-route'))$('trip-panel').focus({preventScroll:true});
+  }
+  $('undo-route').addEventListener('click',()=>undoRoute());
+  document.addEventListener('keydown',event=>{
+    if(event.defaultPrevented||event.altKey||event.isComposing||!(event.ctrlKey||event.metaKey)||event.key.toLowerCase()!=='z'||event.target.closest?.('input,textarea,select,[contenteditable="true"]')||document.querySelector('dialog[open]'))return;
+    event.preventDefault();if(!event.repeat)undoRoute(event.shiftKey);
+  });
   const persist=()=>{try{localStorage.setItem('redline-route-v1',JSON.stringify(stops));}catch{}window.dispatchEvent(new CustomEvent('redline:routechange'));};
   // Give a fresh or legacy draft stable stop identities before it can be saved.
   persist();
@@ -108,7 +125,7 @@
       li.dataset.index=String(index);grip.type='button';grip.className='stop-grip';grip.title='Go to city · Drag to reorder';grip.setAttribute('aria-label',`Go to ${place.name}, stop ${index+1}; drag to reorder`);grip.setAttribute('aria-keyshortcuts','Alt+ArrowLeft Alt+ArrowRight');
       number.className='stop-number';number.textContent=String(index+1).padStart(2,'0');name.textContent=place.name;
       remove.className='remove-stop';remove.textContent='×';remove.setAttribute('aria-label',`Remove ${place.name}, stop ${index+1}`);
-      remove.addEventListener('click',()=>{stops.splice(index,1);drawRoute();persist();$('status').textContent='';});
+      remove.addEventListener('click',()=>{checkpoint('remove city');stops.splice(index,1);drawRoute();persist();$('status').textContent='';});
       grip.append(number,name);li.append(grip,remove);$('stop-list').append(li);
       grip.addEventListener('click',event=>{if(event.detail){if(performance.now()<suppressStopClickUntil)return;map.focus({preventScroll:true});}jumpToCity(index);});
       grip.addEventListener('keydown',event=>{if(!event.altKey||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key))return;event.preventDefault();const to=index+(['ArrowLeft','ArrowUp'].includes(event.key)?-1:1);if(to>=0&&to<stops.length){moveStop(index,to);$('stop-list').children[to].querySelector('.stop-grip').focus();}});
@@ -131,7 +148,7 @@
   }
   function moveStop(from,to) {
     if(from===to)return;
-    const [place]=stops.splice(from,1);stops.splice(to,0,place);drawRoute();persist();
+    checkpoint('reorder cities');const [place]=stops.splice(from,1);stops.splice(to,0,place);drawRoute();persist();
     $('status').textContent='';
   }
   function startStopDrag(event,from,grip) {
@@ -241,7 +258,7 @@
     const previous=stops.at(-1);
     if(previous&&Math.abs(previous.latitude-place.latitude)<.01&&Math.abs(previous.longitude-place.longitude)<.01){$('status').textContent='That is already your last stop.';closeSearch();return;}
     const {name,country='',admin1='',latitude,longitude}=place;
-    stops.push({name,country,admin1,latitude,longitude,id:place.id||crypto.randomUUID()});input.value='';closeSearch();drawRoute();persist();$('status').textContent='';input.focus();
+    checkpoint('add city');stops.push({name,country,admin1,latitude,longitude,id:place.id||crypto.randomUUID()});input.value='';closeSearch();drawRoute();persist();$('status').textContent='';input.focus();
   }
   function showResults(items,message='') {
     results=items;selected=-1;input.removeAttribute('aria-activedescendant');$('suggestions').replaceChildren();
@@ -309,7 +326,7 @@
   });
   document.addEventListener('pointerdown',event=>{if(!$('destination-form').contains(event.target)&&!$('suggestion-panel').contains(event.target))closeSearch();});
   $('play').addEventListener('click',trace);
-  $('clear').addEventListener('click',()=>{stops=[];drawRoute();persist();input.value='';closeSearch();input.focus();});
+  $('clear').addEventListener('click',()=>{if(!stops.length)return;checkpoint('clear route');stops=[];drawRoute();persist();input.value='';closeSearch();$('undo-route').focus({preventScroll:true});});
   const labelNodes=new Map();
   // Place names avoid the route's dots, its chosen label boxes, and the dock.
   function renderLabels(matrix,bounds,occupied) {
@@ -605,8 +622,8 @@
     refreshLayout:scheduleView,
     focusStop:id=>{const index=stops.findIndex(p=>p.id===id);if(index>=0){jumpToCity(index);map.focus({preventScroll:true});}return index>=0;},
     getStops:()=>stops.map(p=>({...p})),
-    setStops:(items,{preserveView=false}={})=>{stops=items.map(p=>({...p,id:p.id||crypto.randomUUID()}));if(!preserveView)drawRoute();persist();},
-    addCity:place=>{let existing=stops.find(p=>Math.abs(p.latitude-place.latitude)<.02&&Math.abs(p.longitude-place.longitude)<.02);if(existing)return {...existing};if(stops.length>=100)throw Error('A trip can contain up to 100 stops.');const added={...place,id:crypto.randomUUID()};stops.push(added);drawRoute();persist();return {...added};},
+    setStops:(items,{preserveView=false,preserveHistory=false}={})=>{if(!preserveHistory){undoStack.length=0;redoStack.length=0;updateUndo();}stops=items.map(p=>({...p,id:p.id||crypto.randomUUID()}));if(!preserveView)drawRoute();persist();},
+    addCity:place=>{let existing=stops.find(p=>Math.abs(p.latitude-place.latitude)<.02&&Math.abs(p.longitude-place.longitude)<.02);if(existing)return {...existing};if(stops.length>=100)throw Error('A trip can contain up to 100 stops.');const added={...place,id:crypto.randomUUID()};checkpoint('add city');stops.push(added);drawRoute();persist();return {...added};},
     cityDistance:(a,b)=>RedlineGeo.geoDistance([a.longitude,a.latitude],[b.longitude,b.latitude])*6371,
   };
   new ResizeObserver(resizeMap).observe(map);

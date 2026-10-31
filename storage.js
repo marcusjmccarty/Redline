@@ -6,7 +6,7 @@
   const now = () => new Date().toISOString();
   const timestamp = value => typeof value==='string' && value.length<50 && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : now();
   let opening;
-  const urls = new Map(), thumbs = new Map();
+  const urls = new Map(), thumbs = new Map(), backupReceipts = new WeakMap();
   const request = operation => new Promise((resolve,reject) => {
     operation.onsuccess = () => resolve(operation.result);
     operation.onerror = () => reject(operation.error);
@@ -237,13 +237,24 @@
       const photos=await request(stores.photos.getAll());
       return trips.map(trip=>({trip,photos:photos.filter(photo=>photo.tripId===trip.id).map(photo=>({photo,blob:photo.blob}))}));
     });
-    return window.RedlineArchive.pack(records);
+    const blob=window.RedlineArchive.pack(records);
+    backupReceipts.set(blob,{ids:records.map(record=>record.trip.id),at:now()});return blob;
+  }
+  // Called only after the browser has accepted the download. Creating a blob is not a backup.
+  async function recordBackup(blob){
+    const receipt=backupReceipts.get(blob);if(!receipt)fail('Unknown backup.');
+    await transaction(['trips'],'readwrite',async ({trips})=>{
+      for(const id of receipt.ids){const trip=await request(trips.get(id));if(!trip)continue;
+        // Merge only the receipt, preserving edits made in another tab after the export.
+        await request(trips.put({...trip,backedUpAt:receipt.at,backupSource:'export'}));
+      }
+    });backupReceipts.delete(blob);
   }
   async function importArchive(file) {
     const records=await window.RedlineArchive.unpack(file),trips=[],photos=[];
     // Validate and sanitize every byte before starting the single atomic write.
     for (const record of records) {
-      const data=tripData(record.trip),trip={...data,id:crypto.randomUUID(),revision:1,createdAt:timestamp(record.trip.createdAt),updatedAt:now()};
+      const data=tripData(record.trip),trip={...data,id:crypto.randomUUID(),revision:1,createdAt:timestamp(record.trip.createdAt),updatedAt:now(),backedUpAt:now(),backupSource:'import'};
       trips.push(trip);
       for (const entry of record.photos) {
         const p=entry.photo;
@@ -263,5 +274,5 @@
     });
     persist(); return {tripCount:trips.length,photoCount:photos.length};
   }
-  window.RedlineStorage={api,exportArchive,importArchive,persist};
+  window.RedlineStorage={api,exportArchive,recordBackup,importArchive,persist};
 })();

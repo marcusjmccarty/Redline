@@ -56,8 +56,8 @@
       <div class="voyage-head">
         <div class="voyage-title"><span id="trip-title"></span></div>
         <div class="voyage-actions">
-          <button id="trips-button" class="voyage-tab" type="button" aria-keyshortcuts="T" aria-controls="trip-panel" aria-expanded="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 3.5h9.5a1.5 1.5 0 0 1 1.5 1.5v11.5H6a1.5 1.5 0 0 1-1.5-1.5zM4.5 15A1.5 1.5 0 0 1 6 13.5h9.5M7.5 6.5h5M7.5 9h4"/></svg><span>Logbook</span></button>
-          <button id="photos-button" class="voyage-tab" type="button" aria-keyshortcuts="P" aria-haspopup="dialog" aria-controls="photo-panel" aria-expanded="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v11h-13zM3.5 12.5l3.5-3.5 3 3 2.5-2.5 4 4"/><circle cx="12.8" cy="7.6" r="1.2"/></svg><span>Album</span> <span id="photo-count"></span></button>
+          <button id="trips-button" class="voyage-tab" type="button" aria-keyshortcuts="L" title="Logbook (L)" aria-controls="trip-panel" aria-expanded="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 3.5h9.5a1.5 1.5 0 0 1 1.5 1.5v11.5H6a1.5 1.5 0 0 1-1.5-1.5zM4.5 15A1.5 1.5 0 0 1 6 13.5h9.5M7.5 6.5h5M7.5 9h4"/></svg><span>Logbook</span></button>
+          <button id="photos-button" class="voyage-tab" type="button" aria-keyshortcuts="A" title="Album (A)" aria-haspopup="dialog" aria-controls="photo-panel" aria-expanded="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v11h-13zM3.5 12.5l3.5-3.5 3 3 2.5-2.5 4 4"/><circle cx="12.8" cy="7.6" r="1.2"/></svg><span>Album</span> <span id="photo-count"></span></button>
           <button id="save-trip" class="voyage-tab" type="button" aria-keyshortcuts="S" title="Save trip (S)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h10l2.5 2.5v10.5h-13v-13zM7 3.5v5h6v-5M6.5 16.5v-5h7v5"/></svg><span id="save-trip-label">Save</span></button>
         </div>
       </div>
@@ -76,6 +76,10 @@
       <div id="trip-panel" class="logbook route-log" hidden role="region" aria-labelledby="trips-heading" tabindex="-1">
         <div class="logbook-inner"><div class="logbook-scroll">
           <div class="logbook-head"><h2 id="trips-heading">Logbook</h2><p id="trips-summary"></p><button class="close-panel icon-button" data-close="trip-panel" aria-label="Close the logbook" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>
+          <details id="trip-switcher" class="trip-switcher"><summary>Switch trip <span aria-hidden="true">⌄</span></summary>
+          <div class="trip-list-heading"><h3>Saved trips</h3><label id="trip-search-label" class="trip-search" hidden><span class="sr-only">Find a trip</span><input id="trip-search" type="search" placeholder="Find a trip" autocomplete="off"></label></div>
+          <ul id="trip-list" class="trip-grid" aria-label="Saved trips"></ul>
+          </details>
           <section class="current-trip" aria-labelledby="current-trip-label">
             <div id="current-trip-map" hidden class="trip-map current-map" aria-hidden="true"></div>
             <div class="current-trip-info">
@@ -85,12 +89,11 @@
               <div class="current-actions"><button id="new-trip" class="text-button" type="button">+ New trip</button><button id="export-trip" class="text-button" type="button">Export trip</button></div>
             </div>
           </section>
-          <div class="log-route-heading"><span>Stops</span><button id="clear" class="text-button" type="button">Clear route</button><button id="toggle-stops" type="button" aria-controls="route-stops-panel" aria-expanded="true" hidden></button></div>
+          <div class="log-route-heading"><span>Stops</span><button id="undo-route" class="text-button" type="button" title="Undo route edit (Ctrl / ⌘ + Z)" aria-keyshortcuts="Control+Z Meta+Z" disabled>↶ Undo</button><button id="clear" class="text-button" type="button">Clear route</button><button id="toggle-stops" type="button" aria-controls="route-stops-panel" aria-expanded="true" hidden></button></div>
           <div id="route-stops-panel"><ol id="stop-list" aria-label="Stops in travel order"></ol><p id="empty-hint" hidden>Add a destination to begin.</p></div>
           <p id="trip-message" class="panel-message" role="status"></p>
-          <details id="saved-trips"><summary>Saved trips</summary>
-          <div class="trip-list-heading"><h3>Saved trips</h3><label id="trip-search-label" class="trip-search" hidden><span class="sr-only">Find a trip</span><input id="trip-search" type="search" placeholder="Find a trip" autocomplete="off"></label></div>
-          <ul id="trip-list" class="trip-grid" aria-label="Saved trips"></ul>
+          <details id="saved-trips"><summary>Backed-up trips</summary>
+          <ul id="backup-list" class="backup-list" aria-label="Backed-up trips"></ul>
           </details>
           <div class="logbook-foot"><p class="storage-note">Kept in this browser only.</p><button id="backup-trips" class="text-button" type="button">Back up all</button><button id="import-trips" class="text-button" type="button">Import backup</button><input id="trip-backup-file" type="file" accept=".redline,application/octet-stream" hidden></div>
         </div></div>
@@ -153,12 +156,12 @@
     <dialog id="info-dialog" aria-labelledby="info-title">
       <div class="panel-top"><h2 id="info-title">A few bearings</h2><button id="close-info" class="close-panel" aria-label="Close information" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>
       <dl class="info-shortcuts">
-        <dt>Plan a trip</dt><dd>Type a destination and press Enter. Use ↑ ↓ to choose a search result. In the logbook, drag a city’s name to reorder it, or focus it and use Alt + arrow keys. Use × beside a stop to remove it.</dd>
+        <dt>Plan a trip</dt><dd>Type a destination and press Enter. Use ↑ ↓ to choose a search result. In the logbook, drag a city’s name to reorder it, or focus it and use Alt + arrow keys. Use × beside a stop to remove it. Undo or Ctrl + Z (⌘ + Z on Mac) restores route edits, including a cleared route; Ctrl / ⌘ + Shift + Z redoes them.</dd>
         <dt>Trace route</dt><dd>Press Return or Space to start or resume the trace, and hold either for 2× speed. The Trace route button pauses. A full trip finishes at the world overview. Zoom during travel to follow the line at your chosen level.</dd>
         <dt>One city at a time</dt><dd>Click a city to look at it within the whole trip. The arrows beside Trace route, or your arrow keys, then travel from that city to the next or previous one; press again during travel to arrive at once. Backspace (Delete on a Mac), Home, or the globe glides back to the overview.</dd>
         <dt>Just the map</dt><dd>Press H to hide the controls. H, Escape, or a double-click on the map brings them back.</dd>
-        <dt>The logbook</dt><dd>S saves the trip. T opens a lined logbook on the left: name the trip, drag stops to reorder them, or remove them. Saved trips holds your other trips and their rename, export, and delete controls. Trips, photos, and postcards stay in this browser with no account; use Back up all regularly and Import backup to restore or move devices. Clearing website data or private browsing can erase them, and backups contain your photos and notes, so keep them private.</dd>
-        <dt>The album</dt><dd>P opens the album to your last page. Click outside or press Escape to close the book. Turn pages with the arrows, ← →, the page corners, a swipe, or the slider; Home and End close it on either cover. The contents page and the tabs on its edge jump to a city, and the pin beside a city’s name finds it on the map. All photos shows every photo at once; press Select, then click photos (Shift-click selects a run) to move or delete them. Add photos, or drag them anywhere onto the page; photos with location data find their city. City locations: <a href="https://www.geonames.org/" target="_blank" rel="noreferrer">GeoNames</a>.</dd>
+        <dt>The logbook</dt><dd>S saves the trip. L opens a lined logbook on the left: name the trip, drag stops to reorder them, or remove them. Switch trip at the top opens your other trips and their rename, export, and delete controls. Backed-up trips lists trips exported or imported since backup tracking began. Trips, photos, and postcards stay in this browser with no account; use Back up all regularly and Import backup to restore or move devices. Clearing website data or private browsing can erase them, and backups contain your photos and notes, so keep them private.</dd>
+        <dt>The album</dt><dd>A opens the album to your last page. Click outside or press Escape to close the book. Turn pages with the arrows, ← →, the page corners, a swipe, or the slider; Home and End close it on either cover. The contents page and the tabs on its edge jump to a city, and the pin beside a city’s name finds it on the map. All photos shows every photo at once; press Select, then click photos (Shift-click selects a run) to move or delete them. Add photos, or drag them anywhere onto the page; photos with location data find their city. City locations: <a href="https://www.geonames.org/" target="_blank" rel="noreferrer">GeoNames</a>.</dd>
         <dt>Photos and postcards</dt><dd>Click a print to open it; browse its city with ← →, a swipe, or the arrows at the photo’s edges. Use the bin to delete a photo; All photos → Select also lets you move photos. Choose Postcard, press F, or click the photo to turn it over and write on the back; it saves automatically, and Save commits your changes immediately. Click outside or press Escape to close. Print or Ctrl + P (⌘ + P on Mac) prints both sides, and Share sends an image of both sides.</dd>
         <dt>The map</dt><dd>Scroll or use + / − to zoom. Drag to pan when zoomed in. Country, city, and regional detail appears as you zoom.</dd>
       </dl>
