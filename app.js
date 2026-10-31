@@ -624,8 +624,13 @@
   document.addEventListener('keyup',event=>{held.delete(event.key);if(event.key===' '&&event.target.id==='play')event.preventDefault();});
   window.addEventListener('blur',()=>held.clear());
   document.addEventListener('visibilitychange',()=>{if(document.hidden){held.clear();lastTick=null;}});
-  const fragment=document.createDocumentFragment();
-  for(const d of window.WORLD_PATHS)fragment.append(svg('path',{d}));$('land').append(fragment);
+  const fragment=document.createDocumentFragment(),landClip=document.createDocumentFragment();
+  for(const d of window.WORLD_PATHS){
+    const path=svg('path',{d});fragment.append(path);landClip.append(path.cloneNode());
+  }
+  // Direct shapes keep the regional washes clipped to the same coastlines
+  // and lake holes in every browser, without a repeating raster texture.
+  $('land').append(fragment);$('atlas-land-clip').append(landClip);
   for(const polygon of window.ANTARCTICA_POLYGONS)$('antarctica').append(svg('path'));
   const regionFragment=document.createDocumentFragment();for(const d of REGION_PATHS)if(d)regionFragment.append(svg('path',{d}));$('regions').append(regionFragment);
   for(const label of $('map-labels').children){label.dataset.mapX=label.getAttribute('x');label.dataset.mapY=label.getAttribute('y');label.dataset.mapRotation=label.getAttribute('transform')?.match(/rotate\(([-\d.]+)/)?.[1]||'0';}

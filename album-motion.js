@@ -3,6 +3,41 @@
   'use strict';
   const make=className=>{const el=document.createElement('div');el.className=className;return el;};
   const done=animations=>Promise.all(animations.map(animation=>animation.finished.catch(()=>{})));
+  // Retain decoded thumbnails while the album is open. Throwaway Image
+  // objects did not keep the next view ready and only warmed a dozen photos.
+  const previews=new Map(),previewQueue=[];
+  let decoding=0;
+  function pumpPreviews(){
+    while(decoding<3&&previewQueue.length){
+      const entry=previewQueue.shift();if(previews.get(entry.url)!==entry||entry.settled)continue;
+      entry.running=true;decoding++;
+      entry.timer=setTimeout(()=>entry.finish(false),1500);
+      entry.image.src=entry.url;
+      Promise.resolve().then(()=>entry.image.decode()).then(()=>entry.finish(true),()=>entry.finish(false));
+    }
+  }
+  function preload(urls){
+    const work=[];
+    for(const url of [...new Set(urls.filter(Boolean))].slice(0,48)){
+      let entry=previews.get(url);
+      if(entry){previews.delete(url);previews.set(url,entry);work.push(entry.promise);continue;}
+      const image=new Image();image.decoding='async';image.loading='eager';
+      entry={url,image,running:false,settled:false};
+      entry.promise=new Promise(resolve=>{entry.finish=ready=>{
+        if(entry.settled)return;entry.settled=true;clearTimeout(entry.timer);
+        if(entry.running)decoding--;
+        if(!ready&&previews.get(url)===entry)previews.delete(url);
+        resolve(ready);pumpPreviews();
+      };});
+      previews.set(url,entry);previewQueue.push(entry);work.push(entry.promise);
+      while(previews.size>48){const [oldUrl,old]=previews.entries().next().value;previews.delete(oldUrl);old.finish(false);old.image.removeAttribute('src');}
+    }
+    pumpPreviews();return Promise.all(work);
+  }
+  function clearPreloads(){
+    const entries=[...previews.values()];previews.clear();previewQueue.length=0;
+    for(const entry of entries){entry.finish(false);entry.image.removeAttribute('src');}
+  }
   function snapshots(source){
     const scroll=source.querySelector('.photo-scroll'),viewport=scroll?.getBoundingClientRect();
     const positions=[...source.querySelectorAll('.photo-scroll')].map(node=>[node.scrollTop,node.scrollLeft]);
@@ -33,14 +68,14 @@
       return {el,restore:()=>scrolls.forEach((node,i)=>{[node.scrollTop,node.scrollLeft]=positions[i];})};
     };
   }
-  async function decodeImages(images){
-    const groups=new Map();
-    for(const image of images){const key=image.currentSrc||image.src;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(image);}
-    await Promise.all([...groups.values()].map(async group=>{
-      const image=group[0];image.loading='eager';
+  async function decodeImages(images,{reveal=()=>true}={}){
+    await Promise.all([...new Set(images)].map(async image=>{
+      image.loading='eager';
       try{
-        if(!image.complete||!image.naturalWidth)await image.decode?.();
-        for(const copy of group){copy.loading='eager';copy.closest('.photo-image')?.classList.add('loaded');}
+        // complete means bytes loaded, not that the bitmap is ready to paint.
+        // Decode each actual face before moving it, including cached images.
+        await image.decode?.();
+        if(reveal())image.closest('.photo-image')?.classList.add('loaded');
       }catch{}
     }));
   }
@@ -213,8 +248,8 @@
       }
     };
   }
-  // A view switch starts just like a chapter turn. Images prepare independently
-  // and can never hold the paper still while the user waits for a decoder.
+  // Keep the old spread in place while the next page's bitmaps prepare. Warm
+  // thumbnails normally finish immediately; corrupt images cannot block it.
   function changeView({book,source,apply,direction,two}){
     const layer=make('album-view-layer'),hinge=make('album-view-hinge'),leaf=make('album-view-leaf');
     const front=make('album-view-face album-view-front'),back=make('album-view-face album-view-back');
@@ -243,11 +278,14 @@
     layer.append(preparation);copies.forEach(copy=>copy.restore());
     const after=tabs.getBoundingClientRect(),shift=`${before.left-after.left}px ${before.top-after.top}px`;
     const tabsMove=before.left!==after.left||before.top!==after.top;if(tabsMove)tabs.style.translate=shift;
-    let disposed=false,animations=[];
-    decodeImages([...captures.values()].flatMap(capture=>capture.images).concat([...layer.querySelectorAll('img')]));
+    let disposed=false,started=false,animations=[],readyTimer,cancelReady;
+    const cancelled=new Promise(resolve=>{cancelReady=resolve;});
+    const ready=decodeImages([...captures.values()].flatMap(capture=>capture.images).concat([...layer.querySelectorAll('img')]),{reveal:()=>!disposed&&!started});
     return {
       async play(){
         if(disposed)return;
+        await Promise.race([ready,cancelled,new Promise(resolve=>{readyTimer=setTimeout(resolve,240);})]);
+        clearTimeout(readyTimer);if(disposed)return;
         const frontShade=make('page-shade album-view-shade'),backShade=make('page-shade album-view-shade'),cast=make('page-shade cast');
         front.classList.add(forward?'right':'left');back.classList.add(forward?'left':'right');
         if(two){
@@ -259,12 +297,16 @@
           leaf.classList.add('single-leaf');
         }
         copies.forEach(copy=>copy.restore());
+        // Give the browser a paint opportunity with the finished leaf in its
+        // final stacking order. Uploads and scroll restoration precede motion.
+        await Promise.race([cancelled,new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))]);
+        if(disposed)return;started=true;
         animations=turnLeaf({leaf,frontShade,backShade,cast,forward,two});
         if(tabsMove)animations.push(tabs.animate([{translate:shift},{translate:tabTranslate||'0px 0px'}],{duration:two?744:560,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}));
         await done(animations);
       },
-      dispose(){disposed=true;incoming.style.visibility=visibility;tabs.style.translate=tabTranslate;layer.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.viewMotion;[book.style.width,book.style.height,book.style.flex]=savedSize;}
+      dispose(){disposed=true;clearTimeout(readyTimer);cancelReady();incoming.style.visibility=visibility;tabs.style.translate=tabTranslate;layer.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.viewMotion;[book.style.width,book.style.height,book.style.flex]=savedSize;}
     };
   }
-  window.RedlineAlbumMotion={create,changeView,turnLeaf};
+  window.RedlineAlbumMotion={create,changeView,turnLeaf,preload,clearPreloads};
 })();

@@ -27,12 +27,13 @@ input::placeholder { color: #8b8070; }
 
 /* The map */
 main { position: relative; width: 100%; height: 100%; }
-.map-shell { position: absolute; inset: 0; overflow: hidden; --water: #a6c1cb; background: radial-gradient(ellipse at 28% 18%, #f5e9cb38 0%, #f5e9cb00 58%), radial-gradient(ellipse at 52% 44%, #d7e5e5 0%, #c0d5dc 52%, var(--water) 100%); }
+.map-shell { position: absolute; inset: 0; overflow: hidden; --water: #c0d5dc; background: radial-gradient(ellipse at 14% 65%, #e8ece1a6 0%, #e8ece100 43%), radial-gradient(ellipse at 77% 24%, #94b8c56b 0%, #94b8c500 49%), radial-gradient(ellipse at 54% 78%, #91b6c457 0%, #91b6c400 40%), radial-gradient(ellipse at 44% 31%, #e4e9dc99 0%, #e4e9dc00 47%), var(--water); }
 #map { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 #map.dragging { cursor: grabbing; }
 #map.zoomed-out, #map.zoomed-out.dragging { cursor: default; }
 #map:focus { outline: none; }
-#land path, #antarctica path { fill: url(#land-wash); stroke: #9a805d; stroke-width: .7; stroke-linejoin: round; fill-rule: evenodd; vector-effect: non-scaling-stroke; }
+#land path, #antarctica path { fill: #e5d4b2; stroke: #9a805d; stroke-width: .7; stroke-linejoin: round; fill-rule: evenodd; clip-rule: evenodd; vector-effect: non-scaling-stroke; }
+#antarctica path { fill: url(#polar-wash); }
 #regions path { fill: none; stroke: #907e61; stroke-width: .5; stroke-opacity: .65; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 .continent { font-family: Georgia, serif; font-size: 15px; letter-spacing: 4px; text-anchor: middle; fill: #69563e; opacity: .82; }
 .ocean { font-family: Georgia, serif; font-size: 15px; letter-spacing: 1px; font-style: italic; text-anchor: middle; fill: #405b62; opacity: .9; }
