@@ -28,12 +28,11 @@
     <div class="map-shell" id="map-shell">
       <svg id="map" viewBox="0 0 1440 720" preserveAspectRatio="none" aria-label="World map showing your travel route" role="img" tabindex="-1">
         <defs>
-          <pattern id="atlas-paper" patternUnits="userSpaceOnUse" width="1440" height="720"><rect width="1440" height="720" fill="#f4e6c9"/><image href="atlas-paper.svg" width="1440" height="720" preserveAspectRatio="none"/></pattern>
           <pattern id="grid" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse"><path d="M120 0H0V120" fill="none" stroke="#80745e" stroke-width="0.6" opacity="0.24"/></pattern></defs>
-        <image href="atlas-water.svg" width="1440" height="720" preserveAspectRatio="none" aria-hidden="true"/>
         <g id="graticule" aria-hidden="true"><rect x="-2880" y="-1440" width="7200" height="3600" fill="url(#grid)"/></g>
         <g id="land"></g>
         <g id="antarctica" aria-hidden="true"></g>
+        <image id="atlas-wash" href="atlas-wash.png" width="1440" height="720" preserveAspectRatio="none" pointer-events="none" aria-hidden="true"/>
         <g id="country-borders" aria-hidden="true"></g>
         <g id="regions" aria-hidden="true"></g>
         <g id="map-labels" aria-hidden="true">
@@ -53,9 +52,13 @@
       <svg id="place-labels" aria-hidden="true"></svg>
     </div>
     <div class="atlas-frame" aria-hidden="true">
-      <span class="atlas-corner north-west"></span><span class="atlas-corner north-east"></span>
-      <span class="atlas-corner south-west"></span><span class="atlas-corner south-east"></span>
-      <span class="atlas-ornament north"></span><span class="atlas-ornament south"></span>
+      <svg class="atlas-rule" viewBox="0 0 1000 1000" preserveAspectRatio="none"><path d="M3 5C180 3 320 7 499 4S820 6 997 3C995 220 998 380 996 500S998 820 996 997C790 995 650 999 500 996S190 998 3 996C5 800 2 650 4 500S2 180 3 5Z"/><path d="M7 8H992V992H8Z" stroke-opacity=".28"/></svg>
+      <svg class="atlas-corner north-west" viewBox="0 0 60 60"><defs><g id="atlas-corner-engraving"><path d="M1 55V1H55L48 7H7V48Z" fill="#f3e6c9"/><path d="M5 48V5H48M11 39C11 24 24 11 39 11M15 36C16 25 25 16 36 15"/><path d="m11 29 5-5m-4 11 7-7m-2 12 7-7m-2 11 7-7m-2-26 5 4m1-3 6 5m-13-7 4 3" stroke-opacity=".65"/></g><g id="atlas-border-cartouche"><path d="M2 14H35C43 14 46 4 57 4H71C82 4 85 14 93 14H126L119 18H9Z"/><path d="M18 14H35C45 14 48 8 57 8H71C80 8 83 14 93 14H110" fill="none" stroke-opacity=".55"/><path d="m61 11 3-3 3 3-3 3Z" fill="#b59c71" stroke="none"/></g></defs><use href="#atlas-corner-engraving"/></svg>
+      <svg class="atlas-corner north-east" viewBox="0 0 60 60"><use href="#atlas-corner-engraving"/></svg>
+      <svg class="atlas-corner south-west" viewBox="0 0 60 60"><use href="#atlas-corner-engraving"/></svg>
+      <svg class="atlas-corner south-east" viewBox="0 0 60 60"><use href="#atlas-corner-engraving"/></svg>
+      <svg class="atlas-ornament north" viewBox="0 0 128 22"><use href="#atlas-border-cartouche"/></svg>
+      <svg class="atlas-ornament south" viewBox="0 0 128 22"><use href="#atlas-border-cartouche"/></svg>
     </div>
     <div class="zoom-controls" aria-label="Map controls">
       <button id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>

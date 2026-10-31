@@ -1184,7 +1184,9 @@ test('the atlas paints connected landmasses once and keeps country borders out o
   const land=[...$('land').children];assert.equal(land.length,w.ATLAS_LAND.length);
   assert.ok(land.every((path,i)=>path.getAttribute('d')===w.ATLAS_LAND[i]));
   assert.equal($('country-borders').children.length,w.ATLAS_BORDERS.length);
-  assert.ok(land.every(path=>/^url\(#atlas-/.test(path.style.fill)));
+  assert.ok(land.every(path=>!path.style.fill),'Plain vector fills never invoke an image-backed pattern for each landmass');
+  assert.equal($('map').querySelectorAll('image').length,1);assert.equal($('atlas-wash').getAttribute('href'),'atlas-wash.png');
+  assert.equal($('map').querySelectorAll('pattern image, filter, mask').length,0,'Zoom cannot allocate world-sized image pattern tiles or nested SVG documents');
   assert.equal($('atlas-land-clip'),null);assert.equal($('land-washes'),null,'Camera frames have no full-world gradient clipping passes');
 });
 
@@ -1319,6 +1321,7 @@ test('map frames read layout before painting, skip unchanged scenes, and defer h
   for(let i=0;i<90;i++)frame();await tick();
   const zoomed=map.getAttribute('viewBox').split(' ').map(Number);
   assert.ok(Math.abs((anchor[0]-zoomed[0])/zoomed[2]-.2)<1e-6&&Math.abs((anchor[1]-zoomed[1])/zoomed[3]-.3)<1e-6,'Wheel zoom preserves the point beneath the cursor');
+  assert.ok(mutations.every(record=>record.target!==$('atlas-wash')),'Zooming never reloads, resizes, or rewrites the raster wash');
   const before=map.getAttribute('viewBox');mutations.length=0;
   $('photo-panel').showModal();await tick();$('zoom-in').click();
   for(let i=0;i<90;i++)frame();await tick();

@@ -11,18 +11,17 @@
   }
   const intersects=(bounds,view,pad=3)=>bounds.right>=view.x-pad&&bounds.left<=view.x+view.w+pad&&bounds.bottom>=view.y-pad&&bounds.top<=view.y+view.h+pad;
   function create(land,regions,landPaths,regionPaths,countryLayer,countryPaths=[]){
-    function mount(root,paths,coloured){
+    function mount(root,paths){
       const fragment=document.createDocumentFragment(),entries=[];
       for(const d of paths){
         if(!d)continue;
         const bounds=measure(d),node=document.createElementNS('http://www.w3.org/2000/svg','path');
         node.setAttribute('d',d);
-        if(coloured)node.style.fill='url(#atlas-paper)';
         entries.push({node,bounds,visible:true});fragment.append(node);
       }
       root?.append(fragment);return entries;
     }
-    const coasts=mount(land,landPaths,true),countries=mount(countryLayer,countryPaths,false),boundaries=mount(regions,regionPaths,false);
+    const coasts=mount(land,landPaths),countries=mount(countryLayer,countryPaths),boundaries=mount(regions,regionPaths);
     let last='';
     return {paint(view,showRegions){
       const key=[view.x,view.y,view.w,view.h,showRegions].join(',');if(key===last)return;last=key;

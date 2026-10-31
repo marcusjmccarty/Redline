@@ -1,4 +1,5 @@
 import {writeFile} from 'node:fs/promises';
-import {paperSVG} from './atlas-paper.mjs';
-for(const [kind,name] of [['land','atlas-paper'],['water','atlas-water']])await writeFile(new URL(`../public/${name}.svg`,import.meta.url),paperSVG(kind));
-console.log('Baked the two small atlas colour textures.');
+import {paper} from './atlas-paper.mjs';
+const {png}=paper();
+await writeFile(new URL('../public/atlas-wash.png',import.meta.url),png);
+console.log(`Baked one ${Math.round(png.length/1024)} KB atlas wash.`);

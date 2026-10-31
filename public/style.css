@@ -4,7 +4,7 @@
   --paper: #efe5d2; --paper-high: #f7f0e2; --paper-low: #e4d5b9; --paper-edge: #c4b08b; --mat: #faf5e9;
   --ink: #453b2d; --muted: #685c49; --line: #b7a688; --brass: #a28b62;
   --red: #9d4835; --red-dark: #823c2e; --route-red: #cb3824;
-  --ocean: #bed8de; --land: #efdfb5; --coast: #9d8560;
+  --ocean: #bed8de; --land: #f2e4c7; --coast: #9d8560;
   --dock: var(--paper); --chart: var(--paper); --sepia: var(--ink);
   --paper-grain: url("data:image/png;base64,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");
   --paper-wash: radial-gradient(130% 120% at 30% 10%, var(--paper-high), var(--paper) 60%, var(--paper-low));
@@ -37,27 +37,28 @@ input::placeholder { color: var(--muted); }
 
 /* The map */
 main { position: relative; width: 100%; height: 100%; }
-.map-shell { position: absolute; inset: 0; overflow: hidden; background: #bed5d9; }
-/* A bold engraved neatline with geometric corner blocks, no scrollwork. */
-.atlas-frame { position: absolute; z-index: 2; inset: 10px; border: 2px solid #806a46; box-shadow: 0 0 0 3px #f7ecd5, 0 0 0 5px #9e845b, 0 0 0 10px #e7d6b3, inset 0 0 0 5px #f7eedb, inset 0 0 0 6px #a48a61; pointer-events: none; }
-.atlas-corner { position: absolute; width: 21px; height: 21px; border: 2px solid #806a46; background: #e6d4af; box-shadow: inset 0 0 0 3px #f7eedb; }
-.atlas-corner::after { content: ''; position: absolute; inset: 6px; background: #967b50; transform: rotate(45deg); }
-.atlas-corner.north-west { top: -2px; left: -2px; }
-.atlas-corner.north-east { top: -2px; right: -2px; }
-.atlas-corner.south-west { bottom: -2px; left: -2px; }
-.atlas-corner.south-east { bottom: -2px; right: -2px; }
-.atlas-ornament { position: absolute; left: calc(50% - 29px); width: 58px; height: 10px; border: 1px solid #806a46; background: #f7eedb; box-shadow: inset 0 0 0 2px #e6d4af; }
-.atlas-ornament::after { content: ''; position: absolute; left: 25px; top: 1px; width: 6px; height: 6px; background: #9e845b; transform: rotate(45deg); }
-.atlas-ornament.north { top: -3px; }
-.atlas-ornament.south { bottom: -3px; }
-@media (max-width: 600px) { .atlas-frame { inset: 7px; border-width: 1px; } .atlas-corner { width: 17px; height: 17px; } .atlas-corner::after { inset: 4px; } }
+.map-shell { position: absolute; inset: 0; overflow: hidden; background: #c9dbdd; }
+/* Worn paper, an uneven ink rule, and restrained engraved details. This
+   frame is outside the moving map and never participates in camera painting. */
+.atlas-frame { position: absolute; z-index: 2; inset: 7px; border: 7px solid #ebdbb9; outline: 1px solid #9a8058; box-shadow: 0 0 0 7px #e6d4b0, inset 0 0 0 1px #b39a71; pointer-events: none; }
+.atlas-rule { position: absolute; inset: 1px; width: calc(100% - 2px); height: calc(100% - 2px); fill: none; stroke: #987e55; stroke-width: .9; }
+.atlas-rule path { vector-effect: non-scaling-stroke; }
+.atlas-corner { position: absolute; width: 53px; height: 53px; fill: none; stroke: #947950; stroke-width: .85; }
+.atlas-corner.north-west { top: -7px; left: -7px; }
+.atlas-corner.north-east { top: -7px; right: -7px; transform: scaleX(-1); }
+.atlas-corner.south-west { bottom: -7px; left: -7px; transform: scaleY(-1); }
+.atlas-corner.south-east { bottom: -7px; right: -7px; transform: scale(-1); }
+.atlas-ornament { position: absolute; left: calc(50% - 64px); width: 128px; height: 22px; fill: #f4e8ce; stroke: #947950; stroke-width: .8; }
+.atlas-ornament.north { top: -10px; }
+.atlas-ornament.south { bottom: -10px; transform: scaleY(-1); }
+@media (max-width: 600px) { .atlas-frame { inset: 5px; border-width: 5px; } .atlas-corner { width: 38px; height: 38px; } .atlas-ornament { width: 96px; height: 18px; left: calc(50% - 48px); } }
 
 #map { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 #map.dragging { cursor: grabbing; }
 #map.zoomed-out, #map.zoomed-out.dragging { cursor: default; }
 #map:focus { outline: none; }
 #land path, #antarctica path { fill: var(--land); stroke: var(--coast); stroke-width: .7; stroke-linejoin: round; fill-rule: evenodd; clip-rule: evenodd; vector-effect: non-scaling-stroke; }
-#antarctica path { fill: url(#atlas-paper); }
+#atlas-wash { pointer-events: none; }
 #country-borders path { fill: none; stroke: #9c805b; stroke-width: .55; stroke-opacity: .5; stroke-linejoin: round; vector-effect: non-scaling-stroke; pointer-events: none; }
 #regions path { fill: none; stroke: #907e61; stroke-width: .5; stroke-opacity: .65; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 .continent { font-family: Georgia, serif; font-size: 15px; letter-spacing: 4px; text-anchor: middle; fill: #69563e; opacity: .82; }
@@ -84,7 +85,7 @@ main { position: relative; width: 100%; height: 100%; }
 body.sheet-open :is(.route-dock, .zoom-controls) { opacity: 0; translate: 0 18px; pointer-events: none; }
 
 /* A compact trip planner over the map. */
-.route-dock { --chart: #faf3e3; --paper-wash: none; position: absolute; z-index: 3; bottom: 22px; left: 50%; transform: translateX(-50%); width: min(700px, calc(100% - 40px)); padding: 14px 22px 12px;
+.route-dock { --chart: #faf3e3; --paper-wash: var(--paper-grain); position: absolute; z-index: 3; bottom: 22px; left: 50%; transform: translateX(-50%); width: min(700px, calc(100% - 40px)); padding: 14px 22px 12px;
   color: var(--sepia); border-radius: 3px; transition: opacity .3s ease, translate .4s var(--ease-out);
   background-color: var(--chart);
   background-image:
@@ -93,9 +94,9 @@ body.sheet-open :is(.route-dock, .zoom-controls) { opacity: 0; translate: 0 18px
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M6 0 7.2 4.8 12 6 7.2 7.2 6 12 4.8 7.2 0 6 4.8 4.8Z' fill='%23a28b62'/%3E%3C/svg%3E"),
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M6 0 7.2 4.8 12 6 7.2 7.2 6 12 4.8 7.2 0 6 4.8 4.8Z' fill='%23a28b62'/%3E%3C/svg%3E"),
     var(--paper-wash);
-  background-size: 9px 9px, 9px 9px, 9px 9px, 9px 9px, auto;
+  background-size: 9px 9px, 9px 9px, 9px 9px, 9px 9px, 64px 64px;
   background-position: 3px 3px, calc(100% - 3px) 3px, 3px calc(100% - 3px), calc(100% - 3px) calc(100% - 3px), 0 0;
-  background-repeat: no-repeat;
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, repeat;
   box-shadow: 0 0 0 1px var(--brass), inset 0 0 0 5px var(--chart), inset 0 0 0 6px #a28b6299, 0 16px 44px #352c233b, 0 2px 6px #352c231f; }
 .voyage-head { display: flex; align-items: center; gap: 12px; }
 .voyage-title { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.15; }
