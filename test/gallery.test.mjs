@@ -58,7 +58,7 @@ async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,p
     await api(`/trips/${trip.id}/photos`,{method:'POST',body:form});
   }
   w.localStorage.setItem('redline-saved-trip',JSON.stringify({id:trip.id,title:trip.title,revision:trip.revision,hash:JSON.stringify(stops)}));
-  w.eval(source('public/postcards.js'));w.eval(source('public/trips.js'));
+  w.eval(source('public/postcards.js'));w.eval(source('public/album-motion.js'));w.eval(source('public/trips.js'));
   await wait(()=>$('trip-title').textContent===trip.title&&(!seed||$('photo-count').textContent===String(seedStops.length)));
   $('photos-button').click();await wait(()=>$('photo-panel').open);await tick();
   const change=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new w.Event('change',{bubbles:true}));};
@@ -595,7 +595,7 @@ function controlledMotion(w){
   const running=new Set();
   class Motion {
     constructor(element,options){
-      this.element=element;this.options=options;
+      this.element=element;this.options=options;this.reversed=false;this.reverse=()=>{this.reversed=!this.reversed;};
       this.done=new Promise((resolve,reject)=>{
         this.finish=()=>{running.delete(this);resolve();};
         this.cancel=()=>{if(running.delete(this))reject(Error('Cancelled'));};
@@ -607,50 +607,77 @@ function controlledMotion(w){
   return {running,finish:async()=>{[...running].forEach(item=>item.finish());await tick();}};
 }
 
-test('every album visit opens its cover to the bookmark, and dismissing folds it before closing',async t=>{
+test('album and All Photos fold a stable spread into the front cover, pause, then disappear',async t=>{
   const {w,$,press,pages,tab}=await setup(t),motion=controlledMotion(w);
-  tab(madrid.id).click();await motion.finish();
-  const bookmark=pages();assert.equal(bookmark,'left:city right:inside');
-  assert.equal($('gallery-filter').parentElement,$('album-book'),'Tabs travel with the physical book');
-  for(let visit=0;visit<2;visit++){
-    // Also exercise closing from All Photos, without losing the album bookmark.
-    if(visit===0)$('sheet-view').click();
-    const paper=$('photo-gallery').firstElementChild;
-    const outside=type=>$('photo-panel').dispatchEvent(new w.MouseEvent(type,{bubbles:true}));
-    outside('pointerdown');outside('click');
-    assert.equal($('photo-panel').open,true);assert.equal($('photo-panel').dataset.motion,'closing');
-    if(visit===0){assert.equal($('album-book').dataset.mode,'sheet');assert.equal($('photo-gallery').firstElementChild,paper,'All Photos stays intact throughout dismissal');}
-    else assert.ok($('album-pages').querySelector('.album-leaf'),'The cover folds before the dialog goes away');
-    assert.equal($('album-book').inert,true);
-    const fade=[...motion.running].find(item=>item.element===$('album-book'));assert.ok(fade);assert.ok(fade.options.duration<=520,'Closing is snappy');
+  tab(madrid.id).click();await motion.finish();const bookmark=pages();
+  for(const view of ['sheet','album']){
+    $(view+'-view').click();if(view==='sheet')$('photo-scroll').scrollTop=180;
+    const paper=$('photo-gallery').firstElementChild,spread=$('album-pages').firstElementChild;
+    press('Escape');
+    assert.equal($('photo-panel').dataset.motion,'closing');assert.equal($('album-book').dataset.mode,view);
+    const scene=$('album-book').querySelector('.album-cover-scene');
+    assert.ok(scene.querySelector('.album-cover-front .album-cover'),'The entire front cover folds over this view');
+    assert.equal($('gallery-filter').parentElement,scene,'Tabs follow the cover geometrically');
+    assert.equal(scene.querySelectorAll('[id]').length,1,'Only the original tab navigation has an ID');
+    assert.equal($('photo-gallery').firstElementChild,paper);assert.equal($('album-pages').firstElementChild,spread);
+    assert.equal(motion.running.size,2);assert.equal([...motion.running][0].options.duration,660);
     press('Escape');await motion.finish();
-    assert.equal($('photo-panel').open,false,'Closing ends in one sequence, with no second fade');
-    assert.equal($('album-pages').children.length,0,'No old page surfaces remain to flash');
-    $('photos-button').click();
-    assert.equal(pages(),'left:void right:cover','Each visit begins on the cover');
-    await wait(()=>motion.running.size===4);
-    assert.equal($('photo-panel').dataset.motion,'opening');
-    press('ArrowRight');assert.equal(motion.running.size,4,'Travel keys cannot interrupt the opening');
-    await motion.finish();
-    assert.equal($('photo-panel').dataset.motion,'');assert.equal($('album-book').inert,false);
-    assert.equal($('album-book').dataset.mode,visit===0?'sheet':'album','The view preference is retained');
+    assert.equal($('photo-panel').open,true,'The front cover stays visible after the fold');
+    assert.equal([...motion.running][0].options.duration,130,'A short beat separates folding from departure');
+    assert.equal($('photo-panel').dataset.departing,undefined);
+    await motion.finish();assert.equal($('photo-panel').dataset.departing,'true');
+    assert.equal([...motion.running][0].options.duration,190);
+    await motion.finish();assert.equal($('photo-panel').open,false);
+    assert.equal($('album-pages').children.length,0);assert.equal($('album-book').querySelector('.album-cover-scene'),null);
+    assert.equal($('gallery-filter').parentElement,$('album-book'));
+    $('photos-button').click();await wait(()=>motion.running.size===2);
+    assert.equal($('photo-panel').dataset.motion,'opening');assert.equal($('album-book').dataset.mode,view);
+    const arrived=$('album-pages').firstElementChild;
+    press('ArrowRight');assert.equal(motion.running.size,2);
+    await motion.finish();assert.equal($('photo-panel').dataset.motion,'');assert.equal($('album-book').inert,false);
+    if(view==='sheet')assert.equal($('photo-scroll').scrollTop,180,'All Photos reopens at the same prints');
+    assert.equal($('album-pages').firstElementChild,arrived,'Opening hands back the same live spread, without replacing photos');
     $('album-view').click();assert.equal(pages(),bookmark);
   }
 });
 
-test('closing during an opening cancels cleanly and keeps the intended page for next time',async t=>{
+test('closing halfway through opening reverses that same cover and preserves the bookmark',async t=>{
   const {w,$,press,pages,tab}=await setup(t);
-  tab(madrid.id).click();const bookmark=pages();press('Escape');
-  const motion=controlledMotion(w);
-  $('photos-button').click();await wait(()=>motion.running.size===4);
+  tab(madrid.id).click();const bookmark=pages();press('Escape');const motion=controlledMotion(w);
+  $('photos-button').click();await wait(()=>motion.running.size===2);
+  const scene=$('album-book').querySelector('.album-cover-scene'),animations=[...motion.running];
   press('Escape');assert.equal($('photo-panel').dataset.motion,'closing');
-  await motion.finish();await motion.finish();assert.equal($('photo-panel').open,false);
-  $('photos-button').click();await wait(()=>motion.running.size===4);await motion.finish();
-  assert.equal(pages(),bookmark);assert.equal($('album-book').inert,false);
-  // Reduced motion skips the cover and dismissal animation entirely.
+  assert.equal($('album-book').querySelector('.album-cover-scene'),scene);
+  assert.ok(animations.every(animation=>animation.reversed),'Reverse in place, without replacing any page');
+  await motion.finish();await motion.finish();await motion.finish();assert.equal($('photo-panel').open,false);
+  $('photos-button').click();await wait(()=>motion.running.size===2);await motion.finish();assert.equal(pages(),bookmark);
   w.matchMedia=()=>({matches:true});press('Escape');assert.equal($('photo-panel').open,false);
   $('photos-button').click();await wait(()=>!$('photo-panel').dataset.motion);
   assert.equal(pages(),bookmark);assert.equal(motion.running.size,0);
+});
+
+test('dismissal while storage is loading never reveals late pages or reopens the album',async t=>{
+  const {w,$,press,storage,api}=await setup(t);press('Escape');
+  const motion=controlledMotion(w);let release;
+  storage.api=async(path,options)=>{await new Promise(resolve=>release=resolve);return api(path,options);};
+  $('photos-button').click();await wait(()=>!!release);assert.ok($('album-book').querySelector('.album-loading-cover'));
+  press('Escape');await tick();await motion.finish();await motion.finish();
+  assert.equal($('photo-panel').open,false);release();await tick();
+  assert.equal($('photo-panel').open,false);assert.equal($('album-book').querySelector('.album-cover-scene'),null);
+  assert.equal($('album-book').querySelector('.album-loading-cover'),null);
+});
+
+test('single-page opening and All Photos use the same cover lifecycle and defer redraws',async t=>{
+  const {w,$,press}=await setup(t);press('Escape');w.innerWidth=480;w.innerHeight=800;
+  const motion=controlledMotion(w);$('photos-button').click();await wait(()=>motion.running.size===2);
+  const scene=$('album-book').querySelector('.album-cover-scene');assert.ok(scene.classList.contains('single'));
+  const copy=scene.querySelector('.album-snapshot');
+  w.dispatchEvent(new w.Event('redline:routechange'));w.dispatchEvent(new w.Event('resize'));await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(scene.querySelector('.album-snapshot'),copy,'Background updates cannot replace moving surfaces');
+  await motion.finish();assert.equal($('album-pages').classList.contains('single'),true);
+  $('sheet-view').click();$('photo-scroll').scrollTop=240;press('Escape');
+  const scroll=$('album-book').querySelector('.album-cover-scene .photo-scroll');assert.equal(scroll.scrollTop,240,'Closing keeps the visible scroll position');
+  await motion.finish();await motion.finish();await motion.finish();assert.equal($('photo-panel').open,false);
 });
 
 test('postcard Save commits immediately, keeps failed drafts, and the back controls stay in reading order',async t=>{
@@ -750,7 +777,7 @@ test('route undo restores cleared and edited stops, survives saving, and never c
 
 test('photo arrows rest after pointer inactivity and return on movement, without hiding keyboard controls',async t=>{
   const {w,$,tiles}=await setup(t);const realTimeout=w.setTimeout.bind(w),realClear=w.clearTimeout.bind(w),timers=new Map();let next=50000;
-  w.setTimeout=(fn,delay,...args)=>{if(delay!==1800)return realTimeout(fn,delay,...args);timers.set(++next,fn);return next;};
+  w.setTimeout=(fn,delay,...args)=>{if(delay!==450)return realTimeout(fn,delay,...args);timers.set(++next,fn);return next;};
   w.clearTimeout=id=>{timers.delete(id);realClear(id);};
   tiles()[0].click();const frame=$('full-photo').parentElement;
   const move=pointerType=>{const event=new w.Event('pointermove',{bubbles:true});Object.defineProperty(event,'pointerType',{value:pointerType});frame.dispatchEvent(event);};
@@ -762,10 +789,26 @@ test('photo arrows rest after pointer inactivity and return on movement, without
   await w.RedlinePostcards.close();assert.equal(timers.size,0);
 });
 
-test('closing an already closed cover does not turn it across the screen',async t=>{
-  const {w,$,press}=await setup(t);press('End');const motion=controlledMotion(w);
-  press('Escape');assert.equal(motion.running.size,1,'Only the book departure runs');
-  assert.equal($('album-pages').querySelector('.album-leaf'),null);
-  assert.equal([...motion.running][0].options.duration,280);
-  await motion.finish();assert.equal($('photo-panel').open,false);
+test('front and back cover bookmarks close cleanly and return to the same cover',async t=>{
+  for(const end of ['Home','End']){
+    const {w,$,press,pages}=await setup(t);press(end);const bookmark=pages(),motion=controlledMotion(w);
+    press('Escape');await tick();
+    const scene=$('album-book').querySelector('.album-cover-scene');assert.ok(scene.classList.contains('closed-book'));
+    await motion.finish();await motion.finish();await motion.finish();assert.equal($('photo-panel').open,false);
+    $('photos-button').click();await wait(()=>motion.running.size===2);await motion.finish();assert.equal(pages(),bookmark);
+  }
+});
+
+
+test('cover snapshots omit offscreen photos while retaining sheet layout and scroll',async t=>{
+  const {w,$,tiles}=await setup(t);tiles();const source=$('album-sheet'),scroll=$('photo-scroll'),all=[...source.querySelectorAll('.photo-tile')];
+  const rect=(top,height)=>({top,bottom:top+height,left:0,right:600,width:600,height});
+  source.getBoundingClientRect=()=>rect(0,600);scroll.getBoundingClientRect=()=>rect(50,500);scroll.scrollTop=123;
+  source.querySelectorAll('.gallery-city').forEach(section=>section.getBoundingClientRect=()=>rect(0,1000));
+  all.forEach((tile,i)=>tile.getBoundingClientRect=()=>rect(i===0?80:900,100));
+  const cover=w.document.createElement('section');cover.className='album-cover';
+  const scene=w.RedlineAlbumMotion.create({book:$('album-book'),source,cover,two:true});
+  const copies=$('album-book').querySelectorAll('.album-snapshot');assert.equal(copies.length,2);
+  for(const copy of copies){assert.equal(copy.querySelectorAll('img').length,1);assert.equal(copy.querySelectorAll('.photo-tile').length,all.length);assert.equal(copy.querySelector('.photo-scroll').scrollTop,123);}
+  scene.dispose();assert.equal(source.querySelectorAll('img').length,all.length,'Original photos stay intact');
 });
