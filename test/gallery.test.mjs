@@ -14,7 +14,7 @@ const wait=async condition=>{
 };
 const tick=()=>new Promise(resolve=>setTimeout(resolve,5));
 
-async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,paris],seedSizes=[],realMap=false}={}){
+async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,paris],seedSizes=[],realMap=false,textLength=null}={}){
   const dom=new JSDOM(source('map.html'),{url:'https://redline.test/Redline/',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window,$=id=>w.document.getElementById(id),objects=new Set();let stops=route;
   Object.assign(w,{Blob,File,FormData,TextEncoder,TextDecoder,indexedDB:new IDBFactory()});
@@ -37,12 +37,13 @@ async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,p
   Object.defineProperties(w.HTMLImageElement.prototype,{naturalWidth:{get:()=>1600},naturalHeight:{get:()=>1000}});
   w.RedlinePostcardExport={render:()=>({toBlob:callback=>callback(new Blob([jpeg],{type:'image/jpeg'}))})};
   if(realMap){
+    if(textLength!==null)w.SVGElement.prototype.getComputedTextLength=()=>textLength;
     w.localStorage.setItem('redline-route-v1',JSON.stringify(route));
     w.localStorage.setItem('redline-cities-collapsed','true');
     w.matchMedia=()=>({matches:false});w.ResizeObserver=class{observe(){}};
     let frame=0;w.requestAnimationFrame=()=>++frame;w.cancelAnimationFrame=()=>{};
     w.Element.prototype.getBoundingClientRect=function(){
-      const [left,top,width,height]=this.id==='route-dock'?[370,760,700,116]:this.closest?.('#trip-panel')?[24,24,380,600]:[0,0,1440,900];
+      const [left,top,width,height]=this.id==='route-dock'?[370,760,700,116]:this.matches('.zoom-controls')?[1380,790,36,76]:this.closest?.('#trip-panel')?[24,24,380,600]:[0,0,1440,900];
       return {left,top,width,height,right:left+width,bottom:top+height};
     };
     w.SVGElement.prototype.getScreenCTM=function(){const [x,y,width,height]=$('map').getAttribute('viewBox').split(' ').map(Number);return {a:1440/width,b:0,c:0,d:900/height,e:-x*1440/width,f:-y*900/height};};
@@ -140,8 +141,8 @@ test('a spread names both its cities, and turns keep tab focus and finish when p
   press('End');const closing=[...running];press('End');assert.deepEqual([...running],closing);
   await finish();assert.equal(pages(),'left:back right:void');
   $('sheet-view').click();assert.equal($('album-foot').inert,true,'Hidden page controls leave the tab order');
-  await wait(()=>running.size===5);await finish();
-  $('album-view').click();await wait(()=>running.size===5);await finish();assert.equal($('album-foot').inert,false);
+  await wait(()=>running.size===4);await finish();
+  $('album-view').click();await wait(()=>running.size===4);await finish();assert.equal($('album-foot').inert,false);
 });
 
 test('the divider tabs are coloured book cloth with readable labels',()=>{
@@ -897,12 +898,12 @@ test('cover motion waits for decoded snapshots and can close before its first mo
 
 test('switching Album and All Photos animates both directions and handles rapid changes and dismissal',async t=>{
   const {w,$,press,pages}=await setup(t),motion=controlledMotion(w),bookmark=pages();
-  $('sheet-view').click();assert.equal($('album-book').inert,true);await wait(()=>motion.running.size===5);
+  $('sheet-view').click();assert.equal($('album-book').inert,true);await wait(()=>motion.running.size===4);
   assert.equal($('album-book').dataset.mode,'sheet');
   assert.ok([...motion.running].every(animation=>animation.element!==$('album-book')),'The binding and tabs never fade out or wobble');
   const outgoing=$('album-book').querySelector('.album-view-layer');assert.ok(outgoing);assert.equal(outgoing.querySelectorAll('[id]').length,0);
-  const front=[...motion.running].find(animation=>animation.element.classList.contains('album-view-front'));
-  assert.deepEqual(Array.from(front.frames,frame=>frame.transform),['rotateY(0deg)','rotateY(-90deg)','rotateY(-90deg)','rotateY(-90deg)']);
+  const leaf=[...motion.running].find(animation=>animation.element.classList.contains('album-view-leaf'));
+  assert.deepEqual(Array.from(leaf.frames,frame=>frame.transform),['rotateY(0deg)','rotateY(-180deg)']);
   assert.ok(outgoing.querySelector('.album-view-front .album-page'));assert.ok(outgoing.querySelector('.album-view-back .album-copy-album-sheet'));
   assert.equal(outgoing.querySelectorAll('.album-copy-album-pages').length,0,'Native half-pages keep the same geometry as a chapter turn');
   assert.equal($('album-sheet').style.visibility,'','The live sheet stays painted beneath the opaque moving leaf');
@@ -926,8 +927,8 @@ test('a stalled image has a bounded preparation window and late results cannot r
   $('sheet-view').click();assert.equal(motion.running.size,0,'The old spread remains still while the next page prepares');
   assert.ok(releases.length>0);const old=$('album-book').querySelector('.album-view-layer');assert.ok(old.querySelector('.print'));
   assert.equal($('album-sheet').style.visibility,'','The incoming sheet remains painted even if one bitmap stalls');
-  await wait(()=>motion.running.size===5);
-  await motion.finish();assert.equal(old.isConnected,false);assert.equal($('album-sheet').style.visibility,'');assert.equal($('album-book').inert,false,'A stalled decoder cannot trap the gallery');
+  await new Promise(resolve=>setTimeout(resolve,300));assert.equal(motion.running.size,0,'A slow bitmap must not turn as a blank print after the old 240ms deadline');
+  await wait(()=>!old.isConnected);assert.equal(motion.running.size,0,'A stalled decoder uses a direct switch, never an incomplete page turn');assert.equal(old.isConnected,false);assert.equal($('album-sheet').style.visibility,'');assert.equal($('album-book').inert,false,'A stalled decoder cannot trap the gallery');
   w.HTMLImageElement.prototype.decode=decode;releases.forEach(resolve=>resolve());await tick();assert.equal(motion.running.size,0);assert.equal(old.isConnected,false);
   $('photo-scroll').scrollTop=160;$('album-view').click();
   assert.equal($('album-book').querySelector('.album-copy-photo-scroll').scrollTop,160,'Outgoing prints retain their exact scroll position');
@@ -1020,7 +1021,7 @@ test('a large All Photos turn locates visible rows without measuring or cloning 
   source.querySelectorAll('.gallery-city').forEach(section=>section.getBoundingClientRect=()=>rect(0,4000));
   all.forEach((tile,i)=>tile.getBoundingClientRect=()=>{reads++;return rect(i<6?80:900+i*100,100);});
   w.HTMLImageElement.prototype.decode=function(){decodes.set(this.src,(decodes.get(this.src)||0)+1);return Promise.resolve();};
-  const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===5);
+  const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===4);
   assert.ok(reads<=16,'Binary row lookup skips offscreen photos; both halves reuse the measurements');
   assert.equal(decodes.size,6,'Only visible photos need decoding');
   assert.ok([...decodes.values()].every(count=>count===3),'The live image and both actual page faces are decoded before moving');
@@ -1041,7 +1042,7 @@ test('contact-sheet turns freeze sticky headings and visible prints at their exa
     reads.set(index,(reads.get(index)||0)+1);
     return rect(68+(index%4)*176,180+Math.floor(index/4)*160-scroll.scrollTop,150,150);
   };});
-  const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===5);
+  const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===4);
   const snapshots=[...$('album-book').querySelectorAll('.album-frozen-sheet')];assert.equal(snapshots.length,2);
   const captured=snapshots.flatMap(snapshot=>[...snapshot.querySelectorAll('.photo-tile')]),indices=[...new Set(captured.map(tile=>all.findIndex(original=>original.dataset.photoId===tile.dataset.photoId)))].sort((a,b)=>a-b);
   assert.deepEqual(indices,Array.from({length:20},(_,index)=>index+136),'The two halves retain every visible print');
@@ -1110,24 +1111,24 @@ test('three-photo layouts alternate physical sides through long chapters',async 
   assert.equal(counts.reduce((a,b)=>a+b,0),76);assert.ok(counts.filter(n=>n===4).length>counts.length/2);
 });
 
-test('view turns retain the ordinary page timing while their flat faces meet edge-on without overlap',async t=>{
+test('view changes use the ordinary chapter leaf animation, without separate face opacity switches',async t=>{
   const {w,$,tab}=await setup(t,{route:[paris],seedStops:Array.from({length:38},()=>paris)});tab(paris.id).click();const motion=controlledMotion(w);
   $('album-next').click();assert.equal(motion.running.size,4);
-  const ordinary=[...motion.running][0].options;await motion.finish();
+  const ordinary=[...motion.running].map(animation=>({frames:animation.frames,options:animation.options}));await motion.finish();
   for(const [button,sign] of [['sheet-view',-1],['album-view',1]]){
-    $(button).click();await wait(()=>motion.running.size===5);
-    const animations=[...motion.running],front=animations.find(a=>a.element.classList.contains('album-view-front')),back=animations.find(a=>a.element.classList.contains('album-view-back'));
-    for(const animation of animations)assert.equal(JSON.stringify(animation.options),JSON.stringify(ordinary));
-    assert.ok(front.element.parentNode.classList.contains('paired'));assert.equal(front.element.parentNode,back.element.parentNode);
-    assert.equal(animations.some(a=>a.element===front.element.parentNode),false,'The parent never rotates a second, overlapping 3D scene');
-    assert.deepEqual(Array.from(front.frames,f=>f.opacity),[1,1,0,0]);assert.deepEqual(Array.from(back.frames,f=>f.opacity),[0,0,1,1]);
-    assert.equal(front.frames[1].transform,`rotateY(${sign*90}deg)`);assert.equal(back.frames[2].transform,`rotateY(${-sign*90}deg)`);
-    assert.equal(front.frames[1].offset,.5);assert.equal(back.frames[2].offset,.5,'Faces change visibility only when paper is edge-on');
-    assert.equal(back.frames.at(-1).transform,'rotateY(0deg)');
-    const css=source('public/gallery.css');assert.match(css,/\.album-view-leaf\.paired \{[^}]*transform-style: flat/);
+    $(button).click();await wait(()=>motion.running.size===4);
+    const animations=[...motion.running],leaf=animations[0];
+    assert.ok(leaf.element.classList.contains('album-view-leaf'));
+    assert.deepEqual(Array.from(leaf.frames,f=>f.transform),['rotateY(0deg)',`rotateY(${sign*180}deg)`]);
+    animations.forEach((animation,i)=>{
+      assert.equal(JSON.stringify(animation.options),JSON.stringify(ordinary[i].options));
+      if(i)assert.equal(JSON.stringify(animation.frames),JSON.stringify(ordinary[i].frames));
+    });
+    assert.equal(animations.some(animation=>animation.element.classList.contains('album-view-face')),false,'Both faces travel on one physical leaf and one clock');
     await motion.finish();
   }
 });
+
 
 test('All Photos prepares while the album rests and reuses that sheet on the first switch',async t=>{
   const {$}=await setup(t);await wait(()=>$('photo-gallery').querySelector('.photo-image'));
@@ -1142,7 +1143,7 @@ test('the actual turning faces decode before movement even when image bytes are 
   $('sheet-view').click();assert.equal(motion.running.size,0);assert.ok(releases.length>0,'Complete images still need a decoded bitmap');
   const layer=$('album-book').querySelector('.album-view-layer');assert.ok(layer);assert.equal($('album-book').inert,true);
   await tick();assert.equal(motion.running.size,0,'The paper cannot move before its images are ready');
-  releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===5);
+  releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===4);
   assert.ok([...layer.querySelectorAll('.photo-image')].every(image=>image.classList.contains('loaded')));
   await motion.finish();assert.equal($('album-book').inert,false);
 });
@@ -1185,7 +1186,7 @@ test('the atlas paints connected landmasses once and keeps country borders out o
   assert.ok(land.every((path,i)=>path.getAttribute('d')===w.ATLAS_LAND[i]));
   assert.equal($('country-borders').children.length,w.ATLAS_BORDERS.length);
   assert.ok(land.every(path=>!path.style.fill),'Plain vector fills never invoke an image-backed pattern for each landmass');
-  assert.equal($('map').querySelectorAll('image').length,1);assert.equal($('atlas-wash').getAttribute('href'),'atlas-wash.png');
+  assert.equal($('map').querySelectorAll('image').length,0,'The map has no raster wash or image-backed colour effects');
   assert.equal($('map').querySelectorAll('pattern image, filter, mask').length,0,'Zoom cannot allocate world-sized image pattern tiles or nested SVG documents');
   assert.equal($('atlas-land-clip'),null);assert.equal($('land-washes'),null,'Camera frames have no full-world gradient clipping passes');
 });
@@ -1199,7 +1200,7 @@ test('photo-view turns pause background thumbnail work and resume it after settl
     };
     const warmed=cache.preload(Array.from({length:6},(_,i)=>`https://redline.test/idle-${dismiss}-${i}.jpg`));
     await tick();assert.equal(started,3);
-    $(dismiss?'album-view':'sheet-view').click();await wait(()=>motion.running.size===5);
+    $(dismiss?'album-view':'sheet-view').click();await wait(()=>motion.running.size===4);
     releases.splice(0).forEach(resolve=>resolve());await tick();
     assert.equal(started,3,'No new background decode competes with the moving leaf');
     if(dismiss){press('Escape');await wait(()=>motion.running.size===3);}
@@ -1246,7 +1247,7 @@ test('view faces stay in the same compositor stack from preparation through the 
   assert.ok(leaf,'The final hinged leaf exists before thumbnail decoding finishes');
   const images=[...layer.querySelectorAll('img')],parents=images.map(image=>image.parentNode);
   const changes=[],observer=new w.MutationObserver(records=>changes.push(...records));observer.observe(layer,{subtree:true,childList:true});
-  assert.equal(motion.running.size,0);releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===5);
+  assert.equal(motion.running.size,0);releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===4);
   assert.equal(changes.length+observer.takeRecords().length,0,'Starting the turn does not remove, insert, or reparent any moving content');
   assert.ok(images.every((image,i)=>image.parentNode===parents[i]));assert.equal(layer.querySelector('.album-view-leaf'),leaf);
   observer.disconnect();await motion.finish();
@@ -1255,7 +1256,7 @@ test('view faces stay in the same compositor stack from preparation through the 
 test('view turns keep the live destination painted throughout and retire the old half before the final leaf, in both directions',async t=>{
   const {w,$,tab,press}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w),nativeFrame=w.requestAnimationFrame;
   for(const [button,target] of [['sheet-view','album-sheet'],['album-view','album-pages']]){
-    $(button).click();await wait(()=>motion.running.size===5);
+    $(button).click();await wait(()=>motion.running.size===4);
     const layer=$('album-book').querySelector('.album-view-layer'),frames=[];
     assert.equal($(target).style.visibility,'','No hidden-to-visible layer replacement is needed at arrival');
     assert.equal($(target).hidden,false);
@@ -1269,7 +1270,7 @@ test('view turns keep the live destination painted throughout and retire the old
     frames.shift()(w.performance.now());await wait(()=>!layer.isConnected);
     assert.equal($('album-book').inert,false);w.requestAnimationFrame=nativeFrame;
   }
-  $('sheet-view').click();await wait(()=>motion.running.size===5);
+  $('sheet-view').click();await wait(()=>motion.running.size===4);
   const layer=$('album-book').querySelector('.album-view-layer'),frames=[];
   w.requestAnimationFrame=callback=>{frames.push(callback);return frames.length;};
   [...motion.running].forEach(animation=>animation.finish());await tick();assert.equal(layer.dataset.handoff,'true');
@@ -1293,7 +1294,7 @@ test('closing releases gallery image elements while reopening restores saved pho
 test('legacy thumbnail generation waits for a page turn to finish',async t=>{
   const {w,$,tab,storage,api}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w);let writes=0;
   storage.api=(path,options)=>{if(path.endsWith('/thumb'))writes++;return api(path,options);};
-  $('sheet-view').click();await wait(()=>motion.running.size===5);
+  $('sheet-view').click();await wait(()=>motion.running.size===4);
   $('photo-gallery').querySelector('img').dispatchEvent(new w.Event('load'));
   await tick();await tick();assert.equal(writes,0,'Canvas encoding and IndexedDB writes wait while paper is moving');
   await motion.finish();await wait(()=>writes===1);
@@ -1321,7 +1322,6 @@ test('map frames read layout before painting, skip unchanged scenes, and defer h
   for(let i=0;i<90;i++)frame();await tick();
   const zoomed=map.getAttribute('viewBox').split(' ').map(Number);
   assert.ok(Math.abs((anchor[0]-zoomed[0])/zoomed[2]-.2)<1e-6&&Math.abs((anchor[1]-zoomed[1])/zoomed[3]-.3)<1e-6,'Wheel zoom preserves the point beneath the cursor');
-  assert.ok(mutations.every(record=>record.target!==$('atlas-wash')),'Zooming never reloads, resizes, or rewrites the raster wash');
   const before=map.getAttribute('viewBox');mutations.length=0;
   $('photo-panel').showModal();await tick();$('zoom-in').click();
   for(let i=0;i<90;i++)frame();await tick();
@@ -1330,4 +1330,61 @@ test('map frames read layout before painting, skip unchanged scenes, and defer h
   $('photo-panel').close();await tick();frame();await tick();
   assert.notEqual(map.getAttribute('viewBox'),before,'Closing immediately paints the current camera position');
   observer.disconnect();
+});
+
+test('crowded route names retain safe widths and clear one another through camera zooms',async t=>{
+  const cities=[['Puerto Ayora',-.74,-90.31],['Quito',-.18,-78.47],['Vienna',48.21,16.37],['Bratislava',48.15,17.11],['Budapest',47.5,19.04],['Prague',50.08,14.44],['Berlin',52.52,13.4],['Munich',48.14,11.58],['Salzburg',47.8,13.04]];
+  const route=cities.map(([name,latitude,longitude],i)=>({id:`cluster-${i}`,name,latitude,longitude,country:'Test'}));
+  const {w,$,press}=await setup(t,{realMap:true,route,seed:false,textLength:2}),frames=new Map();let next=10000,time=0;
+  w.requestAnimationFrame=callback=>{frames.set(++next,callback);return next;};w.cancelAnimationFrame=id=>frames.delete(id);
+  const frame=()=>{time+=16;for(const [id,callback] of [...frames]){frames.delete(id);callback(time);}};
+  press('Escape');await tick();$('zoom-in').click();for(let i=0;i<120;i++)frame();$('zoom-out').click();for(let i=0;i<120;i++)frame();
+  for(let zoom=0;zoom<5;zoom++){
+    const [vx,vy,vw,vh]=$('map').getAttribute('viewBox').split(' ').map(Number),boxes=[];
+    for(const group of $('route-stops').children){
+      const text=group.querySelector('text');assert.ok(text._width>=text.textContent.length*8.3,'A short browser measurement never poisons the cached width');
+      if(text.classList.contains('label-hidden'))continue;
+      const anchor=text.getAttribute('text-anchor'),width=text._width,[x,y]=group._point;
+      const box={x:(x-vx)*1440/vw+Number(text.getAttribute('x'))-(anchor==='end'?width:anchor==='middle'?width/2:0)-3,y:(y-vy)*900/vh+Number(text.getAttribute('y'))-17,w:width+6,h:23};
+      for(const other of boxes)assert.equal(w.RedlineLabels.overlaps(box,other),false,`${text.textContent} has a clear label at zoom ${zoom}`);
+      boxes.push(box);
+    }
+    assert.ok(boxes.length>0);
+    $('map').dispatchEvent(new w.WheelEvent('wheel',{clientX:785,clientY:245,deltaY:-200,bubbles:true,cancelable:true}));for(let i=0;i<120;i++)frame();
+  }
+});
+
+test('geographic headings yield to route city labels instead of drawing through them',async t=>{
+  const route=[{id:'atlas-conflict',name:'A very long city label',country:'Test',longitude:16,latitude:51.5}];
+  const {w,$,press}=await setup(t,{realMap:true,route,seed:false});
+  const frames=new Map();let next=10000,time=0;
+  w.requestAnimationFrame=callback=>{frames.set(++next,callback);return next;};w.cancelAnimationFrame=id=>frames.delete(id);
+  press('Escape');await tick();
+  for(const id of ['zoom-in','zoom-out']){$(id).click();for(let i=0;i<120;i++){time+=16;for(const [frame,callback] of [...frames]){frames.delete(frame);callback(time);}}}
+  const europe=[...$('map-labels').children].find(label=>label.textContent==='EUROPE');
+  assert.equal(europe.style.visibility,'hidden','The atlas heading shares the city collision layout');
+  assert.equal($('route-stops').querySelector('text').classList.contains('label-hidden'),false,'The trip keeps priority over decorative names');
+});
+
+test('turning pages keep their measured padding when removed from the live grid',async t=>{
+  const {w,$,tab}=await setup(t);tab(paris.id).click();
+  const native=w.getComputedStyle;
+  w.getComputedStyle=element=>{
+    const result=native(element);
+    if(element.matches('#album-pages > .album-page'))return {getPropertyValue:property=>({'padding-top':'31px','padding-right':'34px','padding-bottom':'39px','padding-left':'34px'}[property]||result.getPropertyValue(property))};
+    return result;
+  };
+  const motion=controlledMotion(w);$('sheet-view').click();await wait(()=>motion.running.size===4);
+  for(const copy of $('album-book').querySelectorAll('.album-view-layer .album-page')){
+    assert.equal(copy.style.paddingTop,'31px');assert.equal(copy.style.paddingRight,'34px');
+    assert.equal(copy.style.paddingBottom,'39px');assert.equal(copy.style.paddingLeft,'34px');
+  }
+  await motion.finish();
+});
+
+test('a failed thumbnail decode never starts a blank page turn or traps the controls',async t=>{
+  const {w,$,tab}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w);
+  w.HTMLImageElement.prototype.decode=function(){return this.closest('.album-view-layer')?Promise.reject(Error('Decode failed')):Promise.resolve();};
+  $('sheet-view').click();await wait(()=>!$('album-book').dataset.viewMotion);
+  assert.equal(motion.running.size,0);assert.equal($('album-sheet').hidden,false);assert.equal($('album-book').inert,false);
 });
