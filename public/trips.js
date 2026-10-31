@@ -81,6 +81,7 @@
   }
   function finishAlbumClose(focus){
     clearTimeout(sheetWarmTimer);
+    window.RedlineAlbumMotion.clearPreloads();
     $('photos-button').setAttribute('aria-expanded','false');
     if($('photo-panel').open)$('photo-panel').close();
     // Native close hides immediately; animation cleanup cannot flash into view.
@@ -505,14 +506,20 @@
     $('gallery-filter').classList.toggle('away',reviewing||!photos.length);$('gallery-filter').inert=reviewing||!photos.length;
     $('photo-panel').classList.toggle('selecting',selecting&&!reviewing);
   }
+  function warmPreviews(){
+    if(!$('photo-panel').open||albumMotion?.phase==='closing'||busy)return;
+    const groups=photoGroups(),index=Math.max(0,groups.findIndex(group=>group.id===activeCity));
+    // Warm the active chapter and the following city while the cover/page is
+    // opening. Only small thumbnails enter this bounded, retained cache.
+    const ordered=[...groups.slice(index),...groups.slice(0,index)];
+    window.RedlineAlbumMotion.preload(ordered.flatMap(group=>group.items.map(photo=>photo.thumbUrl)).filter(Boolean).slice(0,40));
+  }
   function warmSheet(){
     clearTimeout(sheetWarmTimer);
     sheetWarmTimer=setTimeout(()=>{
       if(!$('photo-panel').open||$('photo-viewer').open||mode()!=='album'||albumMotion||viewMotion||turning||busy)return;
       const groups=photoGroups();renderSheet(groups);
-      // Prepare only the first screen of the city the switch will reveal.
-      const group=groups.find(group=>group.id===activeCity)||groups[0];
-      for(const photo of group?.items.slice(0,12)||[]){const image=new Image();image.decoding='async';image.src=photo.thumbUrl||photo.url;image.decode?.().catch(()=>{});}
+      warmPreviews();
     },160);
   }
   function applyView(next){
@@ -539,6 +546,8 @@
   }
   $('album-view').addEventListener('click',()=>setView('album'));
   $('sheet-view').addEventListener('click',()=>setView('sheet'));
+  $('sheet-view').addEventListener('pointerenter',warmPreviews);
+  $('sheet-view').addEventListener('focus',warmPreviews);
   function cityOptions(select,emptyLabel){
     select.replaceChildren(new Option(emptyLabel,''));
     app.getStops().forEach((stop,i)=>select.add(new Option(`${stopNumber(i)} · ${stop.name}${stop.country?', '+stop.country:''}`,stop.id)));
@@ -883,7 +892,7 @@
     // The slider speaks the same page names and numbers as the label.
     const scrub=$('album-scrub');scrub.min='0';scrub.max=String(last);scrub.step=String(step());scrub.value=String(at);scrub.disabled=!last;scrub.setAttribute('aria-valuetext',$('album-position').textContent);
     // Keep the chosen tab when its city shares these pages; otherwise follow the first city on them.
-    if(cities.length&&!cities.some(city=>city.id===activeCity))activeCity=cities[0].id;markTab();
+    if(cities.length&&!cities.some(city=>city.id===activeCity))activeCity=cities[0].id;markTab();warmPreviews();
   }
   function preload(index){for(const i of visiblePages(index))for(const photo of pages[i]?.items||[]){const image=new Image();image.decoding='async';image.src=photo.thumbUrl||photo.url;}}
   // Focus on a page that turned away (a contents entry, say) moves to the current tab, so the keyboard keeps its place.

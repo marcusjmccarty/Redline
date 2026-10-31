@@ -912,12 +912,13 @@ test('switching Album and All Photos animates both directions and handles rapid 
   assert.equal($('album-book').querySelector('.album-view-layer'),null);
 });
 
-test('view changes start immediately even when an image decoder stalls and late results cannot revive a turn',async t=>{
+test('a stalled image has a bounded preparation window and late results cannot revive a turn',async t=>{
   const {w,$,press,tab}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w),decode=w.HTMLImageElement.prototype.decode,releases=[];
   w.HTMLImageElement.prototype.decode=function(){return this.closest('#album-sheet')?new Promise(resolve=>releases.push(resolve)):decode.call(this);};
-  $('sheet-view').click();assert.equal(motion.running.size,4,'The normal page turn begins in the click handler');
+  $('sheet-view').click();assert.equal(motion.running.size,0,'The old spread remains still while the next page prepares');
   assert.ok(releases.length>0);const old=$('album-book').querySelector('.album-view-layer');assert.ok(old.querySelector('.print'));
   assert.equal($('album-sheet').style.visibility,'hidden');
+  await wait(()=>motion.running.size===4);
   await motion.finish();assert.equal(old.isConnected,false);assert.equal($('album-sheet').style.visibility,'');assert.equal($('album-book').inert,false,'A stalled decoder cannot trap the gallery');
   w.HTMLImageElement.prototype.decode=decode;releases.forEach(resolve=>resolve());await tick();assert.equal(motion.running.size,0);assert.equal(old.isConnected,false);
   $('photo-scroll').scrollTop=160;$('album-view').click();
@@ -1014,7 +1015,7 @@ test('a large All Photos turn locates visible rows without measuring or cloning 
   const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===4);
   assert.ok(reads<=16,'Binary row lookup skips offscreen photos; both halves reuse the measurements');
   assert.equal(decodes.size,6,'Only visible photos need decoding');
-  assert.ok([...decodes.values()].every(count=>count===1),'Copies share a decode request');
+  assert.ok([...decodes.values()].every(count=>count===3),'The live image and both actual page faces are decoded before moving');
   assert.equal($('album-book').querySelectorAll('.album-view-layer img').length,12,'Offscreen photographs are absent from moving surfaces');
   await motion.finish();assert.equal(source.querySelectorAll('img').length,80);
 });
@@ -1032,7 +1033,7 @@ test('contact-sheet turns freeze sticky headings and visible prints at their exa
     reads.set(index,(reads.get(index)||0)+1);
     return rect(68+(index%4)*176,180+Math.floor(index/4)*160-scroll.scrollTop,150,150);
   };});
-  const motion=controlledMotion(w);$('album-view').click();assert.equal(motion.running.size,4);
+  const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===4);
   const snapshots=[...$('album-book').querySelectorAll('.album-frozen-sheet')];assert.equal(snapshots.length,2);
   const captured=[...snapshots[0].querySelectorAll('.photo-tile')],indices=captured.map(tile=>all.findIndex(original=>original.dataset.photoId===tile.dataset.photoId));
   assert.deepEqual(indices,Array.from({length:20},(_,index)=>index+136));
@@ -1103,7 +1104,7 @@ test('Album to All Photos uses the exact ordinary page-turn frames, easing, and 
   const {w,$,tab}=await setup(t,{route:[paris],seedStops:Array.from({length:38},()=>paris)});tab(paris.id).click();const motion=controlledMotion(w);
   $('album-next').click();assert.equal(motion.running.size,4);
   const ordinary=JSON.stringify([...motion.running].map(animation=>({frames:animation.frames,options:animation.options})));
-  await motion.finish();$('sheet-view').click();assert.equal(motion.running.size,4);
+  await motion.finish();$('sheet-view').click();await wait(()=>motion.running.size===4);
   assert.equal(JSON.stringify([...motion.running].map(animation=>({frames:animation.frames,options:animation.options}))),ordinary);
   await motion.finish();
 });
@@ -1112,4 +1113,56 @@ test('All Photos prepares while the album rests and reuses that sheet on the fir
   const {$}=await setup(t);await wait(()=>$('photo-gallery').querySelector('.photo-image'));
   assert.equal($('album-sheet').hidden,true);const prepared=$('photo-gallery').firstElementChild;
   $('sheet-view').click();assert.equal($('photo-gallery').firstElementChild,prepared);assert.equal($('album-sheet').hidden,false);
+});
+
+test('the actual turning faces decode before movement even when image bytes are already complete',async t=>{
+  const {w,$,tab}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w),releases=[];
+  Object.defineProperty(w.HTMLImageElement.prototype,'complete',{configurable:true,get:()=>true});
+  w.HTMLImageElement.prototype.decode=function(){return this.closest('.album-view-layer')?new Promise(resolve=>releases.push(resolve)):Promise.resolve();};
+  $('sheet-view').click();assert.equal(motion.running.size,0);assert.ok(releases.length>0,'Complete images still need a decoded bitmap');
+  const layer=$('album-book').querySelector('.album-view-layer');assert.ok(layer);assert.equal($('album-book').inert,true);
+  await tick();assert.equal(motion.running.size,0,'The paper cannot move before its images are ready');
+  releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===4);
+  assert.ok([...layer.querySelectorAll('.photo-image')].every(image=>image.classList.contains('loaded')));
+  await motion.finish();assert.equal($('album-book').inert,false);
+});
+
+test('closing during thumbnail preparation cancels the pending turn without late animation or image changes',async t=>{
+  const {w,$,press}=await setup(t),motion=controlledMotion(w),releases=[];
+  w.HTMLImageElement.prototype.decode=function(){return this.closest('.album-view-layer')?new Promise(resolve=>releases.push(resolve)):Promise.resolve();};
+  $('sheet-view').click();const layer=$('album-book').querySelector('.album-view-layer');assert.equal(motion.running.size,0);
+  press('Escape');await wait(()=>motion.running.size===3);await motion.finish();await wait(()=>!$('photo-panel').open);
+  const before=[...layer.querySelectorAll('.photo-image')].map(image=>image.className);
+  releases.forEach(resolve=>resolve());await tick();await tick();
+  assert.equal(motion.running.size,0);assert.equal(layer.isConnected,false);
+  assert.deepEqual([...layer.querySelectorAll('.photo-image')].map(image=>image.className),before);
+});
+
+test('thumbnail warming retains decoded images, bounds memory, retries failures, and releases on close',async t=>{
+  const {w,$,press}=await setup(t),counts=new Map(),cache=w.RedlineAlbumMotion;
+  cache.clearPreloads();
+  w.HTMLImageElement.prototype.decode=function(){counts.set(this.src,(counts.get(this.src)||0)+1);return Promise.resolve();};
+  const urls=Array.from({length:48},(_,i)=>`https://redline.test/thumb-${i}.jpg`);
+  await cache.preload(urls);await cache.preload(urls);assert.equal([...counts.values()].reduce((a,b)=>a+b,0),48,'Warm images are retained and reused');
+  await cache.preload(['https://redline.test/next.jpg']);await cache.preload([urls[0]]);assert.equal(counts.get(urls[0]),2,'The oldest thumbnail is evicted beyond the cache limit');
+  let attempts=0;w.HTMLImageElement.prototype.decode=()=>++attempts===1?Promise.reject(Error('Temporary decoder failure')):Promise.resolve();
+  await cache.preload(['https://redline.test/retry.jpg']);await cache.preload(['https://redline.test/retry.jpg']);assert.equal(attempts,2);
+  press('Escape');assert.equal($('photo-panel').open,false);await cache.preload([urls[1]]);assert.equal(attempts,3,'Closing releases retained thumbnails');cache.clearPreloads();
+});
+
+test('thumbnail warming limits concurrent decodes so background work cannot flood the page turn',async t=>{
+  const {w}=await setup(t),cache=w.RedlineAlbumMotion,releases=[];cache.clearPreloads();let active=0,peak=0;
+  w.HTMLImageElement.prototype.decode=()=>new Promise(resolve=>{peak=Math.max(peak,++active);releases.push(()=>{active--;resolve();});});
+  const ready=cache.preload(Array.from({length:12},(_,i)=>`https://redline.test/batch-${i}.jpg`));
+  await tick();assert.equal(releases.length,3);
+  for(let batch=0;batch<4;batch++){releases.splice(0).forEach(release=>release());await tick();}
+  await ready;assert.equal(peak,3);cache.clearPreloads();
+});
+
+test('regional atlas washes use direct coastline shapes and preserve the map holes',async t=>{
+  const {$}=await setup(t,{realMap:true});
+  const land=[...$('land').children],clip=$('atlas-land-clip');
+  assert.equal(clip.getAttribute('clip-rule'),'evenodd');assert.equal(clip.children.length,land.length);
+  assert.ok([...clip.children].every((path,i)=>path.tagName.toLowerCase()==='path'&&path.getAttribute('d')===land[i].getAttribute('d')));
+  assert.equal($('land-washes').getAttribute('clip-path'),'url(#atlas-land-clip)');
 });

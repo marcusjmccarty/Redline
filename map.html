@@ -26,9 +26,29 @@
   <main aria-label="Travel map">
     <div class="map-shell" id="map-shell">
       <svg id="map" viewBox="0 0 1440 720" preserveAspectRatio="none" aria-label="World map showing your travel route" role="img" tabindex="-1">
-        <defs><radialGradient id="land-wash" cx="580" cy="200" r="1120" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#f0e4c9"/><stop offset=".55" stop-color="#e2cfaa"/><stop offset="1" stop-color="#cbb18b"/></radialGradient><pattern id="grid" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse"><path d="M120 0H0V120" fill="none" stroke="#80745e" stroke-width="0.6" opacity="0.24"/></pattern></defs>
+        <defs><radialGradient id="atlas-light"><stop stop-color="#f5ead2" stop-opacity=".92"/><stop offset="1" stop-color="#f5ead2" stop-opacity="0"/></radialGradient>
+          <radialGradient id="atlas-ochre"><stop stop-color="#ba9568" stop-opacity=".38"/><stop offset="1" stop-color="#ba9568" stop-opacity="0"/></radialGradient>
+          <radialGradient id="atlas-sage"><stop stop-color="#adb59a" stop-opacity=".29"/><stop offset="1" stop-color="#adb59a" stop-opacity="0"/></radialGradient>
+          <radialGradient id="atlas-rose"><stop stop-color="#c99679" stop-opacity=".23"/><stop offset="1" stop-color="#c99679" stop-opacity="0"/></radialGradient>
+          <radialGradient id="polar-wash" cx=".5" cy=".85" r=".8"><stop stop-color="#f1e6ce"/><stop offset="1" stop-color="#e2d0ae"/></radialGradient>
+          <clipPath id="atlas-land-clip" clipPathUnits="userSpaceOnUse" clip-rule="evenodd"></clipPath><pattern id="grid" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse"><path d="M120 0H0V120" fill="none" stroke="#80745e" stroke-width="0.6" opacity="0.24"/></pattern></defs>
         <g id="graticule" aria-hidden="true"><rect x="-2880" y="-1440" width="7200" height="3600" fill="url(#grid)"/></g>
         <g id="land"></g>
+        <g id="land-washes" clip-path="url(#atlas-land-clip)" aria-hidden="true" pointer-events="none">
+            <ellipse cx="270" cy="160" rx="245" ry="180" fill="url(#atlas-light)"/>
+            <ellipse cx="305" cy="300" rx="160" ry="155" fill="url(#atlas-ochre)"/>
+            <ellipse cx="460" cy="410" rx="150" ry="190" fill="url(#atlas-sage)"/>
+            <ellipse cx="430" cy="565" rx="120" ry="155" fill="url(#atlas-light)"/>
+            <ellipse cx="755" cy="165" rx="165" ry="150" fill="url(#atlas-light)"/>
+            <ellipse cx="790" cy="315" rx="190" ry="135" fill="url(#atlas-ochre)"/>
+            <ellipse cx="865" cy="450" rx="140" ry="165" fill="url(#atlas-light)"/>
+            <ellipse cx="1040" cy="140" rx="260" ry="160" fill="url(#atlas-sage)"/>
+            <ellipse cx="1140" cy="275" rx="190" ry="145" fill="url(#atlas-light)"/>
+            <ellipse cx="1010" cy="380" rx="135" ry="115" fill="url(#atlas-rose)"/>
+            <ellipse cx="1240" cy="545" rx="165" ry="130" fill="url(#atlas-ochre)"/>
+            <ellipse cx="1340" cy="480" rx="100" ry="120" fill="url(#atlas-light)"/>
+            <ellipse cx="720" cy="710" rx="720" ry="95" fill="url(#atlas-light)"/>
+        </g>
         <g id="antarctica" aria-hidden="true"></g>
         <g id="regions" aria-hidden="true"></g>
         <g id="map-labels" aria-hidden="true">
