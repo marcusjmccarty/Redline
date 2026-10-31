@@ -152,7 +152,7 @@ form[aria-busy=true] .add-button { opacity: .45; }
 .log-route-heading .text-button { padding: 8px 0; }
 .log-route-heading > span { flex: 1; }
 .log-route-heading { gap: 16px; }
-.route-log #stop-list { display: block; max-height: min(64svh, 640px); margin: 0; border-top: 1px solid #b4a58b55; scrollbar-width: thin; scrollbar-color: #c2ab84 transparent; }
+.route-log #stop-list { display: block; max-height: min(calc(46svh + 54px), 484px); margin: 0; border-top: 1px solid #b4a58b55; scrollbar-width: thin; scrollbar-color: #c2ab84 transparent; }
 .route-log #stop-list li { min-height: 42px; border-bottom: 1px solid #b4a58b55; border-radius: 0; font: 17px Georgia, serif; }
 .route-log #stop-list li::after { display: none; }
 .route-log .stop-grip { flex: 1; min-width: 0; min-height: 41px; text-align: left; white-space: normal; }

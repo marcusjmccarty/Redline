@@ -26,9 +26,11 @@
     return {el,restore:()=>scrolls.forEach(([node,top,left])=>{node.scrollTop=top;node.scrollLeft=left;})};
   }
   function create({book,source,cover,two,closed='',opening=false}){
-    const scene=make('album-cover-scene'),leaf=make('album-cover-leaf'),front=make('album-cover-front'),back=make('album-cover-back');
+    const scene=make('album-cover-scene'),hinge=make('album-cover-hinge'),leaf=make('album-cover-leaf'),front=make('album-cover-front'),back=make('album-cover-back');
     const tabs=document.getElementById('gallery-filter'),tabParent=tabs.parentElement,tabNext=tabs.nextSibling;
-    const width=source.clientWidth||source.getBoundingClientRect().width||book.clientWidth;
+    const tabHeight=tabs.getBoundingClientRect().height,tabMaxHeight=tabs.style.maxHeight,tabScroll=[tabs.scrollTop,tabs.scrollLeft];
+    book.dataset.coverPreparing='true';
+    const width=source.getBoundingClientRect().width||source.clientWidth||book.clientWidth;
     const size=book.getBoundingClientRect(),savedSize=[book.style.width,book.style.height,book.style.flex];
     // An orientation change is applied after the cover settles, never halfway
     // through a frozen spread. Only transforms run during the fold.
@@ -47,39 +49,52 @@
       scene.append(half('album-cover-still',two));
       if(two)back.append(half('album-cover-crop'));
     }
-    scene.append(leaf,tabs);book.append(scene);book.dataset.coverMotion='true';
+    // The scene is a flat stacking context. Only the hinge is 3D, so a sticky
+    // header or tab can never intersect a turning face at the same depth.
+    hinge.append(leaf);scene.append(hinge);scene.style.visibility='hidden';book.append(scene);
     copies.forEach(copy=>copy.restore());
     const angle=closed==='front'?0:two||closed?-180:-105;
     const shift=two&&!closed?'-25%':'0%';
     const closedFrames={leaf:'rotateY(0deg)',scene:`translateX(${shift})`};
     const openFrames={leaf:`rotateY(${angle}deg)`,scene:'translateX(0%)'};
-    let animations=[],direction=opening?'opening':'closing',disposed=false;
+    let animations=[],direction=opening?'opening':'closing',disposed=false,started=false;
     const pose=state=>{leaf.style.transform=state.leaf;scene.style.transform=state.scene;};
     pose(opening?closedFrames:openFrames);
+    const ready=Promise.all([...scene.querySelectorAll('img')].map(img=>{img.loading='eager';return img.decode?.().catch(()=>{});}))
+      .then(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
+      .then(()=>{
+        if(disposed)return;
+        if(tabHeight)tabs.style.maxHeight=`${tabHeight}px`;
+        scene.append(tabs);[tabs.scrollTop,tabs.scrollLeft]=tabScroll;book.dataset.coverMotion='true';
+        book.querySelector('.album-loading-cover')?.remove();delete book.dataset.preparing;
+        scene.style.visibility='';
+      });
     function run(from,to,duration){
       const timing={duration,easing:'cubic-bezier(.4,0,.2,1)',fill:'both'};
       animations=[leaf.animate([{transform:from.leaf},{transform:to.leaf}],timing),scene.animate([{transform:from.scene},{transform:to.scene}],timing)];
       return done(animations);
     }
     return {
-      open(){direction='opening';return run(closedFrames,openFrames,860);},
+      async open(){direction='opening';await ready;if(disposed||direction!=='opening')return;started=true;return run(closedFrames,openFrames,860);},
       close(){
-        if(direction==='opening'&&animations.length){
+        if(direction==='opening'&&started){
           direction='closing';animations.forEach(animation=>animation.reverse());return done(animations);
         }
-        direction='closing';return closed==='front'?Promise.resolve():run(openFrames,closedFrames,660);
+        const alreadyClosed=opening&&!started||closed==='front';direction='closing';
+        return ready.then(()=>{if(disposed||alreadyClosed)return;return run(openFrames,closedFrames,660);});
       },
       async depart(onDepart){
         // Let the complete front cover register before it leaves the map.
-        const hold=scene.animate([{opacity:1},{opacity:1}],{duration:130,fill:'both'});animations.push(hold);await done([hold]);
+        const hold=scene.animate([{opacity:1},{opacity:1}],{duration:40,fill:'both'});animations.push(hold);await done([hold]);
         if(disposed)return;onDepart();
-        const fade=scene.animate([{opacity:1,translate:'0 0'},{opacity:0,translate:'0 9px'}],{duration:190,easing:'ease-in',fill:'forwards'});
+        const fade=scene.animate([{opacity:1,translate:'0 0'},{opacity:0,translate:'0 6px'}],{duration:120,easing:'ease-out',fill:'forwards'});
         animations.push(fade);await done([fade]);
       },
       dispose(){
-        disposed=true;animations.forEach(animation=>animation.cancel());
+        disposed=true;
         tabParent.insertBefore(tabs,tabNext?.parentElement===tabParent?tabNext:null);
-        scene.remove();delete book.dataset.coverMotion;
+        tabs.style.maxHeight=tabMaxHeight;[tabs.scrollTop,tabs.scrollLeft]=tabScroll;
+        scene.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.coverMotion;delete book.dataset.coverPreparing;
         [book.style.width,book.style.height,book.style.flex]=savedSize;
       }
     };

@@ -7,18 +7,20 @@
   function wakeArrows(pointer='mouse'){
     const frame=$('full-photo').parentElement;clearTimeout(arrowTimer);frame.classList.remove('arrows-idle');
     if(pointer==='touch')return;
-    arrowTimer=setTimeout(()=>{if($('photo-viewer').open)frame.classList.add('arrows-idle');},450);
+    arrowTimer=setTimeout(()=>{if($('photo-viewer').open)frame.classList.add('arrows-idle');},700);
   }
   const empty=()=>Object.fromEntries(fields.map(key=>[key,'']));
   const motion=el=>typeof el?.animate==='function'&&'finished' in (window.Animation?.prototype||{})&&!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const settle=animation=>animation?.finished?.catch(()=>{});
   const decode=url=>{const image=new Image();image.decoding='async';image.src=url;return image.decode?image.decode().catch(()=>{}):Promise.resolve();};
-  const dirty=state=>JSON.stringify(state.value)!==state.saved;
-  function status(){if(!active)return;$('postcard-save-status').textContent=active.promise?'Saving…':'';$('postcard-saved').textContent=active.promise?'Saving…':dirty(active)?'':active.saved!==JSON.stringify(empty())?'Saved':'';$('save-postcard').disabled=active.preview||!!active.promise;$('save-postcard').textContent=active.promise?'Saving…':'Save';}
-  async function save(state){
+  const cardDirty=state=>JSON.stringify(state.value)!==state.saved;
+  const captionDirty=state=>state.caption.trim()!==state.savedCaption;
+  const dirty=state=>cardDirty(state)||captionDirty(state);
+  function status(){if(!active)return;$('postcard-save-status').textContent=active.promise?'Saving…':'';$('postcard-saved').textContent=active.promise?'Saving…':cardDirty(active)?'':active.saved!==JSON.stringify(empty())?'Saved':'';$('save-postcard').disabled=active.preview||!!active.promise;$('save-postcard').textContent=active.promise?'Saving…':'Save';}
+  async function savePostcard(state){
     if(!state||state.preview)return;
-    if(state.promise){await state.promise;return save(state);}
-    if(!dirty(state))return;
+    if(state.promise){await state.promise;return savePostcard(state);}
+    if(!cardDirty(state))return;
     const snapshot=JSON.stringify(state.value);
     state.promise=(async()=>{
       const result=await request(`/photos/${state.photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:JSON.parse(snapshot),revision:state.revision})});
@@ -27,8 +29,48 @@
     try{await state.promise;if(active===state)$('postcard-error').textContent='';}
     catch(error){if(active===state)$('postcard-error').textContent=error.message;throw error;}
     finally{state.promise=null;status();}
-    if(dirty(state))return save(state);
+    if(cardDirty(state))return savePostcard(state);
   }
+  function captionStatus(){
+    if(!active)return;
+    $('save-caption').disabled=!!active.captionPromise;
+    $('save-caption').textContent=active.captionPromise?'Saving…':'Save';
+  }
+  function captionEditor(open){
+    $('caption-form').hidden=!open;$('photo-caption').hidden=open;
+    $('edit-caption').setAttribute('aria-expanded',String(open));
+    $('postcard-front').classList.toggle('caption-editing',open);
+    if(open){$('caption-input').value=active.caption;$('caption-input').focus();captionStatus();}
+    else $('photo-caption').textContent=active.photo.caption||active.photo.city?.name||'';
+  }
+  async function saveCaption(state){
+    if(!state||state.preview)return;
+    if(state.captionPromise){await state.captionPromise;return saveCaption(state);}
+    if(!captionDirty(state))return;
+    const text=state.caption.trim();
+    state.captionPromise=(async()=>{
+      const result=await request(`/photos/${state.photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption:text,revision:state.captionRevision})});
+      state.savedCaption=result.caption;state.captionRevision=result.revision;
+      state.photo.caption=result.caption;state.photo.captionRevision=result.revision;
+      window.dispatchEvent(new CustomEvent('redline:captionchange',{detail:{id:state.photo.id,caption:result.caption,revision:result.revision}}));
+    })();captionStatus();
+    try{await state.captionPromise;if(active===state)$('postcard-error').textContent='';}
+    catch(error){if(active===state)$('postcard-error').textContent=error.message;throw error;}
+    finally{state.captionPromise=null;captionStatus();}
+    if(captionDirty(state))return saveCaption(state);
+  }
+  async function save(state){await savePostcard(state);await saveCaption(state);}
+  async function finishCaption(){
+    const state=active;if(!state)return;clearTimeout(timer);
+    try{await saveCaption(state);if(active===state){captionEditor(false);$('edit-caption').focus({preventScroll:true});$('postcard-save-status').textContent='Caption saved.';}}catch{}
+  }
+  $('edit-caption').addEventListener('click',()=>{if($('caption-form').hidden)captionEditor(true);else finishCaption();});
+  $('caption-form').addEventListener('submit',event=>{event.preventDefault();finishCaption();});
+  $('caption-input').addEventListener('input',()=>{
+    if(!active)return;active.caption=$('caption-input').value;captionStatus();clearTimeout(timer);
+    const state=active;timer=setTimeout(()=>saveCaption(state).catch(()=>{}),600);
+  });
+  $('caption-input').addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();finishCaption();}});
   function flip(){
     if(active?.preview)return;
     const back=!$('photo-viewer').classList.contains('flipped'),viewer=$('photo-viewer');wakeArrows();
@@ -120,11 +162,11 @@
     shareGeneration++;shareFile=null;clearTimeout(shareTimer);$('share-postcard').disabled=true;
     request=api;clearTimeout(timer);
     const previous=api?states.get(photo.id):null;
-    if(previous&&(dirty(previous)||previous.promise))active=previous;
-    else {const value={...empty(),...photo.postcard};active={photo,value,saved:JSON.stringify(value),revision:photo.postcardRevision||1,promise:null,preview:!api};if(api)states.set(photo.id,active);}
+    if(previous&&(dirty(previous)||previous.promise||previous.captionPromise))active=previous;
+    else {const value={...empty(),...photo.postcard};active={photo,value,saved:JSON.stringify(value),revision:photo.postcardRevision||1,promise:null,preview:!api,caption:photo.caption||'',savedCaption:photo.caption||'',captionRevision:photo.captionRevision||1,captionPromise:null};if(api)states.set(photo.id,active);}
     const place=photo.city?.name||'';
     $('postcard-error').textContent='';$('full-photo').src=photo.url;$('full-photo').alt=place?`Photo in ${place}`:'Trip photo';
-    $('photo-caption').textContent=place;$('postcard-place').textContent=place;
+    captionEditor(false);$('edit-caption').hidden=active.preview;$('postcard-place').textContent=place;
     for(const key of fields)$(`postcard-${key}`).value=active.value[key];
     // A new photo starts face up, without playing the previous postcard's reverse flip.
     $('photo-viewer').classList.add('changing-photo');

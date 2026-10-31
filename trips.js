@@ -319,9 +319,9 @@
   // ---------- Photos ----------
   function coverScene(opening){
     const book=$('album-book'),displayMode=mode(),source=displayMode==='album'?$('album-pages'):$('album-sheet');
-    const closed=book.dataset.preparing?'front':displayMode==='album'?(book.classList.contains('closed-front')?'front':book.classList.contains('closed-back')?'back':''):'';
+    const closed=book.dataset.preparing&&!opening?'front':displayMode==='album'?(book.classList.contains('closed-front')?'front':book.classList.contains('closed-back')?'back':''):'';
     const scene=window.RedlineAlbumMotion.create({book,source,cover:pageElement({type:'cover'},0,'right'),two:twoPage(),closed,opening});
-    book.querySelector('.album-loading-cover')?.remove();delete book.dataset.preparing;return scene;
+    return scene;
   }
   async function showPhotos(city){
     if(busy||albumMotion?.phase==='closing')return;
@@ -351,7 +351,7 @@
         await Promise.all(images.map(async img=>{try{img.loading='eager';await img.decode();img.closest('.photo-image')?.classList.add('loaded');}catch{}}));
         await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
         if(version!==photoPanelRequest||albumMotion!==token)return;
-        delete book.dataset.preparing;token.scene=coverScene(true);
+        token.scene=coverScene(true);
         await token.scene.open();
         if(version!==photoPanelRequest||albumMotion!==token||token.phase!=='opening')return;
         token.scene.dispose();
@@ -594,7 +594,17 @@
 
   // Saved photos: grouped by city in route order.
   const hasPostcard=photo=>Object.values(photo.postcard||{}).some(value=>typeof value==='string'&&value.trim());
-  const postcardLine=photo=>(photo.postcard?.message||'').trim().split('\n')[0].slice(0,90);
+  const photoCaption=photo=>(photo.caption||'').trim();
+  window.addEventListener('redline:captionchange',event=>{
+    const {id,caption,revision}=event.detail,photo=photos.find(photo=>photo.id===id);if(!photo)return;
+    photo.caption=caption;photo.captionRevision=revision;
+    for(const figure of $('album-pages').querySelectorAll('.print')){
+      if(figure.dataset.photoId!==id)continue;
+      let label=figure.querySelector('figcaption');
+      if(!caption){label?.remove();continue;}
+      if(!label){label=document.createElement('figcaption');figure.append(label);}label.textContent=caption;
+    }
+  });
   function viewerActions(){
     return {
       cities:()=>app.getStops(),
@@ -626,12 +636,13 @@
   // City dividers stick out of the album's edge, like the tabs in a real one.
   // A focused tab keeps keyboard focus when the tabs are rebuilt, as they are after every turn.
   function renderTabs(groups){
-    const nav=$('gallery-filter'),focused=nav.contains(document.activeElement)?document.activeElement.dataset.filter:null;
+    const chapters=albumPages(),nav=$('gallery-filter'),focused=nav.contains(document.activeElement)?document.activeElement.dataset.filter:null;
     nav.replaceChildren(...groups.map((group,i)=>{
       const tab=document.createElement('button');tab.type='button';tab.className='album-tab';tab.dataset.filter=group.id;tab.style.setProperty('--tab',String(i%6));tab.disabled=busy;
-      if(group.stop!==undefined){const number=document.createElement('span');number.className='chip-stop';number.textContent=stopNumber(group.stop);tab.append(number);}
+      const page=folioOf(chapters.findIndex(page=>page.type==='city'&&page.first&&page.group.id===group.id));
+      const number=document.createElement('span');number.className='chip-stop';number.textContent=String(page).padStart(2,'0');number.title=`Page ${page}`;tab.append(number);
       const name=document.createElement('span'),count=document.createElement('span');name.className='tab-name';name.textContent=group.name;count.className='chip-count';count.textContent=String(group.items.length);tab.append(name,count);
-      tab.title=`${group.name} · ${photoLabel(group.items.length)}`;tab.addEventListener('click',()=>goToCity(group.id));
+      tab.title=`${group.name} · page ${page} · ${photoLabel(group.items.length)}`;tab.setAttribute('aria-label',tab.title);tab.addEventListener('click',()=>goToCity(group.id));
       return tab;
     }));
     markTab();if(focused)[...nav.children].find(tab=>tab.dataset.filter===focused)?.focus({preventScroll:true});
@@ -680,7 +691,7 @@
     const button=previewButton(photo,(event,origin)=>{if(Date.now()<suppressClick)return;openPhoto(photo,group,origin);},{saved:true});button.classList.add('print-photo');
     button.setAttribute('aria-label',`Open photo ${position+1} of ${group.items.length} in ${group.name}`);
     frame.append(button,corners);figure.append(frame);
-    const note=postcardLine(photo);
+    const note=photoCaption(photo);
     if(note){const caption=document.createElement('figcaption');caption.textContent=note;figure.append(caption);}
     return figure;
   }

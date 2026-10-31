@@ -70,12 +70,16 @@
     }
     return result;
   }
+  function caption(value='') {
+    if(typeof value!=='string'||value.length>180)fail('Keep captions to 180 characters.');
+    return value.trim();
+  }
   const dimension = value => { const n=Number(value); return Number.isInteger(n)&&n>0&&n<=20000?n:null; };
   function photoDto(record) {
     if (!urls.has(record.id)) urls.set(record.id,URL.createObjectURL(record.blob));
     if (record.thumb && !thumbs.has(record.id)) thumbs.set(record.id,URL.createObjectURL(record.thumb));
     const {blob,thumb,tripId,...photo}=record;
-    return {...photo,url:urls.get(record.id),thumbUrl:thumbs.get(record.id)||null};
+    return {...photo,caption:record.caption||'',captionRevision:record.captionRevision||1,url:urls.get(record.id),thumbUrl:thumbs.get(record.id)||null};
   }
   function coverUrl(record) {
     if (record.thumb) { if (!thumbs.has(record.id)) thumbs.set(record.id,URL.createObjectURL(record.thumb)); return thumbs.get(record.id); }
@@ -217,6 +221,16 @@
       if (thumbs.has(record.id)) { URL.revokeObjectURL(thumbs.get(record.id)); thumbs.delete(record.id); }
       return {photo:photoDto(record)};
     }
+    if (parts[0]==='photos' && parts.length===3 && parts[2]==='caption' && method==='PUT') {
+      const data=caption(body?.caption);
+      return transaction(['photos'],'readwrite',async ({photos})=>{
+        const photo=idValid(parts[1])?await request(photos.get(parts[1])):null;
+        if(!photo)fail('Photo not found.',404);
+        if(!Number.isInteger(body.revision)||body.revision!==(photo.captionRevision||1))fail('This caption changed in another tab. Reopen the photo before saving.',409);
+        photo.caption=data;photo.captionRevision=(photo.captionRevision||1)+1;
+        await request(photos.put(photo));return {caption:data,revision:photo.captionRevision};
+      });
+    }
     if (parts[0]==='photos' && parts.length===3 && parts[2]==='postcard' && method==='PUT') {
       const data=postcard(body?.postcard);
       return transaction(['photos'],'readwrite',async ({photos})=>{
@@ -263,7 +277,7 @@
         if (snapshot && snapshot.id!==p.stopId) fail('The backup contains an invalid photo location.');
         const blob=await cleanPhoto(entry.blob);
         const width=dimension(p.width),height=dimension(p.height);
-        photos.push({id:crypto.randomUUID(),tripId:trip.id,stopId:p.stopId||null,city:snapshot,blob,...(width&&height?{width,height}:{}),createdAt:timestamp(p.createdAt),postcard:postcard(p.postcard),postcardRevision:1});
+        photos.push({id:crypto.randomUUID(),tripId:trip.id,stopId:p.stopId||null,city:snapshot,blob,...(width&&height?{width,height}:{}),createdAt:timestamp(p.createdAt),postcard:postcard(p.postcard),postcardRevision:1,caption:caption(p.caption),captionRevision:1});
       }
     }
     if (!trips.length) fail('This backup has no trips.');
