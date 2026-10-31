@@ -35,7 +35,7 @@
 #info-dialog::backdrop { background-color: #211c1670; }
 .album { transition: none; }
 .album::backdrop { background-color: #1d1712c4; transition: background-color .18s ease; }
-.album[data-departing=true]::backdrop { background-color: #1d171200; transition-duration: .1s; }
+.album[data-departing=true]::backdrop { background-color: #1d171200; transition-duration: .18s; transition-delay: var(--album-exit-delay, 0ms); }
 .album[data-motion=closing] :is(.album-top, .album-foot, #photo-message) { opacity: 0; pointer-events: none; transition: opacity .12s ease; }
 .album:not([open]) { display: none; }
 .album:not([open])::backdrop, #info-dialog:not([open])::backdrop { background-color: #211c1600; }

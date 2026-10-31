@@ -140,8 +140,8 @@ test('a spread names both its cities, and turns keep tab focus and finish when p
   press('End');const closing=[...running];press('End');assert.deepEqual([...running],closing);
   await finish();assert.equal(pages(),'left:back right:void');
   $('sheet-view').click();assert.equal($('album-foot').inert,true,'Hidden page controls leave the tab order');
-  await finish();await finish();
-  $('album-view').click();await finish();await finish();assert.equal($('album-foot').inert,false);
+  await wait(()=>running.size===4);await finish();
+  $('album-view').click();await wait(()=>running.size===4);await finish();assert.equal($('album-foot').inert,false);
 });
 
 test('the divider tabs are coloured book cloth with readable labels',()=>{
@@ -607,7 +607,10 @@ function controlledMotion(w){
     get finished(){return this.done;}
   }
   w.Animation=Motion;w.Element.prototype.animate=function(frames,options){const animation=new Motion(this,options);animation.frames=frames;return animation;};
-  return {running,finish:async()=>{[...running].forEach(item=>item.finish());await tick();}};
+  return {running,finish:async()=>{
+    if(!running.size&&w.document.getElementById('album-book').dataset.viewMotion)await wait(()=>running.size||!w.document.getElementById('album-book').dataset.viewMotion);
+    [...running].forEach(item=>item.finish());await tick();
+  }};
 }
 
 test('album and All Photos slide in, keep their spread stable, and slide away after closing',async t=>{
@@ -617,30 +620,28 @@ test('album and All Photos slide in, keep their spread stable, and slide away af
     $(view+'-view').click();await motion.finish();await motion.finish();if(view==='sheet')$('photo-scroll').scrollTop=180;
     const paper=$('photo-gallery').firstElementChild,spread=$('album-pages').firstElementChild;
     press('Escape');
-    await wait(()=>motion.running.size===2);
+    await wait(()=>motion.running.size===3);
     assert.equal($('photo-panel').dataset.motion,'closing');assert.equal($('album-book').dataset.mode,view);
     const scene=$('album-book').querySelector('.album-cover-scene');
     assert.ok(scene.querySelector('.album-cover-front .album-cover'),'The entire front cover folds over this view');
     assert.equal($('gallery-filter').parentElement,scene,'Tabs follow the cover geometrically');
     assert.equal(scene.querySelectorAll('[id]').length,1,'Only the original tab navigation has an ID');
     assert.equal($('photo-gallery').firstElementChild,paper);assert.equal($('album-pages').firstElementChild,spread);
-    assert.equal(motion.running.size,2);assert.equal([...motion.running][0].options.duration,280);
-    press('Escape');await motion.finish();
-    assert.equal($('photo-panel').open,true,'The front cover stays visible after the fold');
-    assert.equal([...motion.running][0].options.duration,20,'A short beat separates folding from departure');
-    assert.equal($('photo-panel').dataset.departing,undefined);
-    await motion.finish();assert.equal($('photo-panel').dataset.departing,'true');
-    assert.equal([...motion.running][0].options.duration,100);
-    assert.match([...motion.running][0].frames.at(-1).transform,/translateY\([1-9]/);
-    assert.ok([...motion.running][0].element.classList.contains('album-arrival'));
+    const closing=[...motion.running];assert.ok(closing.every(animation=>animation.options.duration===1400&&animation.options.direction==='reverse'));
+    const reversedFrames=closing.map(animation=>JSON.stringify(animation.frames));
+    assert.equal($('photo-panel').dataset.departing,'true');
+    assert.equal($('photo-panel').style.getPropertyValue('--album-exit-delay'),'1220ms');
+    press('Escape');assert.deepEqual([...motion.running],closing,'A second close does not restart the reverse');
     await motion.finish();assert.equal($('photo-panel').open,false);
     assert.equal($('album-pages').children.length,0);assert.equal($('album-book').querySelector('.album-cover-scene'),null);
     assert.equal($('gallery-filter').parentElement,$('album-book'));
     $('photos-button').click();await wait(()=>motion.running.size===3);
     assert.equal($('photo-panel').dataset.motion,'opening');assert.equal($('album-book').dataset.mode,view);
     const entrance=[...motion.running].find(animation=>animation.element.classList.contains('album-arrival'));
-    assert.equal(entrance.options.duration,1000);assert.equal(entrance.frames.length,2,'The slide uses its full duration, without an early arrival and idle tail');
-    assert.equal([...motion.running].find(animation=>animation.element.classList.contains('album-cover-leaf')).options.duration,1400);
+    assert.equal(entrance.options.duration,1400);
+    assert.equal(entrance.frames[1].offset,1000/1400,'The slide occupies the first second of the common timeline');
+    assert.deepEqual([...motion.running].map(animation=>JSON.stringify(animation.frames)),reversedFrames,'Close reuses the exact opening frames and easing');
+    assert.ok([...motion.running].every(animation=>animation.options.direction==='normal'));
     assert.match(entrance.frames[0].transform,/translateY\([1-9]/);assert.equal(entrance.frames.at(-1).transform,'translateY(0px)');
     const arrived=$('album-pages').firstElementChild;
     press('ArrowRight');assert.equal(motion.running.size,3);
@@ -659,7 +660,7 @@ test('closing halfway through opening reverses that same cover and preserves the
   press('Escape');assert.equal($('photo-panel').dataset.motion,'closing');
   assert.equal($('album-book').querySelector('.album-cover-scene'),scene);
   assert.ok(animations.every(animation=>animation.reversed),'Reverse in place, without replacing any page');
-  assert.ok(animations.every(animation=>animation.playbackRate===-3.5),'An interrupted entrance closes quickly too');
+  assert.ok(animations.every(animation=>animation.playbackRate===undefined),'Reversing preserves the opening speed');
   await motion.finish();await motion.finish();await motion.finish();assert.equal($('photo-panel').open,false);
   $('photos-button').click();await wait(()=>motion.running.size===3);await motion.finish();assert.equal(pages(),bookmark);
   w.matchMedia=()=>({matches:true});press('Escape');assert.equal($('photo-panel').open,false);
@@ -686,7 +687,7 @@ test('single-page opening and All Photos use the same cover lifecycle and defer 
   w.dispatchEvent(new w.Event('redline:routechange'));w.dispatchEvent(new w.Event('resize'));await new Promise(resolve=>setTimeout(resolve,25));
   assert.equal(scene.querySelector('.album-snapshot'),copy,'Background updates cannot replace moving surfaces');
   await motion.finish();assert.equal($('album-pages').classList.contains('single'),true);
-  $('sheet-view').click();await motion.finish();await motion.finish();$('photo-scroll').scrollTop=240;press('Escape');await wait(()=>motion.running.size===2);
+  $('sheet-view').click();await motion.finish();await motion.finish();$('photo-scroll').scrollTop=240;press('Escape');await wait(()=>motion.running.size===3);
   const scroll=$('album-book').querySelector('.album-cover-scene .photo-scroll');assert.equal(scroll.scrollTop,240,'Closing keeps the visible scroll position');
   await motion.finish();await motion.finish();await motion.finish();assert.equal($('photo-panel').open,false);
 });
@@ -920,7 +921,7 @@ test('view changes retain the old spread until images decode and cleanly cancel 
   assert.equal($('album-sheet').style.visibility,'hidden');await motion.finish();assert.equal(old.isConnected,false);assert.equal($('album-sheet').style.visibility,'');
   $('photo-scroll').scrollTop=160;$('album-view').click();
   assert.equal($('album-book').querySelector('.album-copy-photo-scroll').scrollTop,160,'Outgoing prints retain their exact scroll position');
-  press('Escape');await wait(()=>motion.running.size===2);await motion.finish();await motion.finish();await motion.finish();
+  press('Escape');await wait(()=>motion.running.size===3);await motion.finish();await motion.finish();await motion.finish();
   assert.equal($('photo-panel').open,false);assert.equal($('album-book').querySelector('.album-view-layer'),null);assert.equal($('album-pages').style.visibility,'');
 });
 

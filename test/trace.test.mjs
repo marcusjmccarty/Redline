@@ -41,6 +41,16 @@ test('projected line reveal retains the same full arc and excludes date-line jum
   assert.ok(!measure(route([0,0],[0,0])).pathAt(.5).includes('NaN'));
 });
 
+test('label obstacles use only revealed route segments and never bridge the date line',()=>{
+  const geometry=measure('M0,0L10,0M100,100L110,100');
+  assert.deepEqual(geometry.segmentsAt(0),[]);
+  assert.deepEqual(geometry.segmentsAt(.25),[[[0,0],[5,0]]]);
+  assert.deepEqual(geometry.segmentsAt(.75),[[[0,0],[10,0]],[[100,100],[105,100]]]);
+  assert.deepEqual(geometry.segmentsAt(1),[[[0,0],[10,0]],[[100,100],[110,100]]]);
+  const crossing=measure(route([179,65],[-179,65]));
+  assert.ok(crossing.segmentsAt(1).every(([a,b])=>Math.hypot(b[0]-a[0],b[1]-a[1])<20));
+});
+
 test('the restored map matches the original geography and keeps the entire world in frame',()=>{
   assert.equal(createHash('sha256').update(readFileSync('public/world.js')).digest('hex'),'0c173428c68e58e063b2ec2b0706199fe8b71fbae91804bfcc00f3dc0915c9e0');
   assert.equal(world.WORLD_PATHS.length,176);assert.equal(world.REGION_PATHS.length,581);

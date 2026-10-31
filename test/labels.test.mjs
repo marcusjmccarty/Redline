@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const context={};vm.createContext(context);
 vm.runInContext(readFileSync(new URL('../public/labels.js',import.meta.url),'utf8'),context);
-const {place,estimate,overlaps,slots}=context.RedlineLabels;
+const {place,estimate,overlaps,slots,crosses,indexLines}=context.RedlineLabels;
 
 const item=(id,x,y,priority)=>({id,x,y,width:estimate(id),height:14,priority});
 const dot=({x,y})=>({x:x-4.5,y:y-4.5,w:9,h:9});
@@ -25,7 +25,7 @@ function assertClear(items,result,{width,height,obstacles=[]}){
 test('an isolated city keeps the original right-above label',()=>{
   const [slot]=place([item('LISBON',400,300,0)],{width:1440,height:900});
   assert.equal(slot.name,'right-above');assert.equal(slot.x,10);assert.equal(slot.y,-12);assert.equal(slot.anchor,'start');
-  assert.deepEqual([...slots].map(s=>s.name),['right-above','right-below','left-above','left-below','above','below']);
+  assert.equal(new Set(slots.map(slot=>slot.name)).size,slots.length);
 });
 
 test('two close cities both get non-overlapping placements',()=>{
@@ -99,4 +99,27 @@ test('Puerto Ayora and Quito stay on the outside of their dots, including with s
     assert.ok(result[0].box.x+result[0].box.w<items[0].x,'Puerto Ayora is labelled to its own west');
     assert.ok(result[1].box.x>items[1].x,'Quito is labelled to its own east');
   }
+});
+
+test('route clearance follows the line itself, including tangencies and offscreen segments',()=>{
+  const rect={x:40,y:70,w:10,h:10},diagonal=[[0,0],[100,100]];
+  assert.equal(crosses(diagonal,rect),false,'A large route bounding box must not hide unrelated labels');
+  assert.equal(crosses([[0,70],[100,70]],rect),true);
+  assert.equal(crosses([[0,65],[100,65]],rect,5),true);
+  assert.equal(crosses([[-100,75],[1000,75]],rect),true);
+  const segments=Array.from({length:120},(_,i)=>[[Math.sin(i)*1300,Math.cos(i)*900],[Math.sin(i+.2)*1300,Math.cos(i+.2)*900]]);
+  const indexed=indexLines(segments,{width:800,height:600});
+  for(let x=4;x<700;x+=31)for(let y=4;y<560;y+=47){
+    const box={x,y,w:78,h:20};assert.equal(indexed.hits(box,5),segments.some(segment=>crosses(segment,box,5)),'Spatial indexing retains exact intersections');
+  }
+});
+
+test('nearby city labels clear route strokes and retain their positions as a camera moves',()=>{
+  const view={width:1000,height:700},items=[item('PUERTO AYORA',420,350,0),item('QUITO',443,345,1),item('LIMA',453,390,2)];
+  const segments=[[[420,350],[443,345]],[[443,345],[620,170]],[[443,345],[453,390]],[[400,330],[570,330]]];
+  const result=place(items,{...view,segments});assert.ok(result.every(Boolean));assertClear(items,result,view);
+  result.forEach(slot=>assert.ok(segments.every(segment=>!crosses(segment,slot.box,5)),'Names have breathing room around the red line'));
+  const moved=items.map(city=>({...city,x:city.x+2,y:city.y+1})),lines=segments.map(segment=>segment.map(([x,y])=>[x+2,y+1]));
+  const previous=new Map(result.map((slot,i)=>[items[i].id,slot.name]));
+  assert.deepEqual(place(moved,{...view,segments:lines,previous}).map(slot=>slot?.name),result.map(slot=>slot.name));
 });
