@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#dcd0b6">
+  <meta name="theme-color" content="#eadfc8">
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
   <link rel="stylesheet" href="style.css">
@@ -26,7 +26,7 @@
   <main aria-label="Travel map">
     <div class="map-shell" id="map-shell">
       <svg id="map" viewBox="0 0 1440 720" preserveAspectRatio="none" aria-label="World map showing your travel route" role="img" tabindex="-1">
-        <defs><linearGradient id="land-wash" x1="0" y1="0" x2="0" y2="720" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#d7cab0"/><stop offset=".52" stop-color="#cbbc9f"/><stop offset="1" stop-color="#bca98b"/></linearGradient><pattern id="grid" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse"><path d="M120 0H0V120" fill="none" stroke="#80745e" stroke-width="0.6" opacity="0.24"/></pattern></defs>
+        <defs><radialGradient id="land-wash" cx="580" cy="200" r="1120" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#f0e4c9"/><stop offset=".55" stop-color="#e2cfaa"/><stop offset="1" stop-color="#cbb18b"/></radialGradient><pattern id="grid" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse"><path d="M120 0H0V120" fill="none" stroke="#80745e" stroke-width="0.6" opacity="0.24"/></pattern></defs>
         <g id="graticule" aria-hidden="true"><rect x="-2880" y="-1440" width="7200" height="3600" fill="url(#grid)"/></g>
         <g id="land"></g>
         <g id="antarctica" aria-hidden="true"></g>

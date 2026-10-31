@@ -44,6 +44,77 @@
       }catch{}
     }));
   }
+  function inertCopy(node,deep=true){
+    const copy=node.cloneNode(false);
+    if(node.nodeType!==1)return copy;
+    if(copy.id){copy.classList.add(`album-copy-${copy.id}`);copy.removeAttribute('id');}
+    copy.removeAttribute('autofocus');
+    if(deep)for(const child of node.childNodes)copy.append(inertCopy(child));
+    return copy;
+  }
+  // Freeze only the visible contact sheet. A moving page must not carry a
+  // scrollable grid, sticky layers, or thousands of hidden photo placeholders.
+  function flatSheet(source){
+    const scroll=source.querySelector('.photo-scroll'),bounds=source.getBoundingClientRect(),viewport=scroll?.getBoundingClientRect();
+    if(!viewport?.height||!bounds.width)return null;
+    const images=[],template=inertCopy(source,false);
+    template.hidden=false;template.classList.add('album-snapshot','album-frozen-sheet');
+    const place=(copy,rect,parent)=>{
+      Object.assign(copy.style,{position:'absolute',inset:'auto',left:`${rect.left-parent.left}px`,top:`${rect.top-parent.top}px`,width:`${rect.width}px`,height:`${rect.height}px`,margin:'0',flex:'none'});
+      return copy;
+    };
+    const capture=(node,rect,parent)=>{
+      images.push(...node.querySelectorAll('img'));
+      return place(inertCopy(node),rect,parent);
+    };
+    // Read live geometry before attaching any of the new nodes. Detached
+    // writes below cannot invalidate the live book's layout.
+    for(const child of source.children){
+      const rect=child===scroll?viewport:child.getBoundingClientRect();
+      if(!rect.height||child.hidden)continue;
+      if(child!==scroll){template.append(capture(child,rect,bounds));continue;}
+      const viewportCopy=place(inertCopy(scroll,false),viewport,bounds);
+      viewportCopy.classList.add('album-frozen-scroll');
+      const gallery=scroll.querySelector('#photo-gallery'),copy=inertCopy(gallery,false);
+      copy.classList.add('album-frozen-gallery');viewportCopy.append(copy);template.append(viewportCopy);
+      for(const section of gallery.children){
+        const sectionRect=section.getBoundingClientRect();
+        if(sectionRect.bottom<viewport.top||sectionRect.top>viewport.bottom)continue;
+        if(!section.matches('.gallery-city')){copy.append(capture(section,sectionRect,viewport));continue;}
+        const group=inertCopy(section,false);group.classList.add('album-frozen-group');copy.append(group);
+        const heading=section.querySelector('.gallery-city-heading'),headingRect=heading.getBoundingClientRect();
+        if(headingRect.bottom>viewport.top&&headingRect.top<viewport.bottom)group.append(capture(heading,headingRect,viewport));
+        const grid=section.querySelector('.photo-grid'),tiles=grid.children,gridCopy=inertCopy(grid,false);
+        gridCopy.classList.add('album-frozen-grid');group.append(gridCopy);
+        const columns=Math.max(1,(getComputedStyle(grid).gridTemplateColumns.match(/[\d.]+px/g)||[]).length);
+        const rows=Math.ceil(tiles.length/columns),measured=new Map();
+        const tileRect=index=>{if(!measured.has(index))measured.set(index,tiles[index].getBoundingClientRect());return measured.get(index);};
+        // All Photos uses equal square tiles. Locate the first visible row in
+        // logarithmic time instead of measuring every photo in a large city.
+        let low=0,high=rows;
+        while(low<high){const mid=(low+high)>>1;if(tileRect(mid*columns).bottom<viewport.top-24)low=mid+1;else high=mid;}
+        for(let row=low;row<rows;row++){
+          if(tileRect(row*columns).top>viewport.bottom+24)break;
+          for(let index=row*columns;index<Math.min((row+1)*columns,tiles.length);index++)gridCopy.append(capture(tiles[index],tileRect(index),viewport));
+        }
+      }
+    }
+    return {template,images};
+  }
+  function viewCapture(source,{two,width,closed}){
+    // Ordinary album pages keep their native half-page geometry and container
+    // sizes, exactly as in a chapter turn; don't clone two entire spreads.
+    if(source.classList.contains('album-pages')&&!closed){
+      const pages=[...source.children],templates=pages.map(page=>{const copy=inertCopy(page);copy.classList.add('album-snapshot');return copy;});
+      return {images:[...source.querySelectorAll('img')],take:right=>({el:templates[two&&right?1:0].cloneNode(true),restore(){}})};
+    }
+    const frozen=source.classList.contains('album-sheet')?flatSheet(source):null;
+    const capture=frozen?()=>({el:frozen.template.cloneNode(true),restore(){}}):snapshots(source),style=getComputedStyle(source);
+    return {images:frozen?.images||[...source.querySelectorAll('img')],take:right=>{
+      const copy=capture();copy.el.style.width=`${width}px`;copy.el.style.left=right&&two?`${-width/2}px`:'0';
+      copy.el.style.translate=style.translate||'none';copy.el.style.boxShadow=style.boxShadow;copy.el.style.visibility='visible';return copy;
+    }};
+  }
   // Chapter turns and Album / All Photos share this exact motion.
   function turnLeaf({leaf,frontShade,backShade,cast,forward,two=true,duration=two?744:560}){
     const timing={duration,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'};
@@ -153,12 +224,11 @@
     if(size.width&&size.height){book.style.width=`${size.width}px`;book.style.height=`${size.height}px`;book.style.flex='none';}
     const forward=direction<0;layer.classList.toggle('single',!two);leaf.classList.add(forward?'forward':'backward');
     layer.inert=true;layer.setAttribute('aria-hidden','true');
-    const captures=new Map(),styles=new Map();
+    const captures=new Map();
     function surface(element,right=false){
-      if(!captures.has(element)){captures.set(element,snapshots(element));styles.set(element,getComputedStyle(element));}
-      const holder=make(`album-view-surface ${right?'right':'left'}`),copy=captures.get(element)(),style=styles.get(element);
-      copy.el.style.width=`${width}px`;copy.el.style.left=right&&two?`${-width/2}px`:'0';
-      copy.el.style.translate=style.translate||'none';copy.el.style.boxShadow=style.boxShadow;copy.el.style.visibility='visible';
+      if(!captures.has(element))captures.set(element,viewCapture(element,{two,width,closed:book.classList.contains('closed-front')||book.classList.contains('closed-back')}));
+      const holder=make(`album-view-surface ${right?'right':'left'}`),copy=captures.get(element).take(right);
+      holder.classList.toggle('native-page',copy.el.classList.contains('album-page'));
       holder.style.setProperty('--view-crease',element.classList.contains('album-pages')&&(book.classList.contains('closed-front')||book.classList.contains('closed-back'))?'0':'1');
       holder.append(copy.el);copies.push(copy);return holder;
     }
@@ -174,9 +244,7 @@
     const after=tabs.getBoundingClientRect(),shift=`${before.left-after.left}px ${before.top-after.top}px`;
     const tabsMove=before.left!==after.left||before.top!==after.top;if(tabsMove)tabs.style.translate=shift;
     let disposed=false,animations=[];
-    const scroll=incoming.querySelector('.photo-scroll'),viewport=(scroll||incoming).getBoundingClientRect();
-    const images=[...incoming.querySelectorAll('img')].filter(img=>{const rect=img.getBoundingClientRect();return !viewport.height||rect.bottom>=viewport.top&&rect.top<=viewport.bottom;});
-    decodeImages([...images,...layer.querySelectorAll('img')]);
+    decodeImages([...captures.values()].flatMap(capture=>capture.images).concat([...layer.querySelectorAll('img')]));
     return {
       async play(){
         if(disposed)return;

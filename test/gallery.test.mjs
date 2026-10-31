@@ -896,7 +896,8 @@ test('switching Album and All Photos animates both directions and handles rapid 
   const outgoing=$('album-book').querySelector('.album-view-layer');assert.ok(outgoing);assert.equal(outgoing.querySelectorAll('[id]').length,0);
   const leaf=[...motion.running].find(animation=>animation.element.classList.contains('album-view-leaf'));
   assert.deepEqual(Array.from(leaf.frames,frame=>frame.transform),['rotateY(0deg)','rotateY(-180deg)']);
-  assert.ok(outgoing.querySelector('.album-view-front .album-copy-album-pages'));assert.ok(outgoing.querySelector('.album-view-back .album-copy-album-sheet'));
+  assert.ok(outgoing.querySelector('.album-view-front .album-page'));assert.ok(outgoing.querySelector('.album-view-back .album-copy-album-sheet'));
+  assert.equal(outgoing.querySelectorAll('.album-copy-album-pages').length,0,'Native half-pages keep the same geometry as a chapter turn');
   assert.equal($('album-sheet').style.visibility,'hidden','The live sheet cannot show through the moving leaf');
   await wait(()=>[...outgoing.querySelectorAll('.photo-image')].every(button=>button.classList.contains('loaded')));
   await motion.finish();assert.equal($('album-book').inert,false);
@@ -1001,7 +1002,7 @@ test('returning to All Photos reuses its images and refreshes notes changed in a
   assert.equal($('photo-note').textContent,'Changed elsewhere');
 });
 
-test('a large All Photos turn measures each tile once and decodes each visible image once',async t=>{
+test('a large All Photos turn locates visible rows without measuring or cloning the entire gallery',async t=>{
   const {w,$,tiles}=await setup(t,{route:[paris],seedStops:Array.from({length:80},()=>paris)});tiles();
   const source=$('album-sheet'),scroll=$('photo-scroll'),all=[...source.querySelectorAll('.photo-tile')];
   const rect=(top,height)=>({top,bottom:top+height,left:0,right:600,width:600,height});
@@ -1011,11 +1012,42 @@ test('a large All Photos turn measures each tile once and decodes each visible i
   all.forEach((tile,i)=>tile.getBoundingClientRect=()=>{reads++;return rect(i<6?80:900+i*100,100);});
   w.HTMLImageElement.prototype.decode=function(){decodes.set(this.src,(decodes.get(this.src)||0)+1);return Promise.resolve();};
   const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===4);
-  assert.equal(reads,80,'Both turning halves share one geometry measurement');
+  assert.ok(reads<=16,'Binary row lookup skips offscreen photos; both halves reuse the measurements');
   assert.equal(decodes.size,6,'Only visible photos need decoding');
   assert.ok([...decodes.values()].every(count=>count===1),'Copies share a decode request');
   assert.equal($('album-book').querySelectorAll('.album-view-layer img').length,12,'Offscreen photographs are absent from moving surfaces');
   await motion.finish();assert.equal(source.querySelectorAll('img').length,80);
+});
+
+test('contact-sheet turns freeze sticky headings and visible prints at their exact scrolled positions',async t=>{
+  const {w,$,tiles}=await setup(t,{route:[paris],seedStops:Array.from({length:300},()=>paris)});tiles();
+  const source=$('album-sheet'),scroll=$('photo-scroll'),section=source.querySelector('.gallery-city'),grid=section.querySelector('.photo-grid');
+  const rect=(left,top,width,height)=>({left,top,width,height,right:left+width,bottom:top+height});
+  source.getBoundingClientRect=()=>rect(40,40,800,600);scroll.getBoundingClientRect=()=>rect(40,100,800,540);scroll.scrollTop=5600;
+  section.getBoundingClientRect=()=>rect(40,100-scroll.scrollTop,800,12900);
+  section.querySelector('.gallery-city-heading').getBoundingClientRect=()=>rect(40,100,800,60);
+  grid.style.gridTemplateColumns='150px 150px 150px 150px';
+  const reads=new Map(),all=[...grid.children];
+  all.forEach((tile,index)=>{tile.getBoundingClientRect=()=>{
+    reads.set(index,(reads.get(index)||0)+1);
+    return rect(68+(index%4)*176,180+Math.floor(index/4)*160-scroll.scrollTop,150,150);
+  };});
+  const motion=controlledMotion(w);$('album-view').click();assert.equal(motion.running.size,4);
+  const snapshots=[...$('album-book').querySelectorAll('.album-frozen-sheet')];assert.equal(snapshots.length,2);
+  const captured=[...snapshots[0].querySelectorAll('.photo-tile')],indices=captured.map(tile=>all.findIndex(original=>original.dataset.photoId===tile.dataset.photoId));
+  assert.deepEqual(indices,Array.from({length:20},(_,index)=>index+136));
+  assert.ok(reads.size<35,'Work is bounded by the visible rows rather than all 300 photos');
+  assert.ok([...reads.values()].every(count=>count===1),'No duplicate geometry reads or read/write layout loop');
+  for(const snapshot of snapshots){
+    assert.equal(snapshot.querySelector('.album-copy-photo-scroll').scrollTop,0,'Moving paper has no active scroller');
+    assert.equal(snapshot.querySelector('.gallery-city-heading').style.top,'0px','The pinned heading is frozen at the viewport top');
+    const first=snapshot.querySelector('.photo-tile');
+    assert.equal(first.style.left,'28px');assert.equal(first.style.top,'-80px');assert.equal(first.style.width,'150px');
+    assert.equal(snapshot.querySelectorAll('.photo-tile').length,20);
+    assert.equal(snapshot.querySelectorAll('[id]').length,0);
+  }
+  assert.equal(scroll.scrollTop,0,'The hidden live sheet can reset without moving the captured prints');
+  await motion.finish();assert.equal(grid.children.length,300,'The live gallery is retained intact');
 });
 
 
