@@ -519,7 +519,7 @@
     // Finish a turning leaf before taking the outgoing spread's snapshot.
     if(turning)renderAlbum();
     const source=view==='album'?$('album-pages'):$('album-sheet'),token={target:next};viewMotion=token;
-    token.scene=window.RedlineAlbumMotion.changeView({book,source,direction:next==='sheet'?-1:1,apply:()=>{applyView(next);return next==='album'?$('album-pages'):$('album-sheet');}});
+    token.scene=window.RedlineAlbumMotion.changeView({book,source,two:twoPage(),direction:next==='sheet'?-1:1,apply:()=>{applyView(next);return next==='album'?$('album-pages'):$('album-sheet');}});
     await token.scene.play();if(viewMotion!==token)return;
     viewMotion=null;token.scene.dispose();if(token.refresh)renderGallery();else renderPhotoMode();
     if(token.target!==view)setView(token.target);
