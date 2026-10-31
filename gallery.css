@@ -128,7 +128,7 @@
 .album-cover-scene.closed-book.single .album-cover-leaf { left: 0; width: 100%; }
 
 /* Turning leaves */
-.album-leaf { position: absolute; z-index: 3; top: 0; bottom: 0; width: 50%; transform-style: preserve-3d; will-change: transform; isolation: isolate; }
+.album-leaf { position: absolute; z-index: 3; top: 0; bottom: 0; width: 50%; transform-style: preserve-3d; will-change: transform; }
 .album-leaf.turn-forward { left: 50%; transform-origin: left center; }
 .album-leaf.turn-back { left: 0; transform-origin: right center; }
 .album-page.leaf-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
