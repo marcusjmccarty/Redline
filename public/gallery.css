@@ -35,7 +35,7 @@
 #info-dialog::backdrop { background-color: #211c1670; }
 .album { transition: none; }
 .album::backdrop { background-color: #1d1712c4; transition: background-color .18s ease; }
-.album[data-departing=true]::backdrop { background-color: #1d171200; transition-duration: .24s; }
+.album[data-departing=true]::backdrop { background-color: #1d171200; transition-duration: .16s; }
 .album[data-motion=closing] :is(.album-top, .album-foot, #photo-message) { opacity: 0; pointer-events: none; transition: opacity .12s ease; }
 .album:not([open]) { display: none; }
 .album:not([open])::backdrop, #info-dialog:not([open])::backdrop { background-color: #211c1600; }
@@ -367,12 +367,13 @@
 #photo-viewer.flipped .viewer-edge { pointer-events: none; }
 .photo-viewer-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; padding-top: 8px; }
 #caption-form { display: flex; align-items: center; width: 100%; gap: 8px; margin-top: 5px; animation: caption-drop .18s var(--ease-out); }
-#photo-note { contain: inline-size; margin: 5px 0 3px; color: #625440; font: 18px/1.35 var(--hand); overflow-wrap: anywhere; }
+#photo-note { display: inline; margin: 0; color: #625440; font: 18px/1.35 var(--hand); }
+#photo-note::before { content: ' · '; white-space: pre; color: #a79577; font: 16px Georgia, serif; }
 @keyframes caption-drop { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
 #caption-input { flex: 1; min-width: 0; padding: 7px 0; border: 0; border-bottom: 1px solid #aa9675; outline: none; background: transparent; color: var(--page-ink); font: 16px Georgia, serif; }
 #caption-input:focus-visible { border-bottom-color: var(--red); }
-.photo-viewer-caption { position: relative; display: flex; flex: 1; align-items: center; min-width: 0; border-radius: 2px; }
-#photo-caption { margin: 0; overflow: hidden; font: 16px/1.3 Georgia, serif; text-overflow: ellipsis; white-space: nowrap; transition: color .2s; }
+.photo-viewer-caption { position: relative; display: block; contain: inline-size; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 2px; }
+#photo-caption { display: inline; margin: 0; font: 16px/1.3 Georgia, serif; transition: color .2s; }
 .photo-viewer-tools { display: flex; flex: none; align-items: center; gap: 2px; }
 .viewer-tool { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 9px; border: 0; border-radius: 17px; background: transparent; color: #6d5c45; font: 12px Arial, sans-serif; transition: background-color .2s, color .2s; }
 .viewer-tool svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }

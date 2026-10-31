@@ -61,7 +61,7 @@ async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,p
   w.localStorage.setItem('redline-saved-trip',JSON.stringify({id:trip.id,title:trip.title,revision:trip.revision,hash:JSON.stringify(stops)}));
   w.eval(source('public/postcards.js'));w.eval(source('public/album-motion.js'));w.eval(source('public/trips.js'));
   await wait(()=>$('trip-title').textContent===trip.title&&(!seed||$('photo-count').textContent===String(seedStops.length)));
-  $('photos-button').click();await wait(()=>$('photo-panel').open);await tick();
+  $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);
   const change=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new w.Event('change',{bubbles:true}));};
   const choose=names=>{
     const files=names.map(name=>new File([jpeg],name,{type:/\.txt$/.test(name)?'text/plain':'image/jpeg'}));
@@ -623,13 +623,13 @@ test('album and All Photos slide in, keep their spread stable, and slide away af
     assert.equal($('gallery-filter').parentElement,scene,'Tabs follow the cover geometrically');
     assert.equal(scene.querySelectorAll('[id]').length,1,'Only the original tab navigation has an ID');
     assert.equal($('photo-gallery').firstElementChild,paper);assert.equal($('album-pages').firstElementChild,spread);
-    assert.equal(motion.running.size,2);assert.equal([...motion.running][0].options.duration,660);
+    assert.equal(motion.running.size,2);assert.equal([...motion.running][0].options.duration,420);
     press('Escape');await motion.finish();
     assert.equal($('photo-panel').open,true,'The front cover stays visible after the fold');
     assert.equal([...motion.running][0].options.duration,40,'A short beat separates folding from departure');
     assert.equal($('photo-panel').dataset.departing,undefined);
     await motion.finish();assert.equal($('photo-panel').dataset.departing,'true');
-    assert.equal([...motion.running][0].options.duration,240);
+    assert.equal([...motion.running][0].options.duration,160);
     assert.match([...motion.running][0].frames.at(-1).transform,/translateY\([1-9]/);
     assert.ok([...motion.running][0].element.classList.contains('album-arrival'));
     await motion.finish();assert.equal($('photo-panel').open,false);
@@ -638,6 +638,7 @@ test('album and All Photos slide in, keep their spread stable, and slide away af
     $('photos-button').click();await wait(()=>motion.running.size===3);
     assert.equal($('photo-panel').dataset.motion,'opening');assert.equal($('album-book').dataset.mode,view);
     const entrance=[...motion.running].find(animation=>animation.element.classList.contains('album-arrival'));
+    assert.equal(entrance.options.duration,940,'Opening takes the former full closing duration');
     assert.match(entrance.frames[0].transform,/translateY\([1-9]/);assert.equal(entrance.frames.at(-1).transform,'translateY(0px)');
     const arrived=$('album-pages').firstElementChild;
     press('ArrowRight');assert.equal(motion.running.size,3);
@@ -832,6 +833,7 @@ test('caption editing stays on the photo front, persists separately, and updates
   type('Sunrise by the river.');$('save-caption').click();await wait(()=>$('caption-form').hidden);
   assert.equal(print.querySelector('figcaption').textContent,'Sunrise by the river.');assert.equal($('photo-caption').textContent,'Paris','The city name stays after saving a caption');
   assert.equal($('photo-note').hidden,false);assert.equal($('photo-note').textContent,'Sunrise by the river.');
+  assert.equal($('photo-caption').nextElementSibling,$('photo-note'));assert.equal(footer.contains($('photo-note')),true,'City and caption share the existing footer');
   $('flip-postcard').click();$('postcard-message').value='Dear family, this message is private.';$('postcard-message').dispatchEvent(new w.Event('input'));$('save-postcard').click();
   await wait(()=>$('postcard-save-status').textContent==='Postcard saved.');
   assert.equal(print.querySelector('figcaption').textContent,'Sunrise by the river.');
