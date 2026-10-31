@@ -42,8 +42,8 @@
     $('edit-caption').setAttribute('aria-expanded',String(open));
     $('postcard-front').classList.toggle('caption-editing',open);
     if(open){$('caption-input').value=active.caption;$('caption-input').focus();captionStatus();}
-    $('photo-caption').textContent=active.photo.city?.name||'';
-    $('photo-note').textContent=active.caption.trim();$('photo-note').hidden=open||!active.caption.trim();
+    $('photo-caption').textContent=$('photo-caption').title=active.photo.city?.name||'';
+    $('photo-note').textContent=$('photo-note').title=active.caption.trim();$('photo-note').hidden=open||!active.caption.trim();
   }
   async function saveCaption(state){
     if(!state||state.preview)return;

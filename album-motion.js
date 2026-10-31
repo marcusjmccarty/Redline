@@ -79,8 +79,8 @@
     return {
       async open(){
         direction='opening';await ready;if(disposed||direction!=='opening')return;started=true;
-        run(closedFrames,openFrames,620);
-        animations.push(arrival.animate([{transform:outside},{transform:'translateY(0px)',offset:.6},{transform:'translateY(0px)'}],{duration:620,easing:'cubic-bezier(.22,.7,.18,1)',fill:'both'}));
+        run(closedFrames,openFrames,940);
+        animations.push(arrival.animate([{transform:outside},{transform:'translateY(0px)',offset:.6},{transform:'translateY(0px)'}],{duration:940,easing:'cubic-bezier(.22,.7,.18,1)',fill:'both'}));
         return done(animations);
       },
       close(){
@@ -88,7 +88,7 @@
           direction='closing';reversed=true;animations.forEach(animation=>animation.reverse());return done(animations);
         }
         const alreadyClosed=opening&&!started||closed==='front';direction='closing';
-        return ready.then(()=>{if(disposed||alreadyClosed)return;return run(openFrames,closedFrames,660);});
+        return ready.then(()=>{if(disposed||alreadyClosed)return;return run(openFrames,closedFrames,420);});
       },
       async depart(onDepart){
         if(disposed)return;
@@ -96,7 +96,7 @@
         // Let the complete front cover register before it leaves the map.
         const hold=scene.animate([{opacity:1},{opacity:1}],{duration:40,fill:'both'});animations.push(hold);await done([hold]);
         if(disposed)return;onDepart();
-        const slide=arrival.animate([{transform:'translateY(0px)'},{transform:outside}],{duration:240,easing:'cubic-bezier(.4,0,1,1)',fill:'forwards'});
+        const slide=arrival.animate([{transform:'translateY(0px)'},{transform:outside}],{duration:160,easing:'cubic-bezier(.4,0,1,1)',fill:'forwards'});
         animations.push(slide);await done([slide]);
       },
       dispose(){

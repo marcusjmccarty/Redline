@@ -137,7 +137,7 @@
       <div id="postcard-stage"><div id="postcard-card">
         <div id="postcard-front" class="postcard-face" tabindex="-1"><div class="viewer-photo"><img id="full-photo" alt="" draggable="false"><button id="viewer-previous" class="viewer-edge previous" type="button" aria-label="Previous photo" title="Previous photo (←)" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button><button id="viewer-next" class="viewer-edge next" type="button" aria-label="Next photo" title="Next photo (→)" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button></div>
           <div class="photo-viewer-footer">
-            <div class="photo-viewer-caption"><p id="photo-caption"></p></div>
+            <div class="photo-viewer-caption"><p id="photo-caption"></p><p id="photo-note" hidden></p></div>
             <div class="photo-viewer-tools">
               <span id="photo-position" class="sr-only" role="status" aria-live="polite" hidden></span>
               <button id="edit-caption" class="viewer-tool" type="button" aria-expanded="false" aria-controls="caption-form">Caption</button>
@@ -147,7 +147,6 @@
             </div>
           </div>
           <form id="caption-form" hidden><input id="caption-input" maxlength="180" aria-label="Photo caption" placeholder="Caption" autocomplete="off"><button id="save-caption" class="viewer-tool" type="submit">Save</button></form>
-          <p id="photo-note" hidden></p>
         </div>
         <div id="postcard-back" class="postcard-face" aria-hidden="true" inert>
           <div class="postcard-heading"><span id="postcard-place"></span><span class="postcard-stamp" aria-hidden="true"></span></div>
