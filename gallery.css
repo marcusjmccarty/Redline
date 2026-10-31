@@ -139,6 +139,13 @@
 .album-view-front { transform: translateZ(.1px); }
 .album-view-back { transform: rotateY(180deg) translateZ(.1px); }
 .album-view-face > .album-view-surface { inset: 0; width: 100%; }
+.album-view-leaf.paired { left: 0; width: 100%; transform-style: flat; perspective: 2800px; will-change: auto; }
+.album-view-leaf.paired > .album-view-face { width: 50%; right: auto; transform-style: flat; backface-visibility: visible; -webkit-backface-visibility: visible; will-change: transform, opacity; }
+.album-view-leaf.paired > .right { left: 50%; transform-origin: left center; }
+.album-view-leaf.paired > .left { left: 0; transform-origin: right center; }
+.album-view-leaf.paired > .album-view-front { transform: rotateY(0deg); opacity: 1; }
+.album-view-leaf.paired > .album-view-back { transform: rotateY(90deg); opacity: 0; }
+.album-view-leaf.paired.backward > .album-view-back { transform: rotateY(-90deg); }
 .album-view-layer.single > .album-view-surface, .album-view-layer.single .album-view-leaf { left: 0; width: 100%; transform-origin: left center; }
 .album-view-layer .album-pages::after { opacity: var(--view-crease); }
 .album-book[data-view-motion] :is(.album-pages, .album-tabs) { transition: none; }

@@ -37,33 +37,27 @@ input::placeholder { color: var(--muted); }
 
 /* The map */
 main { position: relative; width: 100%; height: 100%; }
-.map-shell { position: absolute; inset: 0; overflow: hidden; --water: #c4dce0; background:
-  radial-gradient(ellipse 25% 32% at 20% 65%, #e9eee0b3, #e9eee000),
-  radial-gradient(ellipse 23% 28% at 77% 24%, #86b1c080, #86b1c000),
-  radial-gradient(ellipse 26% 26% at 58% 77%, #9bcbd080, #9bcbd000),
-  radial-gradient(ellipse 23% 27% at 42% 32%, #f6efda99, #f6efda00),
-  radial-gradient(ellipse 20% 26% at 5% 20%, #92b7c080, #92b7c000),
-  radial-gradient(ellipse 22% 31% at 91% 71%, #e9ebd999, #e9ebd900),
-  radial-gradient(ellipse 19% 23% at 55% 9%, #a0c3cd66, #a0c3cd00), var(--water); }
-/* Fine engraved rules and modest botanical corners, fixed above the chart. */
-.atlas-frame { position: absolute; z-index: 2; inset: 8px; border: 1px solid #a58b61; box-shadow: 0 0 0 3px #f8f0df, 0 0 0 4px #b69e77, 0 0 0 8px #eee2c8, inset 0 0 0 3px #f6edda, inset 0 0 0 4px #b69e7780; pointer-events: none; }
-.atlas-corner { position: absolute; width: 68px; height: 68px; }
-.atlas-corner.north-west { top: -1px; left: -1px; }
-.atlas-corner.north-east { top: -1px; right: -1px; transform: scaleX(-1); }
-.atlas-corner.south-west { bottom: -1px; left: -1px; transform: scaleY(-1); }
-.atlas-corner.south-east { bottom: -1px; right: -1px; transform: scale(-1); }
-.atlas-ornament { position: absolute; left: calc(50% - 16px); width: 32px; height: 7px; border-block: 1px solid #aa9066; background: #f5ecd8; }
-.atlas-ornament::after { content: ''; position: absolute; left: 13px; top: 0; width: 5px; height: 5px; background: #b19a72; transform: rotate(45deg); }
-.atlas-ornament.north { top: -2px; }
-.atlas-ornament.south { bottom: -2px; }
-@media (max-width: 600px) { .atlas-frame { inset: 6px; } .atlas-corner { width: 44px; height: 44px; } }
+.map-shell { position: absolute; inset: 0; overflow: hidden; background: #bed5d9; }
+/* A bold engraved neatline with geometric corner blocks, no scrollwork. */
+.atlas-frame { position: absolute; z-index: 2; inset: 10px; border: 2px solid #806a46; box-shadow: 0 0 0 3px #f7ecd5, 0 0 0 5px #9e845b, 0 0 0 10px #e7d6b3, inset 0 0 0 5px #f7eedb, inset 0 0 0 6px #a48a61; pointer-events: none; }
+.atlas-corner { position: absolute; width: 21px; height: 21px; border: 2px solid #806a46; background: #e6d4af; box-shadow: inset 0 0 0 3px #f7eedb; }
+.atlas-corner::after { content: ''; position: absolute; inset: 6px; background: #967b50; transform: rotate(45deg); }
+.atlas-corner.north-west { top: -2px; left: -2px; }
+.atlas-corner.north-east { top: -2px; right: -2px; }
+.atlas-corner.south-west { bottom: -2px; left: -2px; }
+.atlas-corner.south-east { bottom: -2px; right: -2px; }
+.atlas-ornament { position: absolute; left: calc(50% - 29px); width: 58px; height: 10px; border: 1px solid #806a46; background: #f7eedb; box-shadow: inset 0 0 0 2px #e6d4af; }
+.atlas-ornament::after { content: ''; position: absolute; left: 25px; top: 1px; width: 6px; height: 6px; background: #9e845b; transform: rotate(45deg); }
+.atlas-ornament.north { top: -3px; }
+.atlas-ornament.south { bottom: -3px; }
+@media (max-width: 600px) { .atlas-frame { inset: 7px; border-width: 1px; } .atlas-corner { width: 17px; height: 17px; } .atlas-corner::after { inset: 4px; } }
 
 #map { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 #map.dragging { cursor: grabbing; }
 #map.zoomed-out, #map.zoomed-out.dragging { cursor: default; }
 #map:focus { outline: none; }
 #land path, #antarctica path { fill: var(--land); stroke: var(--coast); stroke-width: .7; stroke-linejoin: round; fill-rule: evenodd; clip-rule: evenodd; vector-effect: non-scaling-stroke; }
-#antarctica path { fill: url(#polar-wash); }
+#antarctica path { fill: url(#atlas-paper); }
 #country-borders path { fill: none; stroke: #9c805b; stroke-width: .55; stroke-opacity: .5; stroke-linejoin: round; vector-effect: non-scaling-stroke; pointer-events: none; }
 #regions path { fill: none; stroke: #907e61; stroke-width: .5; stroke-opacity: .65; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 .continent { font-family: Georgia, serif; font-size: 15px; letter-spacing: 4px; text-anchor: middle; fill: #69563e; opacity: .82; }
@@ -90,7 +84,7 @@ main { position: relative; width: 100%; height: 100%; }
 body.sheet-open :is(.route-dock, .zoom-controls) { opacity: 0; translate: 0 18px; pointer-events: none; }
 
 /* A compact trip planner over the map. */
-.route-dock { --chart: #faf3e3; --paper-wash: linear-gradient(115deg, #f4e8cf, #fff9ec 19%, #f3e7cd 38%, #fffaee 59%, #f4e9d1 78%, #fcf6e7); position: absolute; z-index: 3; bottom: 22px; left: 50%; transform: translateX(-50%); width: min(700px, calc(100% - 40px)); padding: 14px 22px 12px;
+.route-dock { --chart: #faf3e3; --paper-wash: none; position: absolute; z-index: 3; bottom: 22px; left: 50%; transform: translateX(-50%); width: min(700px, calc(100% - 40px)); padding: 14px 22px 12px;
   color: var(--sepia); border-radius: 3px; transition: opacity .3s ease, translate .4s var(--ease-out);
   background-color: var(--chart);
   background-image:
@@ -168,7 +162,7 @@ form[aria-busy=true] .add-button { opacity: .45; }
 .search-credit a { color: var(--muted); text-decoration: none; }
 
 /* A loose, ruled sheet on the left, independent of the planner. */
-.route-log { position: fixed; z-index: 6; top: 24px; left: 24px; width: min(380px, calc(100vw - 48px)); max-height: calc(100svh - 48px); color: var(--sepia); background-color: var(--paper); background-image: var(--paper-grain), linear-gradient(145deg, #fff9ec, #f3e8d1 23%, #fffaf0 46%, #f4ead5 70%, #fcf6e8); border: 1px solid var(--line); border-radius: 2px; box-shadow: 0 18px 60px #352c2333, 0 2px 5px #352c2322; transform-origin: 30% 20%; transition: translate .24s cubic-bezier(.4,0,.2,1), display .24s allow-discrete; }
+.route-log { position: fixed; z-index: 6; top: 24px; left: 24px; width: min(380px, calc(100vw - 48px)); max-height: calc(100svh - 48px); color: var(--sepia); background-color: #faf3e3; background-image: var(--paper-grain); border: 1px solid var(--line); border-radius: 2px; box-shadow: 0 18px 60px #352c2333, 0 2px 5px #352c2322; transform-origin: 30% 20%; transition: translate .24s cubic-bezier(.4,0,.2,1), display .24s allow-discrete; }
 .route-log[hidden] { translate: calc(-100% - 32px) 0; }
 .route-log:not([hidden]) { transition-duration: .44s; transition-timing-function: cubic-bezier(.22,.7,.18,1); }
 @starting-style { .route-log:not([hidden]) { translate: calc(-100% - 32px) 0; } }

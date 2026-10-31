@@ -9,9 +9,6 @@
     }
     return {left,top,right,bottom,x:count?x/count:0,y:count?y/count:0};
   }
-  function paintFor(bounds){
-    return bounds.x<640?'atlas-americas':bounds.x>1120&&bounds.y>420?'atlas-australia':'atlas-oldworld';
-  }
   const intersects=(bounds,view,pad=3)=>bounds.right>=view.x-pad&&bounds.left<=view.x+view.w+pad&&bounds.bottom>=view.y-pad&&bounds.top<=view.y+view.h+pad;
   function create(land,regions,landPaths,regionPaths,countryLayer,countryPaths=[]){
     function mount(root,paths,coloured){
@@ -20,7 +17,7 @@
         if(!d)continue;
         const bounds=measure(d),node=document.createElementNS('http://www.w3.org/2000/svg','path');
         node.setAttribute('d',d);
-        if(coloured)node.style.fill=`url(#${paintFor(bounds)})`;
+        if(coloured)node.style.fill='url(#atlas-paper)';
         entries.push({node,bounds,visible:true});fragment.append(node);
       }
       root?.append(fragment);return entries;
@@ -35,5 +32,5 @@
       }
     }};
   }
-  window.RedlineAtlas={measure,paintFor,intersects,create};
+  window.RedlineAtlas={measure,intersects,create};
 })();

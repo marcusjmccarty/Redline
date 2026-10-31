@@ -188,6 +188,24 @@
     const start=document.timeline?.currentTime;if(start!=null)animations.forEach(animation=>animation.startTime=start);
     return animations;
   }
+  // A contact sheet contains clipped images and scroll layers. Do not rotate
+  // its two faces together in a preserve-3d scene: browsers can flatten or
+  // discard those nested layers around the 90-degree crossover. Each face is
+  // a flat sibling with its own half-turn, using the same spine and clock.
+  function turnViewLeaf({leaf,front,back,frontShade,backShade,cast,forward,two}){
+    if(!two)return turnLeaf({leaf,frontShade,backShade,cast,forward,two});
+    const timing={duration:744,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'};
+    const outgoing=`rotateY(${forward?-90:90}deg)`,incoming=`rotateY(${forward?90:-90}deg)`;
+    const animations=[
+      front.animate([{transform:'rotateY(0deg)',opacity:1,offset:0},{transform:outgoing,opacity:1,offset:.5},{transform:outgoing,opacity:0,offset:.5},{transform:outgoing,opacity:0,offset:1}],timing),
+      back.animate([{transform:incoming,opacity:0,offset:0},{transform:incoming,opacity:0,offset:.5},{transform:incoming,opacity:1,offset:.5},{transform:'rotateY(0deg)',opacity:1,offset:1}],timing),
+      frontShade.animate([{opacity:0},{opacity:.42,offset:.5},{opacity:.42}],timing),
+      backShade.animate([{opacity:.42},{opacity:.42,offset:.5},{opacity:0}],timing),
+      cast.animate([{opacity:.55},{opacity:0}],timing)
+    ];
+    const start=document.timeline?.currentTime;if(start!=null)animations.forEach(animation=>animation.startTime=start);
+    return animations;
+  }
   function create({book,source,cover,two,closed='',opening=false}){
     const resumePreviews=holdPreviews();
     const arrival=make('album-arrival'),scene=make('album-cover-scene'),hinge=make('album-cover-hinge'),leaf=make('album-cover-leaf'),front=make('album-cover-front'),back=make('album-cover-back');
@@ -283,7 +301,7 @@
     const width=source.getBoundingClientRect().width||source.clientWidth||book.clientWidth,copies=[];
     const size=book.getBoundingClientRect(),savedSize=[book.style.width,book.style.height,book.style.flex];
     if(size.width&&size.height){book.style.width=`${size.width}px`;book.style.height=`${size.height}px`;book.style.flex='none';}
-    const forward=direction<0;layer.classList.toggle('single',!two);leaf.classList.add(forward?'forward':'backward');
+    const forward=direction<0;layer.classList.toggle('single',!two);leaf.classList.add(forward?'forward':'backward');leaf.classList.toggle('paired',two);
     layer.inert=true;layer.setAttribute('aria-hidden','true');
     const captures=new Map();
     function surface(element,right=false){
@@ -336,7 +354,7 @@
         await Promise.race([cancelled,new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))]);
         if(disposed)return;started=true;
         layer.querySelector('.album-view-guard')?.remove();
-        animations=turnLeaf({leaf,frontShade,backShade,cast,forward,two});
+        animations=turnViewLeaf({leaf,front,back,frontShade,backShade,cast,forward,two});
         if(tabsMove)animations.push(tabs.animate([{translate:shift},{translate:tabTranslate||'0px 0px'}],{duration:two?744:560,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}));
         await done(animations);
         if(disposed)return;
