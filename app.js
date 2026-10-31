@@ -152,7 +152,9 @@
   function labelWidth(text){
     const name=text.textContent;
     if(!labelWidths.has(name)){let width=0;try{width=text.getComputedTextLength();}catch{}if(!(width>0))return window.RedlineLabels?.estimate(name)??name.length*8.3;labelWidths.set(name,width);}
-    return labelWidths.get(name);
+    // Do not trust a transient font/layout measurement smaller than Courier's
+    // known advance. A short cached width lets long names overlap indefinitely.
+    return Math.max(labelWidths.get(name),window.RedlineLabels?.estimate(name)??name.length*8.3);
   }
   function moveStop(from,to) {
     if(from===to)return;
@@ -336,6 +338,16 @@
   $('play').addEventListener('click',trace);
   $('clear').addEventListener('click',()=>{if(!stops.length)return;checkpoint('clear route');stops=[];drawRoute();persist();input.value='';closeSearch();$('undo-route').focus({preventScroll:true});});
   const labelNodes=new Map();
+  const typeWidths=new Map(),typeContext=document.createElement('canvas').getContext('2d');
+  function typeWidth(name,font,spacing=0){
+    const key=[name,font,spacing].join('|');
+    if(!typeWidths.has(key)){
+      let width=0;
+      if(typeContext?.measureText){typeContext.font=font;width=typeContext.measureText(name).width;}
+      typeWidths.set(key,(width||name.length*parseFloat(font.replace(/^[^\d]*/,''))*.65)+Math.max(0,name.length-1)*spacing);
+    }
+    return typeWidths.get(key);
+  }
   // Place names avoid the route's dots, its chosen label boxes, and the dock.
   function renderLabels(matrix,bounds,occupied,routes) {
     const layer=$('place-labels'),width=bounds.width,height=bounds.height;
@@ -343,10 +355,10 @@
     const visible=new Set();
     const screen=(x,y)=>[x*matrix.a+matrix.e-bounds.left,y*matrix.d+matrix.f-bounds.top];
     function placeLabel(key,name,x,y,isCity) {
-      const [sx,sy]=screen(x,y),font=isCity?11:12,w=name.length*(isCity?5.8:7.1)+12;
-      const box={x:isCity?sx+5:sx-w/2,y:sy-(isCity?13:8),w,h:18};
-      if(box.x<30||box.x+w>width-30||box.y<22||box.y+18>height-22)return;
-      if(occupied.some(b=>box.x<b.x+b.w+6&&box.x+w+6>b.x&&box.y<b.y+b.h+3&&box.y+21>b.y))return;
+      const [sx,sy]=screen(x,y),font=isCity?11:12,w=typeWidth(name,isCity?'11px Arial':'12px Georgia',isCity?0:1)+8;
+      const box={x:isCity?sx-4:sx-w/2,y:sy-(isCity?16:12),w:w+(isCity?7:0),h:22};
+      if(box.x<30||box.x+box.w>width-30||box.y<22||box.y+box.h>height-22)return;
+      if(occupied.some(b=>RedlineLabels.overlaps(box,b,6)))return;
       if(routes?.hits(box,4))return;
       occupied.push(box);visible.add(key);
       let node=labelNodes.get(key);
@@ -370,6 +382,17 @@
     }
     for(const [key,node] of labelNodes)if(!visible.has(key)){node.remove();labelNodes.delete(key);}
     $('map-labels').style.display=zoomLevel>=1.6?'none':'';
+  }
+  function paintAtlasNames(matrix,bounds,occupied,routes){
+    for(const label of $('map-labels').children){
+      const x=Number(label.dataset.mapX),y=Number(label.dataset.mapY),angle=Number(label.dataset.mapRotation),ocean=label.classList.contains('ocean');
+      changed(label,'transform',`translate(${x} ${y}) scale(${1/matrix.a} ${1/matrix.d}) rotate(${angle})`);
+      const width=typeWidth(label.textContent,ocean?'italic 15px Georgia':'15px Georgia',ocean?1:4)+8,radians=angle*Math.PI/180;
+      const w=Math.abs(width*Math.cos(radians))+Math.abs(24*Math.sin(radians)),h=Math.abs(width*Math.sin(radians))+Math.abs(24*Math.cos(radians));
+      const box={x:x*matrix.a+matrix.e-bounds.left+6*Math.sin(radians)-w/2,y:y*matrix.d+matrix.f-bounds.top-6*Math.cos(radians)-h/2,w,h};
+      const hidden=zoomLevel>=1.6||occupied.some(other=>RedlineLabels.overlaps(box,other,6))||routes?.hits(box,5);
+      label.style.visibility=hidden?'hidden':'';if(!hidden)occupied.push(box);
+    }
   }
   function constrainView(frame){
     const {w,h}=frame;
@@ -414,11 +437,8 @@
     }
     const routes=routeIndex&&RedlineLabels.projectIndex(routeIndex,matrix,bounds);
     const occupied=paintStops(matrix,bounds,obstacles,routes);
-    for(const label of $('map-labels').children){
-      changed(label,'transform',`translate(${label.dataset.mapX} ${label.dataset.mapY}) scale(${1/matrix.a} ${1/matrix.d}) rotate(${label.dataset.mapRotation})`);
-    }
     if(dock)occupied.push(...obstacles);
-    renderLabels(matrix,bounds,occupied,routes);paintProgress();
+    renderLabels(matrix,bounds,occupied,routes);paintAtlasNames(matrix,bounds,occupied,routes);paintProgress();
   }
   function paintStops(matrix,bounds,obstacles,routes){
     const items=[],texts=[],occupied=[];
@@ -430,7 +450,7 @@
       if(!stopShown(index))return;
       const sx=x*matrix.a+matrix.e-bounds.left,sy=y*matrix.d+matrix.f-bounds.top,id=stops[index].id;
       if(labelOwner(index)!==index){text.classList.add('label-hidden');occupied.push({x:sx-7,y:sy-7,w:14,h:14});return;}
-      items.push({id,x:sx,y:sy,width:text._width??text.textContent.length*8.3,height:14,priority:id===activeStopId?-1:index});texts.push(text);
+      items.push({id,x:sx,y:sy,width:text._width??text.textContent.length*8.3,height:17,priority:id===activeStopId?-1:index});texts.push(text);
       occupied.push({x:sx-7,y:sy-7,w:14,h:14});
     });
     const flip=item=>{const end=item.x>bounds.width-180;return {name:end?'left-above':'right-above',x:end?-10:10,y:-12,anchor:end?'end':'start',box:{x:end?item.x-12-item.width:item.x+8,y:item.y-23,w:item.width+4,h:14}};};

@@ -79,15 +79,17 @@
     };
   }
   async function decodeImages(images,{reveal=()=>true}={}){
-    await Promise.all([...new Set(images)].map(async image=>{
+    const decoded=await Promise.all([...new Set(images)].map(async image=>{
       image.loading='eager';
       try{
         // complete means bytes loaded, not that the bitmap is ready to paint.
         // Decode each actual face before moving it, including cached images.
         await image.decode?.();
         if(reveal())image.closest('.photo-image')?.classList.add('loaded');
-      }catch{}
+        return true;
+      }catch{return false;}
     }));
+    return decoded.every(Boolean);
   }
   function inertCopy(node,deep=true){
     const copy=node.cloneNode(false);
@@ -150,7 +152,14 @@
     // Ordinary album pages keep their native half-page geometry and container
     // sizes, exactly as in a chapter turn; don't clone two entire spreads.
     if(source.classList.contains('album-pages')&&!closed){
-      const pages=[...source.children],templates=pages.map(page=>{const copy=inertCopy(page);copy.classList.add('album-snapshot');return copy;});
+      const pages=[...source.children],templates=pages.map(page=>{
+        const copy=inertCopy(page),style=getComputedStyle(page);copy.classList.add('album-snapshot');
+        // Grid-item percentage padding resolves against its grid area. A
+        // positioned turning copy has a different containing block: pin the
+        // measured padding so its prints cannot jump at capture or handoff.
+        for(const property of ['padding-top','padding-right','padding-bottom','padding-left'])copy.style.setProperty(property,style.getPropertyValue(property));
+        return copy;
+      });
       return {images:[...source.querySelectorAll('img')],take:right=>({el:templates[two&&right?1:0].cloneNode(true),restore(){}})};
     }
     const frozen=source.classList.contains('album-sheet')?flatSheet(source):null;
@@ -185,24 +194,6 @@
       const frames=[{transform:'perspective(1600px) rotateY(0deg)',opacity:1},{transform:'perspective(1600px) rotateY(-82deg)',opacity:.2}];
       animations=[leaf.animate(forward?frames:[...frames].reverse(),timing)];
     }
-    const start=document.timeline?.currentTime;if(start!=null)animations.forEach(animation=>animation.startTime=start);
-    return animations;
-  }
-  // A contact sheet contains clipped images and scroll layers. Do not rotate
-  // its two faces together in a preserve-3d scene: browsers can flatten or
-  // discard those nested layers around the 90-degree crossover. Each face is
-  // a flat sibling with its own half-turn, using the same spine and clock.
-  function turnViewLeaf({leaf,front,back,frontShade,backShade,cast,forward,two}){
-    if(!two)return turnLeaf({leaf,frontShade,backShade,cast,forward,two});
-    const timing={duration:744,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'};
-    const outgoing=`rotateY(${forward?-90:90}deg)`,incoming=`rotateY(${forward?90:-90}deg)`;
-    const animations=[
-      front.animate([{transform:'rotateY(0deg)',opacity:1,offset:0},{transform:outgoing,opacity:1,offset:.5},{transform:outgoing,opacity:0,offset:.5},{transform:outgoing,opacity:0,offset:1}],timing),
-      back.animate([{transform:incoming,opacity:0,offset:0},{transform:incoming,opacity:0,offset:.5},{transform:incoming,opacity:1,offset:.5},{transform:'rotateY(0deg)',opacity:1,offset:1}],timing),
-      frontShade.animate([{opacity:0},{opacity:.42,offset:.5},{opacity:.42}],timing),
-      backShade.animate([{opacity:.42},{opacity:.42,offset:.5},{opacity:0}],timing),
-      cast.animate([{opacity:.55},{opacity:0}],timing)
-    ];
     const start=document.timeline?.currentTime;if(start!=null)animations.forEach(animation=>animation.startTime=start);
     return animations;
   }
@@ -301,7 +292,7 @@
     const width=source.getBoundingClientRect().width||source.clientWidth||book.clientWidth,copies=[];
     const size=book.getBoundingClientRect(),savedSize=[book.style.width,book.style.height,book.style.flex];
     if(size.width&&size.height){book.style.width=`${size.width}px`;book.style.height=`${size.height}px`;book.style.flex='none';}
-    const forward=direction<0;layer.classList.toggle('single',!two);leaf.classList.add(forward?'forward':'backward');leaf.classList.toggle('paired',two);
+    const forward=direction<0;layer.classList.toggle('single',!two);leaf.classList.add(forward?'forward':'backward');
     layer.inert=true;layer.setAttribute('aria-hidden','true');
     const captures=new Map();
     function surface(element,right=false){
@@ -339,7 +330,7 @@
     const after=tabs.getBoundingClientRect(),shift=`${before.left-after.left}px ${before.top-after.top}px`;
     const tabsMove=before.left!==after.left||before.top!==after.top;if(tabsMove)tabs.style.translate=shift;
     let disposed=false,started=false,animations=[],readyTimer,cancelReady;
-    const cancelled=new Promise(resolve=>{cancelReady=resolve;});
+    const cancelled=new Promise(resolve=>{cancelReady=()=>resolve(false);});
     // Even a single-page forward turn needs to warm its live destination,
     // although that view no longer needs any duplicate stationary snapshot.
     if(!captures.has(incoming))captures.set(incoming,viewCapture(incoming,{two,width,closed:false}));
@@ -347,14 +338,18 @@
     return {
       async play(){
         if(disposed)return;
-        await Promise.race([ready,cancelled,new Promise(resolve=>{readyTimer=setTimeout(resolve,240);})]);
+        const decoded=await Promise.race([ready,cancelled,new Promise(resolve=>{readyTimer=setTimeout(()=>resolve(false),900);})]);
         clearTimeout(readyTimer);if(disposed)return;
+        // A timed-out decode is not a prepared page. Leave the old spread
+        // still, then switch directly instead of animating blank copies and
+        // flashing the real photos back into view when they finally load.
+        if(!decoded){started=true;return;}
         // Give the browser a paint opportunity with the finished leaf in its
         // final stacking order. Uploads and scroll restoration precede motion.
         await Promise.race([cancelled,new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))]);
         if(disposed)return;started=true;
         layer.querySelector('.album-view-guard')?.remove();
-        animations=turnViewLeaf({leaf,front,back,frontShade,backShade,cast,forward,two});
+        animations=turnLeaf({leaf,frontShade,backShade,cast,forward,two});
         if(tabsMove)animations.push(tabs.animate([{translate:shift},{translate:tabTranslate||'0px 0px'}],{duration:two?744:560,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}));
         await done(animations);
         if(disposed)return;
