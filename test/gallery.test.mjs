@@ -898,7 +898,7 @@ test('switching Album and All Photos animates both directions and handles rapid 
   assert.deepEqual(Array.from(leaf.frames,frame=>frame.transform),['rotateY(0deg)','rotateY(-180deg)']);
   assert.ok(outgoing.querySelector('.album-view-front .album-copy-album-pages'));assert.ok(outgoing.querySelector('.album-view-back .album-copy-album-sheet'));
   assert.equal($('album-sheet').style.visibility,'hidden','The live sheet cannot show through the moving leaf');
-  assert.ok([...outgoing.querySelectorAll('.photo-image')].every(button=>button.classList.contains('loaded')),'Snapshot prints are visible before the turn starts');
+  await wait(()=>[...outgoing.querySelectorAll('.photo-image')].every(button=>button.classList.contains('loaded')));
   await motion.finish();assert.equal($('album-book').inert,false);
   assert.equal($('album-book').querySelector('.album-view-layer'),null);
   $('album-view').click();$('sheet-view').click();await motion.finish();await motion.finish();
@@ -911,17 +911,17 @@ test('switching Album and All Photos animates both directions and handles rapid 
   assert.equal($('album-book').querySelector('.album-view-layer'),null);
 });
 
-test('view changes retain the old spread until images decode and cleanly cancel during preparation',async t=>{
+test('view changes start immediately even when an image decoder stalls and late results cannot revive a turn',async t=>{
   const {w,$,press,tab}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w),decode=w.HTMLImageElement.prototype.decode,releases=[];
   w.HTMLImageElement.prototype.decode=function(){return this.closest('#album-sheet')?new Promise(resolve=>releases.push(resolve)):decode.call(this);};
-  $('sheet-view').click();await wait(()=>releases.length>0);
-  const old=$('album-book').querySelector('.album-view-layer');assert.ok(old.querySelector('.print'));
-  assert.equal(motion.running.size,0);assert.equal($('album-sheet').style.visibility,'hidden');
-  w.HTMLImageElement.prototype.decode=decode;releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===4);
-  assert.equal($('album-sheet').style.visibility,'hidden');await motion.finish();assert.equal(old.isConnected,false);assert.equal($('album-sheet').style.visibility,'');
+  $('sheet-view').click();assert.equal(motion.running.size,4,'The normal page turn begins in the click handler');
+  assert.ok(releases.length>0);const old=$('album-book').querySelector('.album-view-layer');assert.ok(old.querySelector('.print'));
+  assert.equal($('album-sheet').style.visibility,'hidden');
+  await motion.finish();assert.equal(old.isConnected,false);assert.equal($('album-sheet').style.visibility,'');assert.equal($('album-book').inert,false,'A stalled decoder cannot trap the gallery');
+  w.HTMLImageElement.prototype.decode=decode;releases.forEach(resolve=>resolve());await tick();assert.equal(motion.running.size,0);assert.equal(old.isConnected,false);
   $('photo-scroll').scrollTop=160;$('album-view').click();
   assert.equal($('album-book').querySelector('.album-copy-photo-scroll').scrollTop,160,'Outgoing prints retain their exact scroll position');
-  press('Escape');await wait(()=>motion.running.size===3);await motion.finish();await motion.finish();await motion.finish();
+  press('Escape');await wait(()=>motion.running.size===3);await motion.finish();
   assert.equal($('photo-panel').open,false);assert.equal($('album-book').querySelector('.album-view-layer'),null);assert.equal($('album-pages').style.visibility,'');
 });
 
@@ -958,15 +958,15 @@ test('single-page view changes turn paper in both directions and settle safely o
   Object.defineProperty(w,'innerWidth',{configurable:true,writable:true,value:700});w.dispatchEvent(new w.Event('resize'));await wait(()=>pages().startsWith('single:'));
   const motion=controlledMotion(w);
   for(const view of ['sheet','album']){
-    $(view+'-view').click();await wait(()=>motion.running.size===3);
+    $(view+'-view').click();await wait(()=>motion.running.size===1);
     const layer=$('album-book').querySelector('.album-view-layer');assert.ok(layer.classList.contains('single'));
     const leaf=[...motion.running].find(animation=>animation.element.classList.contains('album-view-leaf'));
     const frames=Array.from(leaf.frames,frame=>frame.transform);
-    assert.deepEqual(frames,view==='sheet'?['rotateY(0deg)','rotateY(-105deg)']:['rotateY(-105deg)','rotateY(0deg)']);
-    assert.ok(leaf.frames.every(frame=>frame.opacity===undefined),'Paper stays opaque throughout the turn');
+    assert.deepEqual(frames,view==='sheet'?['perspective(1600px) rotateY(0deg)','perspective(1600px) rotateY(-82deg)']:['perspective(1600px) rotateY(-82deg)','perspective(1600px) rotateY(0deg)']);
+    assert.equal(leaf.options.duration,560,'Use the ordinary single-page turn timing');
     await motion.finish();assert.equal(layer.isConnected,false);assert.equal($('album-book').dataset.mode,view);
   }
-  $('sheet-view').click();await wait(()=>motion.running.size===3);
+  $('sheet-view').click();await wait(()=>motion.running.size===1);
   Object.defineProperty(w,'innerWidth',{configurable:true,writable:true,value:1024});w.dispatchEvent(new w.Event('resize'));
   await wait(()=>!$('album-book').dataset.viewMotion);assert.equal(motion.running.size,0);assert.equal($('album-sheet').style.visibility,'');
   assert.equal($('album-book').querySelector('.album-view-layer'),null);assert.equal($('album-book').inert,false);
@@ -1049,4 +1049,35 @@ test('importing a batch appends new prints without rebuilding earlier previews',
   releases.shift()();await wait(()=>$('photo-review').children.length===2&&releases.length===1);
   assert.equal($('photo-review').firstElementChild,first,'The first preview remains mounted while later files process');
   releases.shift()();await wait(()=>$('photo-review').children.length===3&&!$('choose-photos').disabled);
+});
+
+
+test('three-photo layouts alternate physical sides through long chapters',async t=>{
+  const {w,$,tab,press}=await setup(t,{seedStops:[...Array.from({length:38},()=>paris),...Array.from({length:38},()=>madrid)]});
+  const seen=new Set(),sides=[],counts=[];tab(paris.id).click();
+  for(let i=0;i<40&&!$('album-next').disabled;i++){
+    for(const page of $('album-pages').querySelectorAll('.page-city')){
+      if(seen.has(page.dataset.page))continue;seen.add(page.dataset.page);
+      const count=page.querySelectorAll('.print').length;counts.push(count);
+      if(count===3)sides.push(page.classList.contains('left')?'left':'right');
+    }
+    press('ArrowRight');
+  }
+  assert.deepEqual(sides,['right','left','right','left']);
+  assert.equal(counts.reduce((a,b)=>a+b,0),76);assert.ok(counts.filter(n=>n===4).length>counts.length/2);
+});
+
+test('Album to All Photos uses the exact ordinary page-turn frames, easing, and duration',async t=>{
+  const {w,$,tab}=await setup(t,{route:[paris],seedStops:Array.from({length:38},()=>paris)});tab(paris.id).click();const motion=controlledMotion(w);
+  $('album-next').click();assert.equal(motion.running.size,4);
+  const ordinary=JSON.stringify([...motion.running].map(animation=>({frames:animation.frames,options:animation.options})));
+  await motion.finish();$('sheet-view').click();assert.equal(motion.running.size,4);
+  assert.equal(JSON.stringify([...motion.running].map(animation=>({frames:animation.frames,options:animation.options}))),ordinary);
+  await motion.finish();
+});
+
+test('All Photos prepares while the album rests and reuses that sheet on the first switch',async t=>{
+  const {$}=await setup(t);await wait(()=>$('photo-gallery').querySelector('.photo-image'));
+  assert.equal($('album-sheet').hidden,true);const prepared=$('photo-gallery').firstElementChild;
+  $('sheet-view').click();assert.equal($('photo-gallery').firstElementChild,prepared);assert.equal($('album-sheet').hidden,false);
 });

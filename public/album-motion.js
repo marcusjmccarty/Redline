@@ -44,6 +44,23 @@
       }catch{}
     }));
   }
+  // Chapter turns and Album / All Photos share this exact motion.
+  function turnLeaf({leaf,frontShade,backShade,cast,forward,two=true,duration=two?744:560}){
+    const timing={duration,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'};
+    let animations;
+    if(two)animations=[
+      leaf.animate([{transform:'rotateY(0deg)'},{transform:`rotateY(${forward?-180:180}deg)`}],timing),
+      frontShade.animate([{opacity:0},{opacity:.42,offset:.5},{opacity:.42}],timing),
+      backShade.animate([{opacity:.42},{opacity:.42,offset:.5},{opacity:0}],timing),
+      cast.animate([{opacity:.55},{opacity:0}],timing)
+    ];
+    else{
+      const frames=[{transform:'perspective(1600px) rotateY(0deg)',opacity:1},{transform:'perspective(1600px) rotateY(-82deg)',opacity:.2}];
+      animations=[leaf.animate(forward?frames:[...frames].reverse(),timing)];
+    }
+    const start=document.timeline?.currentTime;if(start!=null)animations.forEach(animation=>animation.startTime=start);
+    return animations;
+  }
   function create({book,source,cover,two,closed='',opening=false}){
     const arrival=make('album-arrival'),scene=make('album-cover-scene'),hinge=make('album-cover-hinge'),leaf=make('album-cover-leaf'),front=make('album-cover-front'),back=make('album-cover-back');
     const tabs=document.getElementById('gallery-filter'),tabParent=tabs.parentElement,tabNext=tabs.nextSibling;
@@ -125,8 +142,8 @@
       }
     };
   }
-  // A view change turns one physical leaf. Both sides keep frozen, decoded
-  // prints at their original scroll positions; the binding never moves.
+  // A view switch starts just like a chapter turn. Images prepare independently
+  // and can never hold the paper still while the user waits for a decoder.
   function changeView({book,source,apply,direction,two}){
     const layer=make('album-view-layer'),hinge=make('album-view-hinge'),leaf=make('album-view-leaf');
     const front=make('album-view-face album-view-front'),back=make('album-view-face album-view-back');
@@ -159,43 +176,27 @@
     let disposed=false,animations=[];
     const scroll=incoming.querySelector('.photo-scroll'),viewport=(scroll||incoming).getBoundingClientRect();
     const images=[...incoming.querySelectorAll('img')].filter(img=>{const rect=img.getBoundingClientRect();return !viewport.height||rect.bottom>=viewport.top&&rect.top<=viewport.bottom;});
-    const ready=decodeImages([...images,...layer.querySelectorAll('img')]);
+    decodeImages([...images,...layer.querySelectorAll('img')]);
     return {
       async play(){
-        await ready;if(disposed)return;
-        const frontShade=make('album-view-shade'),backShade=make('album-view-shade'),cast=make('album-view-cast');
-        const timing={duration:two?660:580,easing:'cubic-bezier(.3,0,.25,1)',fill:'both'};
-        for(const shade of [frontShade,backShade,cast])shade.style.opacity='0';
-        let channels=[];
+        if(disposed)return;
+        const frontShade=make('page-shade album-view-shade'),backShade=make('page-shade album-view-shade'),cast=make('page-shade cast');
+        front.classList.add(forward?'right':'left');back.classList.add(forward?'left':'right');
         if(two){
           const underLeft=forward?oldLeft:newLeft,underRight=forward?newRight:oldRight;
           front.append(forward?oldRight:oldLeft,frontShade);back.append(forward?newLeft:newRight,backShade);
           (forward?underRight:underLeft).append(cast);leaf.append(front,back);hinge.append(leaf);layer.replaceChildren(underLeft,underRight,hinge);
-          channels=[
-            [leaf,[{transform:'rotateY(0deg)'},{transform:`rotateY(${forward?-180:180}deg)`}]],
-            [frontShade,[{opacity:0},{opacity:.14,offset:.5},{opacity:.14}]],
-            [backShade,[{opacity:.14},{opacity:.14,offset:.5},{opacity:0}]],
-            [cast,[{opacity:.12},{opacity:0}]]
-          ];
         }else{
-          const under=forward?newLeft:oldLeft;under.append(cast);front.append(forward?oldLeft:newLeft,frontShade);leaf.append(front);hinge.append(leaf);layer.replaceChildren(under,hinge);
-          channels=[
-            [leaf,forward?[{transform:'rotateY(0deg)'},{transform:'rotateY(-105deg)'}]:[{transform:'rotateY(-105deg)'},{transform:'rotateY(0deg)'}]],
-            [frontShade,[{opacity:0},{opacity:.12,offset:.5},{opacity:0}]],
-            [cast,[{opacity:.12},{opacity:0}]]
-          ];
+          const under=forward?newLeft:oldLeft;front.append(forward?oldLeft:newLeft);leaf.append(front);hinge.append(leaf);layer.replaceChildren(under,hinge);
+          leaf.classList.add('single-leaf');
         }
-        leaf.style.transform=channels[0][1][0].transform;copies.forEach(copy=>copy.restore());
-        // Finish all layout and scrolling before the first moving frame. The
-        // browser gets a paint to prepare the two faces on its compositor.
-        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));if(disposed)return;
-        if(tabsMove)channels.push([tabs,[{translate:shift},{translate:tabTranslate||'0px 0px'}]]);
-        animations=channels.map(([element,frames])=>element.animate(frames,timing));
-        const start=document.timeline?.currentTime;if(start!=null)animations.forEach(animation=>animation.startTime=start);
+        copies.forEach(copy=>copy.restore());
+        animations=turnLeaf({leaf,frontShade,backShade,cast,forward,two});
+        if(tabsMove)animations.push(tabs.animate([{translate:shift},{translate:tabTranslate||'0px 0px'}],{duration:two?744:560,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}));
         await done(animations);
       },
       dispose(){disposed=true;incoming.style.visibility=visibility;tabs.style.translate=tabTranslate;layer.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.viewMotion;[book.style.width,book.style.height,book.style.flex]=savedSize;}
     };
   }
-  window.RedlineAlbumMotion={create,changeView};
+  window.RedlineAlbumMotion={create,changeView,turnLeaf};
 })();

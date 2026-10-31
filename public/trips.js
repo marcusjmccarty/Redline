@@ -3,7 +3,7 @@
   const $=id=>document.getElementById(id),app=window.RedlineApp,SVG='http://www.w3.org/2000/svg';
   let current=null,photos=[],pending=[],busy=false,dirty=false,suppress=false,resumePhotos=false,cityIndex=null,exifReady=null,photoPanelRequest=0,photosRequested=false;
   let activeCity='',galleryItems=[],importing=false,photoMode='',dragDepth=0,selecting=false,thumbQueue=Promise.resolve();
-  let sheetKey='',tabsKey='';
+  let sheetKey='',tabsKey='',sheetWarmTimer=0;
   let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0,anchor=null,drawn=null,reopen=null,albumMotion=null,viewMotion=null;
   const chosen=new Set(),thumbJobs=new Set(),lastPages=new Map(),lastScrolls=new Map();
   const photoLabel=count=>`${count} photo${count===1?'':'s'}`;
@@ -80,6 +80,7 @@
     (back?.isConnected&&back!==document.body&&!back.closest('[hidden],[inert]')?back:$(triggers[id])).focus({preventScroll:true});
   }
   function finishAlbumClose(focus){
+    clearTimeout(sheetWarmTimer);
     $('photos-button').setAttribute('aria-expanded','false');
     if($('photo-panel').open)$('photo-panel').close();
     // Native close hides immediately; animation cleanup cannot flash into view.
@@ -358,7 +359,7 @@
         if(version!==photoPanelRequest||albumMotion!==token||token.phase!=='opening')return;
         token.scene.dispose();
       }
-      albumMotion=null;renderPhotoMode();
+      albumMotion=null;renderPhotoMode();warmSheet();
       if(token.refresh){renderReview();renderGallery();}
     }catch(error){if(version===photoPanelRequest){albumMotion?.scene?.dispose();$('album-book').querySelector('.album-loading-cover')?.remove();delete $('album-book').dataset.preparing;albumMotion=null;openPanel('photo-panel');renderGallery();showError('photo-message',error);}}
     finally{if(version===photoPanelRequest)photosRequested=false;}
@@ -503,6 +504,16 @@
     $('album-view').disabled=$('sheet-view').disabled=reviewing;$('album-modes').classList.toggle('away',reviewing);
     $('gallery-filter').classList.toggle('away',reviewing||!photos.length);$('gallery-filter').inert=reviewing||!photos.length;
     $('photo-panel').classList.toggle('selecting',selecting&&!reviewing);
+  }
+  function warmSheet(){
+    clearTimeout(sheetWarmTimer);
+    sheetWarmTimer=setTimeout(()=>{
+      if(!$('photo-panel').open||$('photo-viewer').open||mode()!=='album'||albumMotion||viewMotion||turning||busy)return;
+      const groups=photoGroups();renderSheet(groups);
+      // Prepare only the first screen of the city the switch will reveal.
+      const group=groups.find(group=>group.id===activeCity)||groups[0];
+      for(const photo of group?.items.slice(0,12)||[]){const image=new Image();image.decoding='async';image.src=photo.thumbUrl||photo.url;image.decode?.().catch(()=>{});}
+    },160);
   }
   function applyView(next){
     view=next;selecting=false;chosen.clear();anchor=null;renderGallery();
@@ -655,7 +666,7 @@
     renderTabs(groups);
     if(mode()==='album')renderAlbum();else renderSheet(groups);
     if(selecting)cityOptions($('move-photos'),'Move to…');
-    updateChosen();renderPhotoMode();
+    updateChosen();renderPhotoMode();if(mode()==='album')warmSheet();
   }
   // City dividers stick out of the album's edge, like the tabs in a real one.
   // A focused tab keeps keyboard focus when the tabs are rebuilt, as they are after every turn.
@@ -720,15 +731,16 @@
     const groups=photoGroups().map(group=>({...group,items:mixedPhotos(group.items)})),list=[{type:'cover'},{type:'inside'},{type:'title'}],rows=contentsRows();
     // Long voyages continue their contents over as many pages as they need.
     if(groups.length>1)for(let i=0;i<groups.length;i+=rows)list.push({type:'contents',groups:groups.slice(i,i+rows),continued:i>0});
+    let photoPage=0;
     for(const group of groups){
       let from=0,page=0;
       while(from<group.items.length){
         const remaining=group.items.length-from;
-        // Four prints carry the chapter; every fourth page gets more breathing
-        // room. Small, exact groups of four don't gain a nearly empty last page.
-        let room=page%4===0&&!(group.items.length<=16&&group.items.length%4===0)?3:4;
+        // An odd cadence moves the three-print layout between left and right
+        // pages, continuing across chapters instead of resetting on one side.
+        let room=photoPage%5===0&&!(group.items.length<=16&&group.items.length%4===0)?3:4;
         if(remaining<=4)room=remaining;else if(remaining===5)room=3;
-        list.push({type:'city',group,items:group.items.slice(from,from+room),first:page===0,from});from+=room;page++;
+        list.push({type:'city',group,items:group.items.slice(from,from+room),first:page===0,from});from+=room;page++;photoPage++;
       }
     }
     if(!photos.length)list.push({type:'empty'});
@@ -902,16 +914,11 @@
       leaf.className=`album-leaf ${forward?'turn-forward':'turn-back'}`;front.classList.add('leaf-face','leaf-front');back.classList.add('leaf-face','leaf-back');
       const frontShade=shade(),backShade=shade(),cast=shade('cast');front.append(frontShade);back.append(backShade);under[forward?1:0].append(cast);
       leaf.append(front,back);root.replaceChildren(...under,leaf);stateClasses(target);updateAlbumNav(target);
-      token.animations.push(
-        leaf.animate([{transform:'rotateY(0deg)'},{transform:`rotateY(${forward?-180:180}deg)`}],timing),
-        frontShade.animate([{opacity:0},{opacity:.42,offset:.5},{opacity:.42}],timing),
-        backShade.animate([{opacity:.42},{opacity:.42,offset:.5},{opacity:0}],timing),
-        cast.animate([{opacity:.55},{opacity:0}],timing));
+      token.animations.push(...RedlineAlbumMotion.turnLeaf({leaf,frontShade,backShade,cast,forward,duration:timing.duration}));
     }else{
       const below=pageElement(pages[forward?target:from],forward?target:from,'single'),above=pageElement(pages[forward?from:target],forward?from:target,'single');
       above.classList.add('single-leaf');root.replaceChildren(below,above);stateClasses(target);updateAlbumNav(target);
-      const out=[{transform:'perspective(1600px) rotateY(0deg)',opacity:1},{transform:'perspective(1600px) rotateY(-82deg)',opacity:.2}];
-      token.animations.push(above.animate(forward?out:[...out].reverse(),{...timing,duration:duration??560}));
+      token.animations.push(...RedlineAlbumMotion.turnLeaf({leaf:above,forward,two:false,duration:duration??560}));
     }
     await Promise.all(token.animations.map(animation=>animation.finished)).catch(()=>{});
     if(turning!==token)return;albumPage=target;if(!settle)return;turning=null;renderGallery();keepAlbumFocus(had);preload(target+(forward?1:-1)*step());
