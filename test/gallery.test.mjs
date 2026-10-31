@@ -905,7 +905,8 @@ test('switching Album and All Photos animates both directions and handles rapid 
   assert.deepEqual(Array.from(leaf.frames,frame=>frame.transform),['rotateY(0deg)','rotateY(-180deg)']);
   assert.ok(outgoing.querySelector('.album-view-front .album-page'));assert.ok(outgoing.querySelector('.album-view-back .album-copy-album-sheet'));
   assert.equal(outgoing.querySelectorAll('.album-copy-album-pages').length,0,'Native half-pages keep the same geometry as a chapter turn');
-  assert.equal($('album-sheet').style.visibility,'hidden','The live sheet cannot show through the moving leaf');
+  assert.equal($('album-sheet').style.visibility,'','The live sheet stays painted beneath the opaque moving leaf');
+  assert.equal(outgoing.querySelectorAll('.album-copy-album-sheet').length,1,'Only the turning half needs a copied destination; stationary photos stay live');
   await wait(()=>[...outgoing.querySelectorAll('.photo-image')].every(button=>button.classList.contains('loaded')));
   await motion.finish();assert.equal($('album-book').inert,false);
   assert.equal($('album-book').querySelector('.album-view-layer'),null);
@@ -924,7 +925,7 @@ test('a stalled image has a bounded preparation window and late results cannot r
   w.HTMLImageElement.prototype.decode=function(){return this.closest('#album-sheet')?new Promise(resolve=>releases.push(resolve)):decode.call(this);};
   $('sheet-view').click();assert.equal(motion.running.size,0,'The old spread remains still while the next page prepares');
   assert.ok(releases.length>0);const old=$('album-book').querySelector('.album-view-layer');assert.ok(old.querySelector('.print'));
-  assert.equal($('album-sheet').style.visibility,'hidden');
+  assert.equal($('album-sheet').style.visibility,'','The incoming sheet remains painted even if one bitmap stalls');
   await wait(()=>motion.running.size===4);
   await motion.finish();assert.equal(old.isConnected,false);assert.equal($('album-sheet').style.visibility,'');assert.equal($('album-book').inert,false,'A stalled decoder cannot trap the gallery');
   w.HTMLImageElement.prototype.decode=decode;releases.forEach(resolve=>resolve());await tick();assert.equal(motion.running.size,0);assert.equal(old.isConnected,false);
@@ -1239,15 +1240,18 @@ test('view faces stay in the same compositor stack from preparation through the 
   observer.disconnect();await motion.finish();
 });
 
-test('view turns paint the live destination beneath the finished leaf before removing it, in both directions',async t=>{
+test('view turns keep the live destination painted throughout and retire the old half before the final leaf, in both directions',async t=>{
   const {w,$,tab,press}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w),nativeFrame=w.requestAnimationFrame;
   for(const [button,target] of [['sheet-view','album-sheet'],['album-view','album-pages']]){
     $(button).click();await wait(()=>motion.running.size===4);
     const layer=$('album-book').querySelector('.album-view-layer'),frames=[];
+    assert.equal($(target).style.visibility,'','No hidden-to-visible layer replacement is needed at arrival');
+    assert.equal($(target).hidden,false);
     w.requestAnimationFrame=callback=>{frames.push(callback);return frames.length;};
     [...motion.running].forEach(animation=>animation.finish());await tick();
     assert.equal($(target).style.visibility,'','The live destination is ready beneath the last frame');
     assert.equal(layer.dataset.handoff,'true');assert.equal(layer.isConnected,true);
+    assert.equal(layer.querySelector(':scope > .album-view-surface > .album-snapshot'),null,'The outgoing stationary half is retired while the final turning face still covers its side');
     frames.shift()(w.performance.now());await tick();
     assert.equal(layer.isConnected,true,'The completed leaf covers the live page for a full paint opportunity');
     frames.shift()(w.performance.now());await wait(()=>!layer.isConnected);
