@@ -296,19 +296,22 @@
     const oldLeft=surface(source),oldRight=two?surface(source,true):null;
     layer.append(oldLeft);if(oldRight)layer.append(oldRight);book.append(layer);copies.forEach(copy=>copy.restore());
     book.dataset.viewMotion='true';
-    const incoming=apply(),visibility=incoming.style.visibility;incoming.style.visibility='hidden';
-    const newLeft=surface(incoming),newRight=two?surface(incoming,true):null;
+    // The real destination is the stationary paper underneath the turn. Keep
+    // it painted throughout; visibility:hidden can discard its scroll/image
+    // layers and force a fresh rasterization exactly as the leaf disappears.
+    const incoming=apply();
+    const arriving=two?surface(incoming,!forward):forward?null:surface(incoming);
     const frontShade=make('page-shade album-view-shade'),backShade=make('page-shade album-view-shade'),cast=make('page-shade cast');
     front.classList.add(forward?'right':'left');back.classList.add(forward?'left':'right');
     // Build the final 3D stack before decoding. At zero degrees the outgoing
     // face covers the next spread. No moving images are reparented at takeoff;
     // the browser has the entire preparation window to rasterize these layers.
     if(two){
-      const underLeft=forward?oldLeft:newLeft,underRight=forward?newRight:oldRight;
-      front.append(forward?oldRight:oldLeft,frontShade);back.append(forward?newLeft:newRight,backShade);
-      (forward?underRight:underLeft).append(cast);leaf.append(front,back);hinge.append(leaf);layer.replaceChildren(underLeft,underRight,hinge);
+      const stationary=forward?oldLeft:oldRight,shadow=make(`album-view-surface ${forward?'right':'left'}`);
+      front.append(forward?oldRight:oldLeft,frontShade);back.append(arriving,backShade);
+      shadow.append(cast);leaf.append(front,back);hinge.append(leaf);layer.replaceChildren(stationary,shadow,hinge);
     }else{
-      const under=forward?newLeft:oldLeft;front.append(forward?oldLeft:newLeft);leaf.append(front);hinge.append(leaf);layer.replaceChildren(under,hinge);
+      front.append(forward?oldLeft:arriving);leaf.append(front);hinge.append(leaf);layer.replaceChildren(...(forward?[]:[oldLeft]),hinge);
       leaf.classList.add('single-leaf');
       // A backward single-page turn starts partly folded. Keep the old page
       // above it during preparation, then remove only this stationary guard.
@@ -319,6 +322,9 @@
     const tabsMove=before.left!==after.left||before.top!==after.top;if(tabsMove)tabs.style.translate=shift;
     let disposed=false,started=false,animations=[],readyTimer,cancelReady;
     const cancelled=new Promise(resolve=>{cancelReady=resolve;});
+    // Even a single-page forward turn needs to warm its live destination,
+    // although that view no longer needs any duplicate stationary snapshot.
+    if(!captures.has(incoming))captures.set(incoming,viewCapture(incoming,{two,width,closed:false}));
     const ready=decodeImages([...captures.values()].flatMap(capture=>capture.images).concat([...layer.querySelectorAll('img')]),{reveal:()=>!disposed&&!started});
     return {
       async play(){
@@ -334,13 +340,13 @@
         if(tabsMove)animations.push(tabs.animate([{translate:shift},{translate:tabTranslate||'0px 0px'}],{duration:two?744:560,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'}));
         await done(animations);
         if(disposed)return;
-        // Paint the live page under the opaque, finished spread before retiring
-        // its 3D layers. Revealing it only as those layers disappeared could
-        // leave a compositor frame without the ready gallery underneath.
-        incoming.style.visibility=visibility;layer.dataset.handoff='true';
+        // Retire the outgoing stationary half first, while the finished leaf
+        // still covers its side. The live destination has never been hidden.
+        for(const page of [oldLeft,oldRight])if(page?.parentNode===layer)page.remove();
+        layer.dataset.handoff='true';
         await Promise.race([cancelled,new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))]);
       },
-      dispose(){disposed=true;clearTimeout(readyTimer);cancelReady();incoming.style.visibility=visibility;tabs.style.translate=tabTranslate;layer.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.viewMotion;[book.style.width,book.style.height,book.style.flex]=savedSize;resumePreviews();}
+      dispose(){disposed=true;clearTimeout(readyTimer);cancelReady();tabs.style.translate=tabTranslate;layer.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.viewMotion;[book.style.width,book.style.height,book.style.flex]=savedSize;resumePreviews();}
     };
   }
   window.RedlineAlbumMotion={create,changeView,turnLeaf,preload,clearPreloads,idle};
