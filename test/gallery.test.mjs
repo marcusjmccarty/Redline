@@ -598,6 +598,7 @@ function controlledMotion(w){
   class Motion {
     constructor(element,options){
       this.element=element;this.options=options;this.reversed=false;this.reverse=()=>{this.reversed=!this.reversed;};
+      this.updatePlaybackRate=value=>{this.playbackRate=value;};
       this.done=new Promise((resolve,reject)=>{
         this.finish=()=>{running.delete(this);resolve();};
         this.cancel=()=>{if(running.delete(this))reject(Error('Cancelled'));};
@@ -623,13 +624,13 @@ test('album and All Photos slide in, keep their spread stable, and slide away af
     assert.equal($('gallery-filter').parentElement,scene,'Tabs follow the cover geometrically');
     assert.equal(scene.querySelectorAll('[id]').length,1,'Only the original tab navigation has an ID');
     assert.equal($('photo-gallery').firstElementChild,paper);assert.equal($('album-pages').firstElementChild,spread);
-    assert.equal(motion.running.size,2);assert.equal([...motion.running][0].options.duration,420);
+    assert.equal(motion.running.size,2);assert.equal([...motion.running][0].options.duration,280);
     press('Escape');await motion.finish();
     assert.equal($('photo-panel').open,true,'The front cover stays visible after the fold');
-    assert.equal([...motion.running][0].options.duration,40,'A short beat separates folding from departure');
+    assert.equal([...motion.running][0].options.duration,20,'A short beat separates folding from departure');
     assert.equal($('photo-panel').dataset.departing,undefined);
     await motion.finish();assert.equal($('photo-panel').dataset.departing,'true');
-    assert.equal([...motion.running][0].options.duration,160);
+    assert.equal([...motion.running][0].options.duration,100);
     assert.match([...motion.running][0].frames.at(-1).transform,/translateY\([1-9]/);
     assert.ok([...motion.running][0].element.classList.contains('album-arrival'));
     await motion.finish();assert.equal($('photo-panel').open,false);
@@ -638,7 +639,8 @@ test('album and All Photos slide in, keep their spread stable, and slide away af
     $('photos-button').click();await wait(()=>motion.running.size===3);
     assert.equal($('photo-panel').dataset.motion,'opening');assert.equal($('album-book').dataset.mode,view);
     const entrance=[...motion.running].find(animation=>animation.element.classList.contains('album-arrival'));
-    assert.equal(entrance.options.duration,940,'Opening takes the former full closing duration');
+    assert.equal(entrance.options.duration,1000);assert.equal(entrance.frames.length,2,'The slide uses its full duration, without an early arrival and idle tail');
+    assert.equal([...motion.running].find(animation=>animation.element.classList.contains('album-cover-leaf')).options.duration,1400);
     assert.match(entrance.frames[0].transform,/translateY\([1-9]/);assert.equal(entrance.frames.at(-1).transform,'translateY(0px)');
     const arrived=$('album-pages').firstElementChild;
     press('ArrowRight');assert.equal(motion.running.size,3);
@@ -657,6 +659,7 @@ test('closing halfway through opening reverses that same cover and preserves the
   press('Escape');assert.equal($('photo-panel').dataset.motion,'closing');
   assert.equal($('album-book').querySelector('.album-cover-scene'),scene);
   assert.ok(animations.every(animation=>animation.reversed),'Reverse in place, without replacing any page');
+  assert.ok(animations.every(animation=>animation.playbackRate===-3.5),'An interrupted entrance closes quickly too');
   await motion.finish();await motion.finish();await motion.finish();assert.equal($('photo-panel').open,false);
   $('photos-button').click();await wait(()=>motion.running.size===3);await motion.finish();assert.equal(pages(),bookmark);
   w.matchMedia=()=>({matches:true});press('Escape');assert.equal($('photo-panel').open,false);
@@ -834,6 +837,7 @@ test('caption editing stays on the photo front, persists separately, and updates
   assert.equal(print.querySelector('figcaption').textContent,'Sunrise by the river.');assert.equal($('photo-caption').textContent,'Paris','The city name stays after saving a caption');
   assert.equal($('photo-note').hidden,false);assert.equal($('photo-note').textContent,'Sunrise by the river.');
   assert.equal($('photo-caption').nextElementSibling,$('photo-note'));assert.equal(footer.contains($('photo-note')),true,'City and caption share the existing footer');
+  assert.equal($('photo-note').tagName,'SPAN');assert.equal($('photo-caption').tagName,'SPAN');assert.equal($('photo-note').parentElement.tagName,'P','Both texts belong to one horizontal paragraph');
   $('flip-postcard').click();$('postcard-message').value='Dear family, this message is private.';$('postcard-message').dispatchEvent(new w.Event('input'));$('save-postcard').click();
   await wait(()=>$('postcard-save-status').textContent==='Postcard saved.');
   assert.equal(print.querySelector('figcaption').textContent,'Sunrise by the river.');
@@ -885,10 +889,15 @@ test('cover motion waits for decoded snapshots and can close before its first mo
 
 test('switching Album and All Photos animates both directions and handles rapid changes and dismissal',async t=>{
   const {w,$,press,pages}=await setup(t),motion=controlledMotion(w),bookmark=pages();
-  $('sheet-view').click();assert.equal($('album-book').inert,true);await wait(()=>motion.running.size===2);
+  $('sheet-view').click();assert.equal($('album-book').inert,true);await wait(()=>motion.running.size===4);
   assert.equal($('album-book').dataset.mode,'sheet');
   assert.ok([...motion.running].every(animation=>animation.element!==$('album-book')),'The binding and tabs never fade out or wobble');
   const outgoing=$('album-book').querySelector('.album-view-layer');assert.ok(outgoing);assert.equal(outgoing.querySelectorAll('[id]').length,0);
+  const leaf=[...motion.running].find(animation=>animation.element.classList.contains('album-view-leaf'));
+  assert.deepEqual(Array.from(leaf.frames,frame=>frame.transform),['rotateY(0deg)','rotateY(-180deg)']);
+  assert.ok(outgoing.querySelector('.album-view-front .album-copy-album-pages'));assert.ok(outgoing.querySelector('.album-view-back .album-copy-album-sheet'));
+  assert.equal($('album-sheet').style.visibility,'hidden','The live sheet cannot show through the moving leaf');
+  assert.ok([...outgoing.querySelectorAll('.photo-image')].every(button=>button.classList.contains('loaded')),'Snapshot prints are visible before the turn starts');
   await motion.finish();assert.equal($('album-book').inert,false);
   assert.equal($('album-book').querySelector('.album-view-layer'),null);
   $('album-view').click();$('sheet-view').click();await motion.finish();await motion.finish();
@@ -907,8 +916,8 @@ test('view changes retain the old spread until images decode and cleanly cancel 
   $('sheet-view').click();await wait(()=>releases.length>0);
   const old=$('album-book').querySelector('.album-view-layer');assert.ok(old.querySelector('.print'));
   assert.equal(motion.running.size,0);assert.equal($('album-sheet').style.visibility,'hidden');
-  w.HTMLImageElement.prototype.decode=decode;releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===2);
-  assert.equal($('album-sheet').style.visibility,'');await motion.finish();assert.equal(old.isConnected,false);
+  w.HTMLImageElement.prototype.decode=decode;releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===4);
+  assert.equal($('album-sheet').style.visibility,'hidden');await motion.finish();assert.equal(old.isConnected,false);assert.equal($('album-sheet').style.visibility,'');
   $('photo-scroll').scrollTop=160;$('album-view').click();
   assert.equal($('album-book').querySelector('.album-copy-photo-scroll').scrollTop,160,'Outgoing prints retain their exact scroll position');
   press('Escape');await wait(()=>motion.running.size===2);await motion.finish();await motion.finish();await motion.finish();
@@ -941,4 +950,23 @@ test('album chapters distribute portrait and landscape prints without changing l
   await w.RedlinePostcards.close();press('Escape');$('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);assert.deepEqual(read().flat(),ordered,'Reopening preserves the arrangement');
   assert.equal(ordered[0],first);$('sheet-view').click();assert.deepEqual([...$('photo-gallery').querySelectorAll('.photo-tile')].map(tile=>tile.dataset.photoId),original.map(photo=>photo.id),'All Photos retains original chronological order');
   assert.deepEqual(Array.from((await api(`/trips/${trip.id}`)).photos,photo=>photo.id),original.map(photo=>photo.id),'No stored order is changed');
+});
+
+test('single-page view changes turn paper in both directions and settle safely on resize',async t=>{
+  const {w,$,pages}=await setup(t);
+  Object.defineProperty(w,'innerWidth',{configurable:true,writable:true,value:700});w.dispatchEvent(new w.Event('resize'));await wait(()=>pages().startsWith('single:'));
+  const motion=controlledMotion(w);
+  for(const view of ['sheet','album']){
+    $(view+'-view').click();await wait(()=>motion.running.size===3);
+    const layer=$('album-book').querySelector('.album-view-layer');assert.ok(layer.classList.contains('single'));
+    const leaf=[...motion.running].find(animation=>animation.element.classList.contains('album-view-leaf'));
+    const frames=Array.from(leaf.frames,frame=>frame.transform);
+    assert.deepEqual(frames,view==='sheet'?['rotateY(0deg)','rotateY(-105deg)']:['rotateY(-105deg)','rotateY(0deg)']);
+    assert.ok(leaf.frames.every(frame=>frame.opacity===undefined),'Paper stays opaque throughout the turn');
+    await motion.finish();assert.equal(layer.isConnected,false);assert.equal($('album-book').dataset.mode,view);
+  }
+  $('sheet-view').click();await wait(()=>motion.running.size===3);
+  Object.defineProperty(w,'innerWidth',{configurable:true,writable:true,value:1024});w.dispatchEvent(new w.Event('resize'));
+  await wait(()=>!$('album-book').dataset.viewMotion);assert.equal(motion.running.size,0);assert.equal($('album-sheet').style.visibility,'');
+  assert.equal($('album-book').querySelector('.album-view-layer'),null);assert.equal($('album-book').inert,false);
 });
