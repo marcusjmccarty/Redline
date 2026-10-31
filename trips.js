@@ -916,18 +916,28 @@
     const timing={duration:duration??(coverTurn?900:Math.min(1000,720+Math.abs(target-from)*12)),easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'};
     $('album-book').style.setProperty('--turn-duration',`${timing.duration}ms`);
     const token={target,animations:[],had};turning=token;
+    // Carry the binding on the paper itself during a cover turn. A fixed
+    // full-spread board otherwise appears before the cover reaches that side.
+    const bound=page=>{
+      if(!coverTurn)return page;
+      const board=document.createElement('div');
+      board.className=`album-bound-page ${page.classList.contains('left')?'left':page.classList.contains('right')?'right':'single'}`;
+      board.dataset.type=page.dataset.type;board.append(page);return board;
+    };
     if(twoPage()){
       const left=forward?from-1:target-1,right=forward?target:from,frontIndex=forward?from:from-1,backIndex=forward?target-1:target;
       const under=[pageElement(pages[left],left,'left'),pageElement(pages[right],right,'right')];
       const leaf=document.createElement('div'),front=pageElement(pages[frontIndex],frontIndex,forward?'right':'left'),back=pageElement(pages[backIndex],backIndex,forward?'left':'right');
-      leaf.className=`album-leaf ${forward?'turn-forward':'turn-back'}`;front.classList.add('leaf-face','leaf-front');back.classList.add('leaf-face','leaf-back');
+      leaf.className=`album-leaf ${forward?'turn-forward':'turn-back'}${coverTurn?' cover-turn':''}`;
       const frontShade=shade(),backShade=shade(),cast=shade('cast');front.append(frontShade);back.append(backShade);under[forward?1:0].append(cast);
-      leaf.append(front,back);root.replaceChildren(...under,leaf);stateClasses(target);updateAlbumNav(target);
+      const frontFace=bound(front),backFace=bound(back);frontFace.classList.add('leaf-face','leaf-front');backFace.classList.add('leaf-face','leaf-back');
+      leaf.append(frontFace,backFace);root.replaceChildren(...under.map(bound),leaf);stateClasses(target);updateAlbumNav(target);
       token.animations.push(...RedlineAlbumMotion.turnLeaf({leaf,frontShade,backShade,cast,forward,duration:timing.duration}));
     }else{
       const below=pageElement(pages[forward?target:from],forward?target:from,'single'),above=pageElement(pages[forward?from:target],forward?from:target,'single');
-      above.classList.add('single-leaf');root.replaceChildren(below,above);stateClasses(target);updateAlbumNav(target);
-      token.animations.push(...RedlineAlbumMotion.turnLeaf({leaf:above,forward,two:false,duration:duration??560}));
+      const face=bound(above);face.classList.add('single-leaf');if(coverTurn)face.classList.add('cover-turn');
+      root.replaceChildren(bound(below),face);stateClasses(target);updateAlbumNav(target);
+      token.animations.push(...RedlineAlbumMotion.turnLeaf({leaf:face,forward,two:false,duration:duration??560}));
     }
     await Promise.all(token.animations.map(animation=>animation.finished)).catch(()=>{});
     if(turning!==token)return;albumPage=target;if(!settle)return;turning=null;renderGallery();keepAlbumFocus(had);preload(target+(forward?1:-1)*step());

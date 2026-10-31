@@ -150,7 +150,18 @@
     const frozen=source.classList.contains('album-sheet')?flatSheet(source):null;
     const capture=frozen?()=>({el:frozen.template.cloneNode(true),restore(){}}):snapshots(source),style=getComputedStyle(source);
     return {images:frozen?.images||[...source.querySelectorAll('img')],take:right=>{
-      const copy=capture();copy.el.style.width=`${width}px`;copy.el.style.left=right&&two?`${-width/2}px`:'0';
+      const copy=capture();
+      if(frozen&&two){
+        // Each face only carries prints that can appear on its half. Keep
+        // gutter-crossing prints on both, including their soft shadow, so the
+        // hinge stays seamless without decoding/rasterizing two whole sheets.
+        const start=right?width/2:0,end=right?width:width/2;
+        for(const tile of copy.el.querySelectorAll('.photo-tile')){
+          const left=parseFloat(tile.closest('.album-frozen-scroll').style.left)+parseFloat(tile.style.left),edge=left+parseFloat(tile.style.width);
+          if(edge<start-24||left>end+24)tile.remove();
+        }
+      }
+      copy.el.style.width=`${width}px`;copy.el.style.left=right&&two?`${-width/2}px`:'0';
       copy.el.style.translate=style.translate||'none';copy.el.style.boxShadow=style.boxShadow;copy.el.style.visibility='visible';return copy;
     }};
   }
