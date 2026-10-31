@@ -37,11 +37,12 @@
     $('save-caption').textContent=active.captionPromise?'Saving…':'Save';
   }
   function captionEditor(open){
-    $('caption-form').hidden=!open;$('photo-caption').hidden=open;
+    if(open&&$('caption-form').hidden){const viewer=$('photo-viewer'),top=viewer.getBoundingClientRect().top;viewer.style.top=`${top}px`;viewer.style.bottom='auto';viewer.style.marginBlock='0';}
+    $('caption-form').hidden=!open;
     $('edit-caption').setAttribute('aria-expanded',String(open));
     $('postcard-front').classList.toggle('caption-editing',open);
     if(open){$('caption-input').value=active.caption;$('caption-input').focus();captionStatus();}
-    else $('photo-caption').textContent=active.photo.caption||active.photo.city?.name||'';
+    $('photo-caption').textContent=active.photo.city?.name||'';
   }
   async function saveCaption(state){
     if(!state||state.preview)return;
@@ -73,7 +74,7 @@
   $('caption-input').addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();finishCaption();}});
   function flip(){
     if(active?.preview)return;
-    const back=!$('photo-viewer').classList.contains('flipped'),viewer=$('photo-viewer');wakeArrows();
+    const back=!$('photo-viewer').classList.contains('flipped'),viewer=$('photo-viewer');if(back)captionEditor(false);wakeArrows();
     // The card lifts slightly off the table while it turns over.
     if(motion(viewer)){viewer.classList.remove('flip-motion');void viewer.offsetWidth;viewer.classList.add('flip-motion');clearTimeout(flip.timer);flip.timer=setTimeout(()=>viewer.classList.remove('flip-motion'),950);}
     $('photo-viewer').classList.toggle('flipped',back);
@@ -157,6 +158,7 @@
   }
   function open(photo,api,collection=[photo],viewerActions=null,origin=null){
     const wasOpen=$('photo-viewer').open,onBack=$('postcard-back').contains(document.activeElement);
+    for(const property of ['top','bottom','margin-block'])$('photo-viewer').style.removeProperty(property);
     if(!wasOpen)returnFocus=origin||document.activeElement;
     sequence=collection;actions=api?viewerActions:null;
     shareGeneration++;shareFile=null;clearTimeout(shareTimer);$('share-postcard').disabled=true;
