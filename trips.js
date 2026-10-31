@@ -88,6 +88,8 @@
     if(turning){const token=turning;turning=null;token.animations.forEach(animation=>animation.cancel());}
     albumMotion?.scene?.dispose();$('album-book').querySelector('.album-loading-cover')?.remove();delete $('album-book').dataset.preparing;
     $('album-pages').replaceChildren();
+    // Retain previews only for an open album, not while exploring the map.
+    $('photo-gallery').replaceChildren();sheetKey='';
     albumMotion=null;delete $('photo-panel').dataset.departing;$('photo-panel').style.removeProperty('--album-exit-delay');photosRequested=false;dragDepth=0;$('photo-drop-hint').hidden=true;
     setSelecting(false);renderPhotoMode();document.body.classList.remove('sheet-open');
     if(!focus&&!$('trip-panel').hidden)$('trip-panel').focus({preventScroll:true});
@@ -432,6 +434,8 @@
     thumbQueue=thumbQueue.then(async()=>{
       await new Promise(resolve=>setTimeout(resolve,0));
       try{
+        await window.RedlineAlbumMotion.idle();
+        if(!$('photo-panel').open)return;
         const {blob}=await encode(image,image.naturalWidth,image.naturalHeight,640,.8),form=new FormData();
         form.append('thumb',blob,'thumb.jpg');form.append('width',String(image.naturalWidth));form.append('height',String(image.naturalHeight));
         const {photo:saved}=await api(`/photos/${photo.id}/thumb`,{method:'PUT',body:form});Object.assign(photo,{thumbUrl:saved.thumbUrl,width:saved.width,height:saved.height});
