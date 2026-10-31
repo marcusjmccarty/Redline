@@ -14,11 +14,13 @@
   function open() {
     if (!opening) opening = new Promise((resolve,reject) => {
       if (!window.indexedDB) return reject(Error('This browser cannot save trips. Enable website storage or use another browser.'));
-      const operation = indexedDB.open('redline-library-v1', 1);
+      const operation = indexedDB.open('redline-library-v1', 2);
       operation.onupgradeneeded = () => {
         const db = operation.result;
-        db.createObjectStore('trips', {keyPath:'id'});
-        db.createObjectStore('photos', {keyPath:'id'}).createIndex('tripId','tripId');
+        if(!db.objectStoreNames.contains('trips'))db.createObjectStore('trips',{keyPath:'id'});
+        if(!db.objectStoreNames.contains('photos'))db.createObjectStore('photos',{keyPath:'id'}).createIndex('tripId','tripId');
+        // Text edits never reserialize the existing image Blob (which can fail in WebKit).
+        if(!db.objectStoreNames.contains('photoNotes'))db.createObjectStore('photoNotes',{keyPath:'id'});
       };
       operation.onsuccess = () => {
         const db = operation.result;
@@ -118,6 +120,10 @@
     return photos;
   }
 
+  async function withNotes(stores,photos){
+    return Promise.all(photos.map(async photo=>({...photo,...await request(stores.photoNotes.get(photo.id))})));
+  }
+
   async function api(path, options={}) {
     const parts=path.split('/').filter(Boolean),method=options.method||'GET';
     let body=options.body;
@@ -146,7 +152,7 @@
     }
     if (parts[0]==='trips' && parts.length===2) {
       if (method==='GET') {
-        const result=await transaction(['trips','photos'],'readonly',async stores=>({trip:await ownTrip(stores.trips,parts[1]),photos:await request(stores.photos.index('tripId').getAll(parts[1]))}));
+        const result=await transaction(['trips','photos','photoNotes'],'readonly',async stores=>({trip:await ownTrip(stores.trips,parts[1]),photos:await withNotes(stores,await request(stores.photos.index('tripId').getAll(parts[1])))}));
         result.photos=result.photos.sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.id.localeCompare(b.id)).map(photoDto);
         return result;
       }
@@ -160,9 +166,9 @@
         });
       }
       if (method==='DELETE') {
-        const ids=await transaction(['trips','photos'],'readwrite',async stores=>{
+        const ids=await transaction(['trips','photos','photoNotes'],'readwrite',async stores=>{
           const trip=await ownTrip(stores.trips,parts[1]),keys=await request(stores.photos.index('tripId').getAllKeys(trip.id));
-          for (const key of keys) await request(stores.photos.delete(key));
+          for(const key of keys){await request(stores.photos.delete(key));await request(stores.photoNotes.delete(key));}
           await request(stores.trips.delete(trip.id)); return keys;
         });
         ids.forEach(forget); return {deleted:true,photoCount:ids.length};
@@ -193,62 +199,53 @@
     // Moving and deleting several photos are single atomic changes.
     if (parts[0]==='trips' && parts.length===3 && parts[2]==='photos' && method==='PUT') {
       const ids=photoIds(body);
-      const records=await transaction(['trips','photos'],'readwrite',async stores=>{
+      const records=await transaction(['trips','photos','photoNotes'],'readwrite',async stores=>{
         const trip=await ownTrip(stores.trips,parts[1]),stop=trip.stops.find(s=>s.id===body.stopId);
         if (!stop) fail('Save this city in your trip before moving photos there.');
         const photos=await tripPhotos(stores,trip,ids);
         for (const photo of photos) { photo.stopId=stop.id; photo.city=stop; await request(stores.photos.put(photo)); }
-        return photos;
+        return withNotes(stores,photos);
       });
       return {photos:records.map(photoDto)};
     }
     if (parts[0]==='trips' && parts.length===3 && parts[2]==='photos' && method==='DELETE') {
       const ids=photoIds(body);
-      await transaction(['trips','photos'],'readwrite',async stores=>{
+      await transaction(['trips','photos','photoNotes'],'readwrite',async stores=>{
         const trip=await ownTrip(stores.trips,parts[1]);await tripPhotos(stores,trip,ids);
-        for (const id of ids) await request(stores.photos.delete(id));
+        for(const id of ids){await request(stores.photos.delete(id));await request(stores.photoNotes.delete(id));}
       });
       ids.forEach(forget); return {deleted:ids.length};
     }
     if (parts[0]==='photos' && parts.length===3 && parts[2]==='thumb' && method==='PUT') {
       const more=await extras(body);if (!more.thumb) fail('Choose a photo preview.');
-      const record=await transaction(['photos'],'readwrite',async ({photos})=>{
+      const record=await transaction(['photos','photoNotes'],'readwrite',async ({photos,photoNotes})=>{
         const photo=idValid(parts[1])?await request(photos.get(parts[1])):null;
         if (!photo) fail('Photo not found.',404);
-        Object.assign(photo,more);await request(photos.put(photo));return photo;
+        Object.assign(photo,more);await request(photos.put(photo));return {...photo,...await request(photoNotes.get(photo.id))};
       });
       // Only the preview changes; the full photo URL may still be on screen.
       if (thumbs.has(record.id)) { URL.revokeObjectURL(thumbs.get(record.id)); thumbs.delete(record.id); }
       return {photo:photoDto(record)};
     }
-    if (parts[0]==='photos' && parts.length===3 && parts[2]==='caption' && method==='PUT') {
-      const data=caption(body?.caption);
-      return transaction(['photos'],'readwrite',async ({photos})=>{
+    if(parts[0]==='photos'&&parts.length===3&&['caption','postcard'].includes(parts[2])&&method==='PUT'){
+      const field=parts[2],data=field==='caption'?caption(body?.caption):postcard(body?.postcard),revisionKey=`${field}Revision`;
+      return transaction(['photos','photoNotes'],'readwrite',async ({photos,photoNotes})=>{
         const photo=idValid(parts[1])?await request(photos.get(parts[1])):null;
         if(!photo)fail('Photo not found.',404);
-        if(!Number.isInteger(body.revision)||body.revision!==(photo.captionRevision||1))fail('This caption changed in another tab. Reopen the photo before saving.',409);
-        photo.caption=data;photo.captionRevision=(photo.captionRevision||1)+1;
-        await request(photos.put(photo));return {caption:data,revision:photo.captionRevision};
-      });
-    }
-    if (parts[0]==='photos' && parts.length===3 && parts[2]==='postcard' && method==='PUT') {
-      const data=postcard(body?.postcard);
-      return transaction(['photos'],'readwrite',async ({photos})=>{
-        const photo=idValid(parts[1])?await request(photos.get(parts[1])):null;
-        if (!photo) fail('Photo not found.',404);
-        if (!Number.isInteger(body.revision) || body.revision!==photo.postcardRevision) fail('This postcard changed in another tab. Reopen the photo before saving.',409);
-        photo.postcard=data; photo.postcardRevision++;
-        await request(photos.put(photo)); return {postcard:data,revision:photo.postcardRevision};
+        const notes=await request(photoNotes.get(photo.id))||{id:photo.id},revision=notes[revisionKey]??photo[revisionKey]??1;
+        if(!Number.isInteger(body.revision)||body.revision!==revision)fail(`This ${field} changed in another tab. Copy your draft, then reload before saving.`,409);
+        notes[field]=data;notes[revisionKey]=revision+1;
+        await request(photoNotes.put(notes));return {[field]:data,revision:notes[revisionKey]};
       });
     }
     fail('Not found.',404);
   }
 
   async function exportArchive(tripId=null) {
-    const records=await transaction(['trips','photos'],'readonly',async stores=>{
+    const records=await transaction(['trips','photos','photoNotes'],'readonly',async stores=>{
       const trips=tripId?[await ownTrip(stores.trips,tripId)]:await request(stores.trips.getAll());
       if (!trips.length) fail('Save a trip before exporting a backup.');
-      const photos=await request(stores.photos.getAll());
+      const photos=await withNotes(stores,await request(stores.photos.getAll()));
       return trips.map(trip=>({trip,photos:photos.filter(photo=>photo.tripId===trip.id).map(photo=>({photo,blob:photo.blob}))}));
     });
     const blob=window.RedlineArchive.pack(records);

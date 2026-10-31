@@ -30,13 +30,12 @@
 
 @starting-style {
   #info-dialog[open] { opacity: 0; transform: translateY(26px) scale(.985); }
-  .album[open] { opacity: 0; }
   .album[open]::backdrop, #info-dialog[open]::backdrop, #photo-viewer[open]::backdrop { background-color: #211c1600; }
 }
 #info-dialog::backdrop { background-color: #211c1670; }
-.album { transition: opacity .18s ease; }
+.album { transition: none; }
 .album::backdrop { background-color: #1d1712c4; transition: background-color .18s ease; }
-.album[data-departing=true]::backdrop { background-color: #1d171200; transition-duration: .12s; }
+.album[data-departing=true]::backdrop { background-color: #1d171200; transition-duration: .24s; }
 .album[data-motion=closing] :is(.album-top, .album-foot, #photo-message) { opacity: 0; pointer-events: none; transition: opacity .12s ease; }
 .album:not([open]) { display: none; }
 .album:not([open])::backdrop, #info-dialog:not([open])::backdrop { background-color: #211c1600; }
@@ -97,6 +96,8 @@
 .album-book:is([data-cover-motion], [data-preparing])::after { visibility: hidden; }
 .album-book[data-preparing] > .album-tabs { visibility: hidden; }
 .album-loading-cover { position: absolute; z-index: 7; top: var(--pad); bottom: var(--pad); left: calc(25% + var(--pad) / 2 + 1px); width: calc(50% - var(--pad) - 2px); }
+.album-arrival { position: absolute; z-index: 7; inset: 0; will-change: transform; }
+.album[data-motion=opening] .album-loading-cover { visibility: hidden; }
 .album-cover-scene { position: absolute; z-index: 7; inset: var(--pad) calc(var(--pad) + 2px); isolation: isolate; }
 .album-cover-hinge { position: absolute; z-index: 3; inset: 0; perspective: 2800px; pointer-events: none; }
 .album-cover-scene::before { content: ''; position: absolute; top: calc(-1 * var(--pad)); bottom: calc(-1 * var(--pad)); left: 50%; right: calc(-1 * var(--pad) - 2px); border-radius: 3px 8px 8px 3px; background: var(--leather); box-shadow: 0 24px 60px #0008; }
@@ -219,7 +220,7 @@
 .print-photo:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
 
 /* Divider tabs and page controls */
-.album-tabs { position: absolute; z-index: 1; left: calc(100% - var(--pad) - 18px); top: 50%; transform: translateY(-50%); flex: none; display: flex; flex-direction: column; gap: 5px; max-height: 76%; margin: 0; padding: 4px 8px 4px 0; overflow-y: auto; scrollbar-width: none; transition: left var(--turn-duration) var(--turn-ease), opacity .2s; }
+.album-tabs { clip-path: inset(0 0 0 calc(16px + var(--page-depth, 6px))); overflow-x: hidden; position: absolute; z-index: 1; left: calc(100% - var(--pad) - 18px); top: 50%; transform: translateY(-50%); flex: none; display: flex; flex-direction: column; gap: 5px; max-height: 76%; margin: 0; padding: 4px 8px 4px 0; overflow-y: auto; scrollbar-width: none; transition: left var(--turn-duration) var(--turn-ease), opacity .2s; }
 .album-tabs::-webkit-scrollbar { display: none; }
 /* Book-cloth colours (oxblood, bottle green, navy, ochre, plum, slate) in one strip; --tab picks one, with half a colour to spare on each side. */
 .album-tab { display: flex; align-items: center; gap: 7px; width: calc(var(--tab-width) + 16px); padding: 8px 10px 8px 30px; border: 0; border-radius: 0 7px 7px 0; background: linear-gradient(90deg, #6b2c2a 0 16.667%, #2f4b3b 0 33.333%, #2d3c58 0 50%, #6c4f1e 0 66.667%, #583450 0 83.333%, #465360 0) calc((var(--tab, 0) * 2 + .5) * 100% / 11) 0 / 1200% 100%; color: #fbf4e6; font: 13px Georgia, serif; text-align: left; box-shadow: 2px 2px 6px #0006, inset 0 1px 0 #ffffff26; transform: none; transition: transform .3s var(--ease-out), filter .3s, box-shadow .3s; }
@@ -244,7 +245,7 @@
 .album #photo-message.error { background: #7c211af2; color: #fff; }
 
 /* "All photos" and import review share one wide sheet inside the book. */
-.album-sheet { position: absolute; z-index: 2; inset: var(--pad) calc(var(--pad) + 2px); display: flex; flex-direction: column; overflow: hidden; border-radius: 3px; color: var(--page-ink); background: var(--page); box-shadow: inset 0 0 40px #8a6a3c1f; animation: sheet-in .35s var(--ease-out); }
+.album-sheet { position: absolute; z-index: 2; inset: var(--pad) calc(var(--pad) + 2px); display: flex; flex-direction: column; overflow: hidden; border-radius: 3px; color: var(--page-ink); background: var(--page); box-shadow: inset 0 0 40px #8a6a3c1f; animation: none; }
 .album-book:is([data-mode=sheet], [data-mode=review])::before { opacity: 1; }
 .album-book[data-mode=sheet] .album-sheet::after { content: ''; position: absolute; z-index: 4; pointer-events: none; top: 0; bottom: 0; left: 50%; width: 32px; transform: translateX(-50%); background: linear-gradient(90deg, #0000, #74563208 35%, #74563220 49%, #fff8e84a 52%, #74563208 67%, #0000); }
 .gallery-toolbar, .gallery-actions, .photo-bulk { flex: none; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 9px 22px; border-bottom: 1px solid #b4a58b44; }
@@ -258,7 +259,7 @@
 .photo-progress { flex: none; height: 3px; overflow: hidden; background: #b4a58b33; }
 .photo-progress span { display: block; width: calc(var(--progress, 0) * 100%); height: 100%; background: var(--red); transition: width .3s var(--ease-out); }
 .photo-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 0 24px; scrollbar-width: thin; scrollbar-color: #bdac90 transparent; }
-.gallery-city-heading { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 16px 22px 10px; background: var(--page); }
+.gallery-city-heading { position: relative; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 16px 22px 10px; background: var(--page); }
 .gallery-stop-number { align-self: flex-start; margin-top: 7px; color: var(--red); font: 10px Georgia, serif; }
 .gallery-city-place { flex: 1; min-width: 0; }
 :is(#photo-gallery, .album-copy-photo-gallery) .gallery-city h3 { margin: 0; overflow: hidden; color: #34271a; font: 26px/1.1 var(--hand); text-overflow: ellipsis; white-space: nowrap; }
@@ -348,7 +349,7 @@
 .viewer-photo { position: relative; overflow: hidden; }
 #full-photo { display: block; width: auto; height: auto; max-width: calc(90vw - 40px); max-height: min(75svh, calc(90svh - 96px)); object-fit: contain; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: pan-y pinch-zoom; }
 .viewer-ghost { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
-.viewer-edge { position: absolute; z-index: 1; top: 0; bottom: 0; display: flex; align-items: center; width: 22%; max-width: 140px; padding: 0 12px; border: 0; background: none; opacity: 0; transition: opacity .15s ease; cursor: pointer; touch-action: pan-y pinch-zoom; }
+.viewer-edge { position: absolute; z-index: 1; top: 0; bottom: 0; display: flex; align-items: center; width: 22%; max-width: 140px; padding: 0 12px; border: 0; background: none; opacity: 0; transition: opacity .45s cubic-bezier(.4,0,.2,1); cursor: pointer; touch-action: pan-y pinch-zoom; }
 .viewer-edge.previous { left: 0; justify-content: flex-start; }
 .viewer-edge.next { right: 0; justify-content: flex-end; }
 .viewer-edge svg { width: 36px; height: 36px; padding: 8px; border-radius: 50%; background: #1d1812a6; fill: none; stroke: #fff; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: transform .2s var(--ease-out); }
@@ -360,8 +361,8 @@
 @media (hover: none), (any-pointer: coarse) { .viewer-edge { width: 18%; padding: 0 8px; opacity: .8; } .viewer-edge svg { width: 30px; height: 30px; padding: 7px; } }
 #photo-viewer.flipped .viewer-edge { pointer-events: none; }
 .photo-viewer-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; padding-top: 8px; }
-.caption-editing .photo-viewer-caption { flex-basis: 100%; order: 1; }
-#caption-form { display: flex; align-items: center; width: 100%; gap: 8px; }
+#caption-form { display: flex; align-items: center; width: 100%; gap: 8px; margin-top: 5px; animation: caption-drop .18s var(--ease-out); }
+@keyframes caption-drop { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
 #caption-input { flex: 1; min-width: 0; padding: 7px 0; border: 0; border-bottom: 1px solid #aa9675; outline: none; background: transparent; color: var(--page-ink); font: 16px Georgia, serif; }
 #caption-input:focus-visible { border-bottom-color: var(--red); }
 .photo-viewer-caption { position: relative; display: flex; flex: 1; align-items: center; min-width: 0; border-radius: 2px; }
@@ -390,7 +391,6 @@
 #postcard-front:focus { outline: none; }
 #postcard-saved { margin-right: auto; color: var(--muted); font: 10px Arial, sans-serif; }
 
-@keyframes sheet-in { from { opacity: 0; transform: scale(.985); } }
 @keyframes bar-in { from { opacity: 0; transform: translateY(-6px); } }
 @keyframes drop-in { from { opacity: 0; transform: translateY(-14px) rotate(calc(var(--tilt, 0deg) * 3)) scale(1.04); } }
 @keyframes fade-in { from { opacity: 0; } }
@@ -405,7 +405,7 @@
   .album-book .album-cover-scene .album-tabs, .album-book .album-cover-scene.closed-book .album-tabs { left: 0; right: 0; top: -36px; }
   .album-book::after { left: calc(var(--pad) + 2px); right: calc(var(--pad) + 2px); top: calc(var(--pad) - var(--page-depth, 6px)); bottom: auto; width: auto; height: var(--page-depth, 6px); background: repeating-linear-gradient(0deg, #e9dec9 0 1px, #c8b99d 1px 2px); }
   .album-cover-scene::after { left: 2px; right: 2px; top: calc(-1 * var(--page-depth, 6px)); bottom: auto; width: auto; height: var(--page-depth, 6px); background: repeating-linear-gradient(0deg, #e9dec9 0 1px, #c8b99d 1px 2px); }
-  .album-tabs, .album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs { left: 10px; right: 10px; top: -26px; transform: none; flex-direction: row; gap: 4px; max-height: none; margin: 0; padding: 3px 2px 0; overflow-x: auto; }
+  .album-tabs, .album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs { clip-path: inset(0 0 var(--page-depth, 6px) 0); left: 10px; right: 10px; top: -26px; transform: none; flex-direction: row; gap: 4px; max-height: none; margin: 0; padding: 3px 2px 0; overflow-x: auto; }
   .album-tab { flex: none; width: auto; max-width: 180px; padding: 7px 12px; border-radius: 5px 5px 0 0; box-shadow: 0 -1px 4px #0003; transform: none; }
   .album-tab:hover:not(:disabled) { transform: none; }
   .album-tab[aria-current=true] { box-shadow: 0 0 0 2px #f4ecdb, 0 2px 8px #0007; transform: none; }

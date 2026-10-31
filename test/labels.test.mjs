@@ -88,3 +88,15 @@ test('the previous candidate is kept while it is still valid',()=>{
   assert.notEqual(blocked[0].name,'left-above');
   assert.equal(place([item('VIENNA',785,209,0)],{...view,previous:{VIENNA:'below'}})[0].name,'below');
 });
+
+
+test('Puerto Ayora and Quito stay on the outside of their dots, including with stale placement history',()=>{
+  for(const [a,b] of [[344,390],[398,406]]){
+    const items=[item('PUERTO AYORA',a,450,0),item('QUITO',b,448,1)];
+    const result=place(items,{width:1440,height:900,previous:{'PUERTO AYORA':'right-above',QUITO:'right-below'}});
+    assert.equal(result[0].anchor,'end');assert.equal(result[1].anchor,'start');
+    assertClear(items,result,{width:1440,height:900});
+    assert.ok(result[0].box.x+result[0].box.w<items[0].x,'Puerto Ayora is labelled to its own west');
+    assert.ok(result[1].box.x>items[1].x,'Quito is labelled to its own east');
+  }
+});

@@ -183,3 +183,49 @@ test('captions save independently of postcards, reject stale edits, and survive 
   await store.api(`/photos/${photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption:'',revision:2})});
   const cleared=(await store.api(`/trips/${trip.id}`)).photos[0];assert.equal(cleared.caption,'');assert.deepEqual(plain(cleared.postcard),card);
 });
+
+test('caption and postcard edits never reserialize image Blobs, and deleting photos cleans up their notes',async()=>{
+  const {store,indexedDB}=library(),trip=await create(store),photo=await upload(store,trip),second=await upload(store,trip);
+  const bytes=await (await fetch(photo.url)).arrayBuffer(),original=IDBObjectStore.prototype.put,written=[];
+  IDBObjectStore.prototype.put=function(value,...args){
+    if(Object.values(value).some(value=>value instanceof Blob))throw new DOMException('Error preparing Blob/File data to be stored in object store','DataCloneError');
+    written.push(this.name);return original.call(this,value,...args);
+  };
+  try{
+    await store.api(`/photos/${photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption:'By the river',revision:1})});
+    await store.api(`/photos/${photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:card,revision:1})});
+    await store.api(`/photos/${second.id}/caption`,{method:'PUT',body:JSON.stringify({caption:'Later that day',revision:1})});
+  }finally{IDBObjectStore.prototype.put=original;}
+  assert.deepEqual(written,['photoNotes','photoNotes','photoNotes']);
+  const reopened=(await library(indexedDB).store.api(`/trips/${trip.id}`)).photos.find(p=>p.id===photo.id);
+  assert.equal(reopened.caption,'By the river');assert.deepEqual(plain(reopened.postcard),card);
+  assert.deepEqual(await (await fetch(reopened.url)).arrayBuffer(),bytes);
+  const db=await new Promise((resolve,reject)=>{const operation=indexedDB.open('redline-library-v1',2);operation.onsuccess=()=>resolve(operation.result);operation.onerror=()=>reject(operation.error);});
+  const notes=()=>new Promise((resolve,reject)=>{const operation=db.transaction('photoNotes').objectStore('photoNotes').getAll();operation.onsuccess=()=>resolve(operation.result);operation.onerror=()=>reject(operation.error);});
+  assert.equal((await notes()).length,2);
+  await store.api(`/trips/${trip.id}/photos`,{method:'DELETE',body:JSON.stringify({ids:[photo.id]})});
+  assert.deepEqual((await notes()).map(note=>note.id),[second.id]);
+  await store.api(`/trips/${trip.id}`,{method:'DELETE'});assert.equal((await notes()).length,0);db.close();
+});
+
+test('upgrading an existing library keeps original photos and text, then exports updated notes',async()=>{
+  const indexedDB=new IDBFactory(),createdAt='2026-09-15T10:00:00.000Z';
+  const trip={id:'legacy-trip-01',title:'An older trip',stops:[paris],revision:3,createdAt,updatedAt:createdAt};
+  const photo={id:'legacy-photo-01',tripId:trip.id,stopId:paris.id,city:paris,createdAt,blob:new Blob([jpeg],{type:'image/jpeg'}),caption:'An older caption',captionRevision:4,postcard:card,postcardRevision:7};
+  await new Promise((resolve,reject)=>{
+    const operation=indexedDB.open('redline-library-v1',1);
+    operation.onupgradeneeded=()=>{const db=operation.result;db.createObjectStore('trips',{keyPath:'id'}).add(trip);const photos=db.createObjectStore('photos',{keyPath:'id'});photos.createIndex('tripId','tripId');photos.add(photo);};
+    operation.onsuccess=()=>{operation.result.close();resolve();};operation.onerror=()=>reject(operation.error);
+  });
+  const {store}=library(indexedDB),before=await store.api(`/trips/${trip.id}`);
+  assert.equal(before.trip.revision,3);assert.equal(before.photos[0].caption,'An older caption');assert.deepEqual(plain(before.photos[0].postcard),card);
+  assert.equal(before.photos[0].captionRevision,4);assert.equal(before.photos[0].postcardRevision,7);
+  assert.deepEqual(Buffer.from(await (await fetch(before.photos[0].url)).arrayBuffer()),jpeg);
+  await store.api(`/photos/${photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption:'A new caption',revision:4})});
+  const after=(await store.api(`/trips/${trip.id}`)).photos[0];assert.equal(after.captionRevision,5);assert.deepEqual(plain(after.postcard),card);
+  const updated={...card,message:'Updated without rewriting the photo'};
+  await store.api(`/photos/${photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:updated,revision:7})});
+  const target=library().store;await target.importArchive(await store.exportArchive(trip.id));
+  const restored=(await target.api(`/trips/${(await target.api('/trips')).trips[0].id}`)).photos[0];
+  assert.equal(restored.caption,'A new caption');assert.deepEqual(plain(restored.postcard),updated);
+});
