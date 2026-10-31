@@ -3,30 +3,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#e9dfc9">
+  <meta name="theme-color" content="#ecdfc5">
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
-  <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="gallery.css">
-  <script src="vendor/geo.js" defer></script>
-  <script src="map-layout.js" defer></script>
-  <script src="world.js" defer></script>
-  <script src="trace.js" defer></script>
-  <script src="labels.js" defer></script>
-  <script src="app.js" defer></script>
-  <script src="postcard-export.js" defer></script>
-  <script src="postcards.js" defer></script>
-  <script src="jpeg.js" defer></script>
-  <script src="archive.js" defer></script>
-  <script src="storage.js" defer></script>
-  <script src="album-motion.js" defer></script>
-  <script src="trips.js" defer></script>
+  <link rel="stylesheet" href="style.css?v=ed57b2be1ee2">
+  <link rel="stylesheet" href="gallery.css?v=3a6bb5fdb437">
+  <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
+  <script src="map-layout.js?v=eb31b38a5551" defer></script>
+  <script src="world.js?v=0c173428c68e" defer></script>
+  <script src="trace.js?v=7b2126928463" defer></script>
+  <script src="labels.js?v=11c241450648" defer></script>
+  <script src="app.js?v=b2b3023e4ebe" defer></script>
+  <script src="postcard-export.js?v=20f417e237fd" defer></script>
+  <script src="postcards.js?v=d93a41ee70f8" defer></script>
+  <script src="jpeg.js?v=c37b5b32449f" defer></script>
+  <script src="archive.js?v=f6fb167e0946" defer></script>
+  <script src="storage.js?v=c5183d65dceb" defer></script>
+  <script src="album-motion.js?v=a8d3b1150afa" defer></script>
+  <script src="trips.js?v=7ff3153bbf3f" defer></script>
 </head>
 <body>
   <main aria-label="Travel map">
     <div class="map-shell" id="map-shell">
       <svg id="map" viewBox="0 0 1440 720" preserveAspectRatio="none" aria-label="World map showing your travel route" role="img" tabindex="-1">
-        <defs><pattern id="grid" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse"><path d="M120 0H0V120" fill="none" stroke="#97896c" stroke-width="0.6" opacity="0.24"/></pattern></defs>
+        <defs><linearGradient id="land-wash" x1="0" y1="0" x2="0" y2="720" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ebddbe"/><stop offset=".52" stop-color="#e4cfa8"/><stop offset="1" stop-color="#d7bb8e"/></linearGradient><pattern id="grid" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse"><path d="M120 0H0V120" fill="none" stroke="#97896c" stroke-width="0.6" opacity="0.24"/></pattern></defs>
         <g id="graticule" aria-hidden="true"><rect x="-2880" y="-1440" width="7200" height="3600" fill="url(#grid)"/></g>
         <g id="land"></g>
         <g id="antarctica" aria-hidden="true"></g>
