@@ -62,6 +62,7 @@ The built website is on the `gh-pages` branch, which GitHub Pages publishes auto
 - `public/labels.js`: placement of route city names so they never overlap.
 - `public/map-layout.js`, `public/world.js`: projection and geography.
 - `scripts/build-atlas.mjs`, `scripts/atlas-geometry.mjs`: dissolve shared national edges at build time while preserving coastlines, lakes, and islands. The generated `public/atlas-geography.js` supplies continuous landmass fills, separate boundary groups, and the original label data; `public/map-paint.js` skips offscreen geometry.
+- `scripts/atlas-paper.mjs`, `scripts/build-paper.mjs`: bake irregular cream and blue colour fields into small images before publication. Land shares one world-aligned texture, independent of borders, with no runtime noise filters. `public/album-motion.js` turns the Album / All Photos faces independently to avoid nested double-sided 3D layers.
 - `public/trace.js`: route geometry, timing, camera framing, and damped zoom.
 - `public/trips.js`: the logbook, the photo album and its page turns, All photos and selection, and import review.
 - `public/gallery.css`: the album, All photos, import review, and the photo viewer and postcard. `public/style.css` holds the map, the trip planner, the logbook, and printing.

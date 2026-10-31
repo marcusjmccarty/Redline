@@ -140,8 +140,8 @@ test('a spread names both its cities, and turns keep tab focus and finish when p
   press('End');const closing=[...running];press('End');assert.deepEqual([...running],closing);
   await finish();assert.equal(pages(),'left:back right:void');
   $('sheet-view').click();assert.equal($('album-foot').inert,true,'Hidden page controls leave the tab order');
-  await wait(()=>running.size===4);await finish();
-  $('album-view').click();await wait(()=>running.size===4);await finish();assert.equal($('album-foot').inert,false);
+  await wait(()=>running.size===5);await finish();
+  $('album-view').click();await wait(()=>running.size===5);await finish();assert.equal($('album-foot').inert,false);
 });
 
 test('the divider tabs are coloured book cloth with readable labels',()=>{
@@ -897,12 +897,12 @@ test('cover motion waits for decoded snapshots and can close before its first mo
 
 test('switching Album and All Photos animates both directions and handles rapid changes and dismissal',async t=>{
   const {w,$,press,pages}=await setup(t),motion=controlledMotion(w),bookmark=pages();
-  $('sheet-view').click();assert.equal($('album-book').inert,true);await wait(()=>motion.running.size===4);
+  $('sheet-view').click();assert.equal($('album-book').inert,true);await wait(()=>motion.running.size===5);
   assert.equal($('album-book').dataset.mode,'sheet');
   assert.ok([...motion.running].every(animation=>animation.element!==$('album-book')),'The binding and tabs never fade out or wobble');
   const outgoing=$('album-book').querySelector('.album-view-layer');assert.ok(outgoing);assert.equal(outgoing.querySelectorAll('[id]').length,0);
-  const leaf=[...motion.running].find(animation=>animation.element.classList.contains('album-view-leaf'));
-  assert.deepEqual(Array.from(leaf.frames,frame=>frame.transform),['rotateY(0deg)','rotateY(-180deg)']);
+  const front=[...motion.running].find(animation=>animation.element.classList.contains('album-view-front'));
+  assert.deepEqual(Array.from(front.frames,frame=>frame.transform),['rotateY(0deg)','rotateY(-90deg)','rotateY(-90deg)','rotateY(-90deg)']);
   assert.ok(outgoing.querySelector('.album-view-front .album-page'));assert.ok(outgoing.querySelector('.album-view-back .album-copy-album-sheet'));
   assert.equal(outgoing.querySelectorAll('.album-copy-album-pages').length,0,'Native half-pages keep the same geometry as a chapter turn');
   assert.equal($('album-sheet').style.visibility,'','The live sheet stays painted beneath the opaque moving leaf');
@@ -926,7 +926,7 @@ test('a stalled image has a bounded preparation window and late results cannot r
   $('sheet-view').click();assert.equal(motion.running.size,0,'The old spread remains still while the next page prepares');
   assert.ok(releases.length>0);const old=$('album-book').querySelector('.album-view-layer');assert.ok(old.querySelector('.print'));
   assert.equal($('album-sheet').style.visibility,'','The incoming sheet remains painted even if one bitmap stalls');
-  await wait(()=>motion.running.size===4);
+  await wait(()=>motion.running.size===5);
   await motion.finish();assert.equal(old.isConnected,false);assert.equal($('album-sheet').style.visibility,'');assert.equal($('album-book').inert,false,'A stalled decoder cannot trap the gallery');
   w.HTMLImageElement.prototype.decode=decode;releases.forEach(resolve=>resolve());await tick();assert.equal(motion.running.size,0);assert.equal(old.isConnected,false);
   $('photo-scroll').scrollTop=160;$('album-view').click();
@@ -1020,7 +1020,7 @@ test('a large All Photos turn locates visible rows without measuring or cloning 
   source.querySelectorAll('.gallery-city').forEach(section=>section.getBoundingClientRect=()=>rect(0,4000));
   all.forEach((tile,i)=>tile.getBoundingClientRect=()=>{reads++;return rect(i<6?80:900+i*100,100);});
   w.HTMLImageElement.prototype.decode=function(){decodes.set(this.src,(decodes.get(this.src)||0)+1);return Promise.resolve();};
-  const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===4);
+  const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===5);
   assert.ok(reads<=16,'Binary row lookup skips offscreen photos; both halves reuse the measurements');
   assert.equal(decodes.size,6,'Only visible photos need decoding');
   assert.ok([...decodes.values()].every(count=>count===3),'The live image and both actual page faces are decoded before moving');
@@ -1041,7 +1041,7 @@ test('contact-sheet turns freeze sticky headings and visible prints at their exa
     reads.set(index,(reads.get(index)||0)+1);
     return rect(68+(index%4)*176,180+Math.floor(index/4)*160-scroll.scrollTop,150,150);
   };});
-  const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===4);
+  const motion=controlledMotion(w);$('album-view').click();await wait(()=>motion.running.size===5);
   const snapshots=[...$('album-book').querySelectorAll('.album-frozen-sheet')];assert.equal(snapshots.length,2);
   const captured=snapshots.flatMap(snapshot=>[...snapshot.querySelectorAll('.photo-tile')]),indices=[...new Set(captured.map(tile=>all.findIndex(original=>original.dataset.photoId===tile.dataset.photoId)))].sort((a,b)=>a-b);
   assert.deepEqual(indices,Array.from({length:20},(_,index)=>index+136),'The two halves retain every visible print');
@@ -1110,13 +1110,23 @@ test('three-photo layouts alternate physical sides through long chapters',async 
   assert.equal(counts.reduce((a,b)=>a+b,0),76);assert.ok(counts.filter(n=>n===4).length>counts.length/2);
 });
 
-test('Album to All Photos uses the exact ordinary page-turn frames, easing, and duration',async t=>{
+test('view turns retain the ordinary page timing while their flat faces meet edge-on without overlap',async t=>{
   const {w,$,tab}=await setup(t,{route:[paris],seedStops:Array.from({length:38},()=>paris)});tab(paris.id).click();const motion=controlledMotion(w);
   $('album-next').click();assert.equal(motion.running.size,4);
-  const ordinary=JSON.stringify([...motion.running].map(animation=>({frames:animation.frames,options:animation.options})));
-  await motion.finish();$('sheet-view').click();await wait(()=>motion.running.size===4);
-  assert.equal(JSON.stringify([...motion.running].map(animation=>({frames:animation.frames,options:animation.options}))),ordinary);
-  await motion.finish();
+  const ordinary=[...motion.running][0].options;await motion.finish();
+  for(const [button,sign] of [['sheet-view',-1],['album-view',1]]){
+    $(button).click();await wait(()=>motion.running.size===5);
+    const animations=[...motion.running],front=animations.find(a=>a.element.classList.contains('album-view-front')),back=animations.find(a=>a.element.classList.contains('album-view-back'));
+    for(const animation of animations)assert.equal(JSON.stringify(animation.options),JSON.stringify(ordinary));
+    assert.ok(front.element.parentNode.classList.contains('paired'));assert.equal(front.element.parentNode,back.element.parentNode);
+    assert.equal(animations.some(a=>a.element===front.element.parentNode),false,'The parent never rotates a second, overlapping 3D scene');
+    assert.deepEqual(Array.from(front.frames,f=>f.opacity),[1,1,0,0]);assert.deepEqual(Array.from(back.frames,f=>f.opacity),[0,0,1,1]);
+    assert.equal(front.frames[1].transform,`rotateY(${sign*90}deg)`);assert.equal(back.frames[2].transform,`rotateY(${-sign*90}deg)`);
+    assert.equal(front.frames[1].offset,.5);assert.equal(back.frames[2].offset,.5,'Faces change visibility only when paper is edge-on');
+    assert.equal(back.frames.at(-1).transform,'rotateY(0deg)');
+    const css=source('public/gallery.css');assert.match(css,/\.album-view-leaf\.paired \{[^}]*transform-style: flat/);
+    await motion.finish();
+  }
 });
 
 test('All Photos prepares while the album rests and reuses that sheet on the first switch',async t=>{
@@ -1132,7 +1142,7 @@ test('the actual turning faces decode before movement even when image bytes are 
   $('sheet-view').click();assert.equal(motion.running.size,0);assert.ok(releases.length>0,'Complete images still need a decoded bitmap');
   const layer=$('album-book').querySelector('.album-view-layer');assert.ok(layer);assert.equal($('album-book').inert,true);
   await tick();assert.equal(motion.running.size,0,'The paper cannot move before its images are ready');
-  releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===4);
+  releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===5);
   assert.ok([...layer.querySelectorAll('.photo-image')].every(image=>image.classList.contains('loaded')));
   await motion.finish();assert.equal($('album-book').inert,false);
 });
@@ -1187,7 +1197,7 @@ test('photo-view turns pause background thumbnail work and resume it after settl
     };
     const warmed=cache.preload(Array.from({length:6},(_,i)=>`https://redline.test/idle-${dismiss}-${i}.jpg`));
     await tick();assert.equal(started,3);
-    $(dismiss?'album-view':'sheet-view').click();await wait(()=>motion.running.size===4);
+    $(dismiss?'album-view':'sheet-view').click();await wait(()=>motion.running.size===5);
     releases.splice(0).forEach(resolve=>resolve());await tick();
     assert.equal(started,3,'No new background decode competes with the moving leaf');
     if(dismiss){press('Escape');await wait(()=>motion.running.size===3);}
@@ -1234,7 +1244,7 @@ test('view faces stay in the same compositor stack from preparation through the 
   assert.ok(leaf,'The final hinged leaf exists before thumbnail decoding finishes');
   const images=[...layer.querySelectorAll('img')],parents=images.map(image=>image.parentNode);
   const changes=[],observer=new w.MutationObserver(records=>changes.push(...records));observer.observe(layer,{subtree:true,childList:true});
-  assert.equal(motion.running.size,0);releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===4);
+  assert.equal(motion.running.size,0);releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===5);
   assert.equal(changes.length+observer.takeRecords().length,0,'Starting the turn does not remove, insert, or reparent any moving content');
   assert.ok(images.every((image,i)=>image.parentNode===parents[i]));assert.equal(layer.querySelector('.album-view-leaf'),leaf);
   observer.disconnect();await motion.finish();
@@ -1243,7 +1253,7 @@ test('view faces stay in the same compositor stack from preparation through the 
 test('view turns keep the live destination painted throughout and retire the old half before the final leaf, in both directions',async t=>{
   const {w,$,tab,press}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w),nativeFrame=w.requestAnimationFrame;
   for(const [button,target] of [['sheet-view','album-sheet'],['album-view','album-pages']]){
-    $(button).click();await wait(()=>motion.running.size===4);
+    $(button).click();await wait(()=>motion.running.size===5);
     const layer=$('album-book').querySelector('.album-view-layer'),frames=[];
     assert.equal($(target).style.visibility,'','No hidden-to-visible layer replacement is needed at arrival');
     assert.equal($(target).hidden,false);
@@ -1257,7 +1267,7 @@ test('view turns keep the live destination painted throughout and retire the old
     frames.shift()(w.performance.now());await wait(()=>!layer.isConnected);
     assert.equal($('album-book').inert,false);w.requestAnimationFrame=nativeFrame;
   }
-  $('sheet-view').click();await wait(()=>motion.running.size===4);
+  $('sheet-view').click();await wait(()=>motion.running.size===5);
   const layer=$('album-book').querySelector('.album-view-layer'),frames=[];
   w.requestAnimationFrame=callback=>{frames.push(callback);return frames.length;};
   [...motion.running].forEach(animation=>animation.finish());await tick();assert.equal(layer.dataset.handoff,'true');
@@ -1281,7 +1291,7 @@ test('closing releases gallery image elements while reopening restores saved pho
 test('legacy thumbnail generation waits for a page turn to finish',async t=>{
   const {w,$,tab,storage,api}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w);let writes=0;
   storage.api=(path,options)=>{if(path.endsWith('/thumb'))writes++;return api(path,options);};
-  $('sheet-view').click();await wait(()=>motion.running.size===4);
+  $('sheet-view').click();await wait(()=>motion.running.size===5);
   $('photo-gallery').querySelector('img').dispatchEvent(new w.Event('load'));
   await tick();await tick();assert.equal(writes,0,'Canvas encoding and IndexedDB writes wait while paper is moving');
   await motion.finish();await wait(()=>writes===1);

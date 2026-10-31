@@ -28,11 +28,9 @@
     <div class="map-shell" id="map-shell">
       <svg id="map" viewBox="0 0 1440 720" preserveAspectRatio="none" aria-label="World map showing your travel route" role="img" tabindex="-1">
         <defs>
-          <linearGradient id="atlas-americas" gradientUnits="userSpaceOnUse" x1="280" y1="40" x2="540" y2="680"><stop stop-color="#fbf1d9"/><stop offset=".13" stop-color="#ead6ad"/><stop offset=".25" stop-color="#fcf3de"/><stop offset=".39" stop-color="#e9d2a6"/><stop offset=".51" stop-color="#faf0d6"/><stop offset=".63" stop-color="#e6cfa0"/><stop offset=".76" stop-color="#fbf1d8"/><stop offset=".88" stop-color="#ecdbb8"/><stop offset="1" stop-color="#faf1dc"/></linearGradient>
-          <radialGradient id="atlas-oldworld" gradientUnits="userSpaceOnUse" cx="950" cy="185" r="620" gradientTransform="translate(950 185) scale(1 .8) translate(-950 -185)"><stop stop-color="#fcf4df"/><stop offset=".15" stop-color="#e9d5ab"/><stop offset=".29" stop-color="#fbf1d8"/><stop offset=".43" stop-color="#e7cfa2"/><stop offset=".56" stop-color="#fcf3df"/><stop offset=".7" stop-color="#ead7b0"/><stop offset=".84" stop-color="#faf0d8"/><stop offset="1" stop-color="#e9d6af"/></radialGradient>
-          <linearGradient id="atlas-australia" gradientUnits="userSpaceOnUse" x1="1160" y1="425" x2="1340" y2="570"><stop stop-color="#faf0d7"/><stop offset=".28" stop-color="#e8cfa1"/><stop offset=".57" stop-color="#fcf2db"/><stop offset=".82" stop-color="#ead6ac"/><stop offset="1" stop-color="#faf1dc"/></linearGradient>
-          <radialGradient id="polar-wash" cx=".5" cy=".85" r=".8"><stop stop-color="#faf3e3"/><stop offset=".46" stop-color="#eee1c7"/><stop offset=".72" stop-color="#faf2e0"/><stop offset="1" stop-color="#ebdcc1"/></radialGradient>
+          <pattern id="atlas-paper" patternUnits="userSpaceOnUse" width="1440" height="720"><rect width="1440" height="720" fill="#f4e6c9"/><image href="atlas-paper.svg" width="1440" height="720" preserveAspectRatio="none"/></pattern>
           <pattern id="grid" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse"><path d="M120 0H0V120" fill="none" stroke="#80745e" stroke-width="0.6" opacity="0.24"/></pattern></defs>
+        <image href="atlas-water.svg" width="1440" height="720" preserveAspectRatio="none" aria-hidden="true"/>
         <g id="graticule" aria-hidden="true"><rect x="-2880" y="-1440" width="7200" height="3600" fill="url(#grid)"/></g>
         <g id="land"></g>
         <g id="antarctica" aria-hidden="true"></g>
@@ -55,10 +53,8 @@
       <svg id="place-labels" aria-hidden="true"></svg>
     </div>
     <div class="atlas-frame" aria-hidden="true">
-      <svg class="atlas-corner north-west" viewBox="0 0 80 80"><defs><g id="atlas-corner-art"><path d="M1 74V1H74L65 7H7V65Z" fill="#f8f0dc"/><g fill="none" stroke="#a48a60" stroke-width=".9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 72V2H72M8 55V8H55M13 40V13H40"/><path d="M8 52C21 52 32 40 28 29C25 21 16 21 14 27C12 32 18 36 21 31M52 8C52 21 40 32 29 28C21 25 21 16 27 14C32 12 36 18 31 21"/><path d="M12 60C20 59 23 54 22 48C18 49 14 53 12 60ZM60 12C59 20 54 23 48 22C49 18 53 14 60 12Z" fill="#e8d8b9"/><path d="m36 36 4-7 4 7-4 7Z" fill="#b89e73" stroke="none"/></g></g></defs><use href="#atlas-corner-art"/></svg>
-      <svg class="atlas-corner north-east" viewBox="0 0 80 80"><use href="#atlas-corner-art"/></svg>
-      <svg class="atlas-corner south-west" viewBox="0 0 80 80"><use href="#atlas-corner-art"/></svg>
-      <svg class="atlas-corner south-east" viewBox="0 0 80 80"><use href="#atlas-corner-art"/></svg>
+      <span class="atlas-corner north-west"></span><span class="atlas-corner north-east"></span>
+      <span class="atlas-corner south-west"></span><span class="atlas-corner south-east"></span>
       <span class="atlas-ornament north"></span><span class="atlas-ornament south"></span>
     </div>
     <div class="zoom-controls" aria-label="Map controls">
