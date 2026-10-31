@@ -43,6 +43,7 @@
     $('postcard-front').classList.toggle('caption-editing',open);
     if(open){$('caption-input').value=active.caption;$('caption-input').focus();captionStatus();}
     $('photo-caption').textContent=active.photo.city?.name||'';
+    $('photo-note').textContent=active.caption.trim();$('photo-note').hidden=open||!active.caption.trim();
   }
   async function saveCaption(state){
     if(!state||state.preview)return;
@@ -153,6 +154,7 @@
       image.animate([{width:`${before.width}px`,height:`${before.height}px`},{width:`${after.width}px`,height:`${after.height}px`}],timing);
       image.animate([{opacity:0,transform:`translateX(${direction*28}px)`},{opacity:1,transform:'translateX(0px)'}],timing);
       $('photo-caption').animate([{opacity:0},{opacity:1}],timing);
+      $('photo-note').animate([{opacity:0},{opacity:1}],timing);
       settle(ghost.animate([{opacity:1,transform:'translateX(0px)'},{opacity:0,transform:`translateX(${-direction*28}px)`}],{duration:280,easing:'ease-in',fill:'forwards'})).then(()=>ghost.remove());
     };
   }

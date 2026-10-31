@@ -115,6 +115,11 @@
 .album-snapshot .page-corner { display: none; }
 .album-snapshot.album-pages { perspective: none; }
 .album-snapshot .gallery-city-heading { -webkit-backdrop-filter: none; backdrop-filter: none; }
+.album-view-layer { position: absolute; z-index: 4; inset: var(--pad) calc(var(--pad) + 2px); pointer-events: none; }
+.album-view-layer > .album-snapshot { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; }
+.album-view-layer .album-pages::after { opacity: var(--view-crease); }
+.album-book[data-view-motion] :is(.album-pages, .album-tabs) { transition: none; }
+.album-book[data-view-motion]::before { transition: opacity .32s ease; }
 /* Settle hidden layout transitions before taking or releasing a spread. */
 .album-book:is([data-cover-preparing], [data-preparing], [data-cover-motion]) :is(.album-pages, .album-sheet, .album-tabs),
 .album-book:is([data-cover-preparing], [data-preparing], [data-cover-motion])::before { transition: none !important; animation: none !important; }
@@ -247,7 +252,7 @@
 /* "All photos" and import review share one wide sheet inside the book. */
 .album-sheet { position: absolute; z-index: 2; inset: var(--pad) calc(var(--pad) + 2px); display: flex; flex-direction: column; overflow: hidden; border-radius: 3px; color: var(--page-ink); background: var(--page); box-shadow: inset 0 0 40px #8a6a3c1f; animation: none; }
 .album-book:is([data-mode=sheet], [data-mode=review])::before { opacity: 1; }
-.album-book[data-mode=sheet] .album-sheet::after { content: ''; position: absolute; z-index: 4; pointer-events: none; top: 0; bottom: 0; left: 50%; width: 32px; transform: translateX(-50%); background: linear-gradient(90deg, #0000, #74563208 35%, #74563220 49%, #fff8e84a 52%, #74563208 67%, #0000); }
+.album-book[data-mode=sheet] .album-sheet::after, .album-view-layer .album-sheet::after { content: ''; position: absolute; z-index: 4; pointer-events: none; top: 0; bottom: 0; left: 50%; width: 32px; transform: translateX(-50%); background: linear-gradient(90deg, #0000, #74563208 35%, #74563220 49%, #fff8e84a 52%, #74563208 67%, #0000); }
 .gallery-toolbar, .gallery-actions, .photo-bulk { flex: none; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 9px 22px; border-bottom: 1px solid #b4a58b44; }
 .sheet-label { flex: 1; color: #8a7a62; font: italic 15px Georgia, serif; }
 .toolbar-button { flex: none; padding: 6px 4px; font-size: 13px; }
@@ -259,7 +264,7 @@
 .photo-progress { flex: none; height: 3px; overflow: hidden; background: #b4a58b33; }
 .photo-progress span { display: block; width: calc(var(--progress, 0) * 100%); height: 100%; background: var(--red); transition: width .3s var(--ease-out); }
 .photo-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 0 24px; scrollbar-width: thin; scrollbar-color: #bdac90 transparent; }
-.gallery-city-heading { position: relative; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 16px 22px 10px; background: var(--page); }
+.gallery-city-heading { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 16px 22px 10px; background: var(--page); }
 .gallery-stop-number { align-self: flex-start; margin-top: 7px; color: var(--red); font: 10px Georgia, serif; }
 .gallery-city-place { flex: 1; min-width: 0; }
 :is(#photo-gallery, .album-copy-photo-gallery) .gallery-city h3 { margin: 0; overflow: hidden; color: #34271a; font: 26px/1.1 var(--hand); text-overflow: ellipsis; white-space: nowrap; }
@@ -362,6 +367,7 @@
 #photo-viewer.flipped .viewer-edge { pointer-events: none; }
 .photo-viewer-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; padding-top: 8px; }
 #caption-form { display: flex; align-items: center; width: 100%; gap: 8px; margin-top: 5px; animation: caption-drop .18s var(--ease-out); }
+#photo-note { contain: inline-size; margin: 5px 0 3px; color: #625440; font: 18px/1.35 var(--hand); overflow-wrap: anywhere; }
 @keyframes caption-drop { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
 #caption-input { flex: 1; min-width: 0; padding: 7px 0; border: 0; border-bottom: 1px solid #aa9675; outline: none; background: transparent; color: var(--page-ink); font: 16px Georgia, serif; }
 #caption-input:focus-visible { border-bottom-color: var(--red); }

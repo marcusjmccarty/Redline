@@ -14,7 +14,7 @@ const wait=async condition=>{
 };
 const tick=()=>new Promise(resolve=>setTimeout(resolve,5));
 
-async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,paris],realMap=false}={}){
+async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,paris],seedSizes=[],realMap=false}={}){
   const dom=new JSDOM(source('map.html'),{url:'https://redline.test/Redline/',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window,$=id=>w.document.getElementById(id),objects=new Set();let stops=route;
   Object.assign(w,{Blob,File,FormData,TextEncoder,TextDecoder,indexedDB:new IDBFactory()});
@@ -53,8 +53,9 @@ async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,p
   for(const name of ['jpeg','archive','storage'])w.eval(source(`public/${name}.js`));
   const storage=w.RedlineStorage,api=storage.api;
   const {trip}=await api('/trips',{method:'POST',body:JSON.stringify({title:'A summer away',stops})});
-  if(seed)for(const stop of seedStops){
+  if(seed)for(const [i,stop] of seedStops.entries()){
     const form=new FormData();form.append('photo',new Blob([jpeg],{type:'image/jpeg'}));form.append('stopId',stop.id);
+    if(seedSizes[i]){form.append('width',String(seedSizes[i][0]));form.append('height',String(seedSizes[i][1]));}
     await api(`/trips/${trip.id}/photos`,{method:'POST',body:form});
   }
   w.localStorage.setItem('redline-saved-trip',JSON.stringify({id:trip.id,title:trip.title,revision:trip.revision,hash:JSON.stringify(stops)}));
@@ -629,7 +630,7 @@ test('album and All Photos slide in, keep their spread stable, and slide away af
     assert.equal($('photo-panel').dataset.departing,undefined);
     await motion.finish();assert.equal($('photo-panel').dataset.departing,'true');
     assert.equal([...motion.running][0].options.duration,240);
-    assert.match([...motion.running][0].frames.at(-1).transform,/translateX\(-/);
+    assert.match([...motion.running][0].frames.at(-1).transform,/translateY\([1-9]/);
     assert.ok([...motion.running][0].element.classList.contains('album-arrival'));
     await motion.finish();assert.equal($('photo-panel').open,false);
     assert.equal($('album-pages').children.length,0);assert.equal($('album-book').querySelector('.album-cover-scene'),null);
@@ -637,7 +638,7 @@ test('album and All Photos slide in, keep their spread stable, and slide away af
     $('photos-button').click();await wait(()=>motion.running.size===3);
     assert.equal($('photo-panel').dataset.motion,'opening');assert.equal($('album-book').dataset.mode,view);
     const entrance=[...motion.running].find(animation=>animation.element.classList.contains('album-arrival'));
-    assert.match(entrance.frames[0].transform,/translateX\(-/);assert.equal(entrance.frames.at(-1).transform,'translateX(0px)');
+    assert.match(entrance.frames[0].transform,/translateY\([1-9]/);assert.equal(entrance.frames.at(-1).transform,'translateY(0px)');
     const arrived=$('album-pages').firstElementChild;
     press('ArrowRight');assert.equal(motion.running.size,3);
     await motion.finish();assert.equal($('photo-panel').dataset.motion,'');assert.equal($('album-book').inert,false);
@@ -830,6 +831,7 @@ test('caption editing stays on the photo front, persists separately, and updates
   assert.equal($('photo-viewer').classList.contains('flipped'),false);
   type('Sunrise by the river.');$('save-caption').click();await wait(()=>$('caption-form').hidden);
   assert.equal(print.querySelector('figcaption').textContent,'Sunrise by the river.');assert.equal($('photo-caption').textContent,'Paris','The city name stays after saving a caption');
+  assert.equal($('photo-note').hidden,false);assert.equal($('photo-note').textContent,'Sunrise by the river.');
   $('flip-postcard').click();$('postcard-message').value='Dear family, this message is private.';$('postcard-message').dispatchEvent(new w.Event('input'));$('save-postcard').click();
   await wait(()=>$('postcard-save-status').textContent==='Postcard saved.');
   assert.equal(print.querySelector('figcaption').textContent,'Sunrise by the river.');
@@ -840,8 +842,10 @@ test('caption editing stays on the photo front, persists separately, and updates
   assert.equal($('photo-position').textContent,'1 / 2');assert.equal(input.value,'The next morning.');
   assert.equal(print.querySelector('figcaption').textContent,'Sunrise by the river.','Failed drafts do not overwrite the saved album caption');
   fail=false;$('save-caption').click();await wait(()=>$('caption-form').hidden);
-  await w.RedlinePostcards.close();prints()[0].click();$('edit-caption').click();assert.equal(input.value,'The next morning.');
+  await w.RedlinePostcards.close();prints()[0].click();assert.equal($('photo-note').textContent,'The next morning.');assert.equal($('photo-caption').textContent,'Paris');
+  $('edit-caption').click();assert.equal(input.value,'The next morning.');assert.equal($('photo-note').hidden,true,'The editor replaces the caption line, keeping the city and tools fixed');
   type('');$('save-caption').click();await wait(()=>$('caption-form').hidden);assert.equal(print.querySelector('figcaption'),null);
+  assert.equal($('photo-note').hidden,true);assert.equal($('photo-caption').textContent,'Paris');
   assert.match((await api(`/trips/${trip.id}`)).photos.find(p=>p.id===id).postcard.message,/Dear family/);
   $('edit-caption').click();assert.equal($('save-caption').disabled,false,'Save can finish an editor whose caption already autosaved');type('A final caption.');press('Escape',input);await wait(()=>$('caption-form').hidden);assert.equal($('photo-viewer').open,true);
 });
@@ -879,13 +883,60 @@ test('cover motion waits for decoded snapshots and can close before its first mo
 
 test('switching Album and All Photos animates both directions and handles rapid changes and dismissal',async t=>{
   const {w,$,press,pages}=await setup(t),motion=controlledMotion(w),bookmark=pages();
-  $('sheet-view').click();assert.equal(motion.running.size,1);assert.equal($('album-book').inert,true);
-  await motion.finish();assert.equal($('album-book').dataset.mode,'sheet');assert.equal(motion.running.size,1);
+  $('sheet-view').click();assert.equal($('album-book').inert,true);await wait(()=>motion.running.size===2);
+  assert.equal($('album-book').dataset.mode,'sheet');
+  assert.ok([...motion.running].every(animation=>animation.element!==$('album-book')),'The binding and tabs never fade out or wobble');
+  const outgoing=$('album-book').querySelector('.album-view-layer');assert.ok(outgoing);assert.equal(outgoing.querySelectorAll('[id]').length,0);
   await motion.finish();assert.equal($('album-book').inert,false);
+  assert.equal($('album-book').querySelector('.album-view-layer'),null);
   $('album-view').click();$('sheet-view').click();await motion.finish();await motion.finish();
+  await motion.finish();
   assert.equal($('album-book').dataset.mode,'sheet','The most recent choice wins during a transition');
   $('album-view').click();await motion.finish();await motion.finish();assert.equal(pages(),bookmark);
   $('sheet-view').click();press('Escape');await wait(()=>[...motion.running].some(animation=>animation.element.classList.contains('album-cover-leaf')));
   await motion.finish();await motion.finish();await motion.finish();assert.equal($('photo-panel').open,false);
   assert.equal($('album-book').querySelector('.album-arrival'),null);
+  assert.equal($('album-book').querySelector('.album-view-layer'),null);
+});
+
+test('view changes retain the old spread until images decode and cleanly cancel during preparation',async t=>{
+  const {w,$,press,tab}=await setup(t);tab(paris.id).click();const motion=controlledMotion(w),decode=w.HTMLImageElement.prototype.decode,releases=[];
+  w.HTMLImageElement.prototype.decode=function(){return this.closest('#album-sheet')?new Promise(resolve=>releases.push(resolve)):decode.call(this);};
+  $('sheet-view').click();await wait(()=>releases.length>0);
+  const old=$('album-book').querySelector('.album-view-layer');assert.ok(old.querySelector('.print'));
+  assert.equal(motion.running.size,0);assert.equal($('album-sheet').style.visibility,'hidden');
+  w.HTMLImageElement.prototype.decode=decode;releases.forEach(resolve=>resolve());await wait(()=>motion.running.size===2);
+  assert.equal($('album-sheet').style.visibility,'');await motion.finish();assert.equal(old.isConnected,false);
+  $('photo-scroll').scrollTop=160;$('album-view').click();
+  assert.equal($('album-book').querySelector('.album-copy-photo-scroll').scrollTop,160,'Outgoing prints retain their exact scroll position');
+  press('Escape');await wait(()=>motion.running.size===2);await motion.finish();await motion.finish();await motion.finish();
+  assert.equal($('photo-panel').open,false);assert.equal($('album-book').querySelector('.album-view-layer'),null);assert.equal($('album-pages').style.visibility,'');
+});
+
+test('album chapters distribute portrait and landscape prints without changing library order',async t=>{
+  const sizes=[...Array.from({length:3},()=>[800,1200]),...Array.from({length:8},()=>[1200,800])];
+  const {w,$,tab,press,api,trip,prints}=await setup(t,{route:[paris],seedStops:sizes.map(()=>paris),seedSizes:sizes});
+  const original=Array.from((await api(`/trips/${trip.id}`)).photos),byId=new Map(original.map(photo=>[photo.id,photo]));
+  const read=()=>{
+    const found=[],seen=new Set();tab(paris.id).click();
+    for(let page=0;page<20&&!$('album-next').disabled;page++){
+      for(const page of $('album-pages').querySelectorAll('.page-city')){
+        const ids=[...page.querySelectorAll('.print')].map(print=>print.dataset.photoId);
+        if(ids.some(id=>seen.has(id)))continue;
+        ids.forEach(id=>seen.add(id));found.push(ids);
+      }
+      press('ArrowRight');
+    }
+    assert.equal($('album-next').disabled,true,'Browsing reaches the back cover');
+    return found;
+  };
+  const groups=read(),ordered=groups.flat();assert.deepEqual(groups.map(group=>group.length),[3,4,4]);
+  assert.equal(new Set(ordered).size,11);
+  for(const group of groups)assert.deepEqual(new Set(group.map(id=>byId.get(id).height>byId.get(id).width)),new Set([true,false]),'Each page has both orientations when available');
+  assert.deepEqual(ordered.filter(id=>byId.get(id).height>byId.get(id).width),original.filter(photo=>photo.height>photo.width).map(photo=>photo.id));
+  tab(paris.id).click();const first=prints()[0].closest('.print').dataset.photoId;prints()[0].click();
+  assert.equal($('photo-position').textContent,'1 / 11');$('viewer-next').click();await wait(()=>$('photo-position').textContent==='2 / 11');
+  await w.RedlinePostcards.close();press('Escape');$('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);assert.deepEqual(read().flat(),ordered,'Reopening preserves the arrangement');
+  assert.equal(ordered[0],first);$('sheet-view').click();assert.deepEqual([...$('photo-gallery').querySelectorAll('.photo-tile')].map(tile=>tile.dataset.photoId),original.map(photo=>photo.id),'All Photos retains original chronological order');
+  assert.deepEqual(Array.from((await api(`/trips/${trip.id}`)).photos,photo=>photo.id),original.map(photo=>photo.id),'No stored order is changed');
 });

@@ -313,7 +313,7 @@
   $('new-trip').addEventListener('click',()=>{if(!canSwitch())return;discardPending();setSelecting(false);current=null;photos=[];activeCity='';albumPage=0;suppress=true;app.setStops([]);suppress=false;dirty=false;remember();update();renderGallery();closePanel('trip-panel');$('destination').focus();});
   document.querySelectorAll('[data-close]').forEach(button=>button.addEventListener('click',event=>closePanel(button.dataset.close,{focus:event.detail?'map':true})));
   document.addEventListener('pointerdown',event=>{if(!event.target.closest?.('.trip-menu,.trip-more'))closeTripMenus();},true);
-  window.addEventListener('resize',()=>{if(!$('photo-panel').open||resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;if(albumMotion){albumMotion.refresh=true;return;}if(view!=='album')return;const had=$('album-pages').contains(document.activeElement)||!!turning?.had;renderAlbum();keepAlbumFocus(had);});});
+  window.addEventListener('resize',()=>{if(!$('photo-panel').open||resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;if(albumMotion){albumMotion.refresh=true;return;}settleView();if(view!=='album')return;const had=$('album-pages').contains(document.activeElement)||!!turning?.had;renderAlbum();keepAlbumFocus(had);});});
   window.addEventListener('redline:routechange',()=>{if(suppress)return;dirty=current?fingerprint()!==current.hash:app.getStops().length>0;update();if(isOpen('trip-panel'))drawCurrentMap();if($('photo-panel').open){renderReview();renderGallery();}});
   window.addEventListener('beforeunload',event=>{if(pending.length||dirty){event.preventDefault();event.returnValue='';}});
 
@@ -508,21 +508,20 @@
   }
   function settleView(){
     if(!viewMotion)return;
-    const token=viewMotion;viewMotion=null;token.animation?.cancel();
-    if(view!==token.target)applyView(token.target);else renderPhotoMode();
+    const token=viewMotion;viewMotion=null;token.scene?.dispose();
+    if(view!==token.target)applyView(token.target);else if(token.refresh)renderGallery();else renderPhotoMode();
   }
   async function setView(next){
     if(viewMotion){viewMotion.target=next;return;}
     if(view===next||albumMotion)return;
     const book=$('album-book');
     if(!canAnimate(book)||!$('photo-panel').open){applyView(next);return;}
-    const token={target:next},direction=next==='sheet'?-1:1;viewMotion=token;renderPhotoMode();
-    const out=book.animate([{transform:'perspective(1800px) rotateY(0deg) translateX(0px)',opacity:1},{transform:`perspective(1800px) rotateY(${direction*6}deg) translateX(${direction*12}px)`,opacity:0}],{duration:110,easing:'ease-in',fill:'forwards'});
-    token.animation=out;await out.finished.catch(()=>{});if(viewMotion!==token)return;
-    applyView(token.target);
-    const incoming=book.animate([{transform:`perspective(1800px) rotateY(${-direction*6}deg) translateX(${-direction*12}px)`,opacity:0},{transform:'perspective(1800px) rotateY(0deg) translateX(0px)',opacity:1}],{duration:190,easing:'cubic-bezier(.2,.8,.25,1)',fill:'both'});
-    token.animation=incoming;out.cancel();await incoming.finished.catch(()=>{});if(viewMotion!==token)return;
-    viewMotion=null;incoming.cancel();renderPhotoMode();
+    // Finish a turning leaf before taking the outgoing spread's snapshot.
+    if(turning)renderAlbum();
+    const source=view==='album'?$('album-pages'):$('album-sheet'),token={target:next};viewMotion=token;
+    token.scene=window.RedlineAlbumMotion.changeView({book,source,direction:next==='sheet'?-1:1,apply:()=>{applyView(next);return next==='album'?$('album-pages'):$('album-sheet');}});
+    await token.scene.play();if(viewMotion!==token)return;
+    viewMotion=null;token.scene.dispose();if(token.refresh)renderGallery();else renderPhotoMode();
     if(token.target!==view)setView(token.target);
   }
   $('album-view').addEventListener('click',()=>setView('album'));
@@ -644,6 +643,7 @@
   }
   function renderGallery(){
     if(albumMotion?.scene){albumMotion.refresh=true;return;}
+    if(viewMotion?.scene){viewMotion.refresh=true;return;}
     const groups=photoGroups();
     if(activeCity&&!groups.some(group=>group.id===activeCity))activeCity='';
     galleryItems=groups.flatMap(group=>group.items);
@@ -687,15 +687,31 @@
     activeCity=id;markTab();
     if(view==='album'){const index=pages.findIndex(page=>page.type==='city'&&page.first&&page.group.id===id);if(index>=0)turnTo(index,{instant});return;}
     const section=[...$('photo-gallery').querySelectorAll('.gallery-city')].find(el=>el.dataset.stopId===id);
-    section?.scrollIntoView({behavior:instant||reduced()?'auto':'smooth',block:'start'});
+    if(!section)return;
+    const scroll=$('photo-scroll'),top=scroll.scrollTop+section.getBoundingClientRect().top-scroll.getBoundingClientRect().top;
+    // Only the sheet scrolls; the book and modal must stay fixed during a view change.
+    if(instant||reduced()||!scroll.scrollTo)scroll.scrollTop=top;else scroll.scrollTo({top,behavior:'smooth'});
   }
 
   // ---------- The album ----------
   // Pages run cover, endpaper, title, contents, city chapters, endpaper, back cover. Side by side,
   // spread s shows pages 2s−1 and 2s, so a closed book shows only its front or its back cover.
   // `albumPage` is a page index; with two pages it is the right-hand page of the open spread.
+  function mixedPhotos(items){
+    const portrait=items.filter(photo=>photo.height>photo.width*1.05),landscape=items.filter(photo=>!(photo.height>photo.width*1.05));
+    if(!portrait.length||!landscape.length)return items;
+    // Evenly distribute the less common shape across the chapter, retaining
+    // the original order within each shape and the same arrangement on reopen.
+    const result=[],portraitFirst=items[0]===portrait[0];let p=0,l=0;
+    while(p<portrait.length||l<landscape.length){
+      const a=(p+.5)/portrait.length,b=(l+.5)/landscape.length;
+      if(p<portrait.length&&(l===landscape.length||a<b||a===b&&portraitFirst))result.push(portrait[p++]);
+      else result.push(landscape[l++]);
+    }
+    return result;
+  }
   function albumPages(){
-    const groups=photoGroups(),list=[{type:'cover'},{type:'inside'},{type:'title'}],rows=contentsRows();
+    const groups=photoGroups().map(group=>({...group,items:mixedPhotos(group.items)})),list=[{type:'cover'},{type:'inside'},{type:'title'}],rows=contentsRows();
     // Long voyages continue their contents over as many pages as they need.
     if(groups.length>1)for(let i=0;i<groups.length;i+=rows)list.push({type:'contents',groups:groups.slice(i,i+rows),continued:i>0});
     for(const group of groups){let rest=group.items,first=true;while(first||rest.length){const room=first?3:4;list.push({type:'city',group,items:rest.slice(0,room),first,from:group.items.length-rest.length});rest=rest.slice(room);first=false;}}
