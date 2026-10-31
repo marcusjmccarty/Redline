@@ -636,7 +636,7 @@
   document.addEventListener('keyup',event=>{held.delete(event.key);if(event.key===' '&&event.target.id==='play')event.preventDefault();});
   window.addEventListener('blur',()=>held.clear());
   document.addEventListener('visibilitychange',()=>{if(document.hidden){held.clear();lastTick=null;}});
-  atlas=RedlineAtlas.create($('land'),$('regions'),window.WORLD_PATHS,window.REGION_PATHS);
+  atlas=RedlineAtlas.create($('land'),$('regions'),window.ATLAS_LAND,window.REGION_PATHS,$('country-borders'),window.ATLAS_BORDERS);
   for(const polygon of window.ANTARCTICA_POLYGONS)$('antarctica').append(svg('path'));
   for(const label of $('map-labels').children){label.dataset.mapX=label.getAttribute('x');label.dataset.mapY=label.getAttribute('y');label.dataset.mapRotation=label.getAttribute('transform')?.match(/rotate\(([-\d.]+)/)?.[1]||'0';label.setAttribute('x','0');label.setAttribute('y','0');}
   const photoVisibility=new MutationObserver(()=>{

@@ -123,8 +123,9 @@
 .album-view-surface.right { left: 50%; }
 .album-view-surface > .album-snapshot { position: absolute; top: 0; bottom: auto; right: auto; height: 100%; margin: 0; transform: none; }
 .album-view-surface > .album-page { left: 0; width: 100%; }
-.album-view-layer > .native-page::after { content: ''; position: absolute; z-index: 2; inset: 0 auto 0 0; width: 23px; pointer-events: none; background: linear-gradient(90deg, #51433040, #5143301c 20%, #0000); }
-.album-view-layer:not(.single) > .native-page.left::after { left: auto; right: 0; transform: scaleX(-1); }
+.album-view-layer .native-page::after { content: ''; position: absolute; z-index: 2; inset: 0 auto 0 0; width: 23px; pointer-events: none; background: linear-gradient(90deg, #51433040, #5143301c 20%, #0000); }
+.album-view-layer:not(.single) .native-page.left::after { left: auto; right: 0; transform: scaleX(-1); }
+.album-view-layer.single .native-page::after { width: 22px; background: linear-gradient(90deg, #51433040, #0000); }
 .album-frozen-sheet { display: block; }
 .album-frozen-scroll { overflow: hidden; padding: 0; }
 .album-frozen-gallery, .album-frozen-group, .album-frozen-grid { position: absolute; inset: 0; }
