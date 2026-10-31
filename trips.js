@@ -3,6 +3,7 @@
   const $=id=>document.getElementById(id),app=window.RedlineApp,SVG='http://www.w3.org/2000/svg';
   let current=null,photos=[],pending=[],busy=false,dirty=false,suppress=false,resumePhotos=false,cityIndex=null,exifReady=null,photoPanelRequest=0,photosRequested=false;
   let activeCity='',galleryItems=[],importing=false,photoMode='',dragDepth=0,selecting=false,thumbQueue=Promise.resolve();
+  let sheetKey='',tabsKey='';
   let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0,anchor=null,drawn=null,reopen=null,albumMotion=null,viewMotion=null;
   const chosen=new Set(),thumbJobs=new Set(),lastPages=new Map(),lastScrolls=new Map();
   const photoLabel=count=>`${count} photo${count===1?'':'s'}`;
@@ -427,11 +428,12 @@
     if(photo.thumbUrl||thumbJobs.has(photo.id)||!image.naturalWidth||!current)return;
     thumbJobs.add(photo.id);
     thumbQueue=thumbQueue.then(async()=>{
+      await new Promise(resolve=>setTimeout(resolve,0));
       try{
         const {blob}=await encode(image,image.naturalWidth,image.naturalHeight,640,.8),form=new FormData();
         form.append('thumb',blob,'thumb.jpg');form.append('width',String(image.naturalWidth));form.append('height',String(image.naturalHeight));
         const {photo:saved}=await api(`/photos/${photo.id}/thumb`,{method:'PUT',body:form});Object.assign(photo,{thumbUrl:saved.thumbUrl,width:saved.width,height:saved.height});
-      }catch{}
+      }catch{}finally{thumbJobs.delete(photo.id);}
     });
   }
   $('choose-photos').addEventListener('click',()=>$('photo-files').click());
@@ -452,7 +454,7 @@
           let gps=null;try{gps=await exifr.gps(files[i]);}catch{}
           const {blob,thumb,width,height}=await cleanImage(files[i]);let candidate=null;try{candidate=await matchCity(gps);}catch{}
           const entry={id:crypto.randomUUID(),name:files[i].name,blob,thumb,width,height,url:URL.createObjectURL(blob),thumbUrl:thumb?URL.createObjectURL(thumb):'',candidate,selected:candidate?(candidate.existing?candidate.id:'match'):'',checked:true};
-          pending.push(entry);renderReview();
+          pending.push(entry);renderReview(true);
         }catch(error){failed++;lastError=error.message;}
       }
       message('photo-message',failed?`${failed} photo${failed===1?'':'s'} could not be read. ${lastError}`:'',failed>0);renderReview();
@@ -503,7 +505,7 @@
     $('photo-panel').classList.toggle('selecting',selecting&&!reviewing);
   }
   function applyView(next){
-    view=next;setSelecting(false);renderGallery();
+    view=next;selecting=false;chosen.clear();anchor=null;renderGallery();
     if(next==='sheet'&&activeCity)goToCity(activeCity,{instant:true});
   }
   function settleView(){
@@ -547,10 +549,11 @@
   function removeButton(label,remove){
     const button=document.createElement('button');button.type='button';button.className='remove-photo';button.innerHTML='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg>';button.title=label;button.setAttribute('aria-label',label);button.disabled=busy;button.addEventListener('click',remove);return button;
   }
-  function renderReview(){
+  function renderReview(incremental=false){
     if(albumMotion?.scene){albumMotion.refresh=true;return;}
-    const container=$('photo-review');container.replaceChildren();const stops=app.getStops();
+    const container=$('photo-review'),fragment=document.createDocumentFragment(),existing=new Set(incremental?[...container.children].map(row=>row.dataset.pendingId):[]),stops=app.getStops();
     pending.forEach((entry,index)=>{
+      if(existing.has(entry.id))return;
       const row=document.createElement('div'),tools=document.createElement('div'),select=document.createElement('select'),pick=document.createElement('label'),checkbox=document.createElement('input'),mark=document.createElement('span');
       row.className='photo-tile review-photo';row.dataset.pendingId=entry.id;row.style.setProperty('--tilt',`${(hash(entry.id)%7-3)*.6}deg`);tools.className='photo-tile-tools';pick.className='photo-pick';checkbox.type='checkbox';checkbox.checked=entry.checked;checkbox.disabled=busy;checkbox.setAttribute('aria-label',`Select ${entry.name||`photo ${index+1}`}`);mark.className='photo-check';mark.innerHTML=icons.check;pick.append(checkbox,mark);
       checkbox.addEventListener('change',()=>{entry.checked=checkbox.checked;updateBulkSelection();});
@@ -565,8 +568,9 @@
       const remove=removeButton(`Remove ${entry.name||`photo ${index+1}`} from import`,()=>{
         URL.revokeObjectURL(entry.url);if(entry.thumbUrl)URL.revokeObjectURL(entry.thumbUrl);pending=pending.filter(p=>p.id!==entry.id);renderReview();
         (container.children[Math.min(index,pending.length-1)]?.querySelector('.remove-photo')||$('choose-photos')).focus({preventScroll:true});
-      });tools.append(select);row.prepend(image,pick,remove);row.append(tools);container.append(row);
+      });tools.append(select);row.prepend(image,pick,remove);row.append(tools);fragment.append(row);
     });
+    if(incremental)container.append(fragment);else container.replaceChildren(fragment);
     $('photo-bulk').hidden=!pending.length;
     cityOptions($('bulk-photo-city'),'Assign a city…');
     const seen=new Set();for(const entry of pending){const city=entry.candidate;if(city&&!city.existing){const key=`${city.latitude},${city.longitude}`;if(!seen.has(key)){seen.add(key);$('bulk-photo-city').add(new Option(`${city.name} (from GPS, new stop)`,`gps:${entry.id}`));}}}
@@ -657,6 +661,8 @@
   // A focused tab keeps keyboard focus when the tabs are rebuilt, as they are after every turn.
   function renderTabs(groups){
     const chapters=albumPages(),nav=$('gallery-filter'),focused=nav.contains(document.activeElement)?document.activeElement.dataset.filter:null;
+    const key=JSON.stringify([busy,groups.map(group=>[group.id,group.name,group.items.length,chapters.findIndex(page=>page.type==='city'&&page.first&&page.group.id===group.id)])]);
+    if(key===tabsKey){markTab();return;}tabsKey=key;
     nav.replaceChildren(...groups.map((group,i)=>{
       const tab=document.createElement('button');tab.type='button';tab.className='album-tab';tab.dataset.filter=group.id;tab.style.setProperty('--tab',String(i%6));tab.disabled=busy;
       const page=folioOf(chapters.findIndex(page=>page.type==='city'&&page.first&&page.group.id===group.id));
@@ -714,7 +720,17 @@
     const groups=photoGroups().map(group=>({...group,items:mixedPhotos(group.items)})),list=[{type:'cover'},{type:'inside'},{type:'title'}],rows=contentsRows();
     // Long voyages continue their contents over as many pages as they need.
     if(groups.length>1)for(let i=0;i<groups.length;i+=rows)list.push({type:'contents',groups:groups.slice(i,i+rows),continued:i>0});
-    for(const group of groups){let rest=group.items,first=true;while(first||rest.length){const room=first?3:4;list.push({type:'city',group,items:rest.slice(0,room),first,from:group.items.length-rest.length});rest=rest.slice(room);first=false;}}
+    for(const group of groups){
+      let from=0,page=0;
+      while(from<group.items.length){
+        const remaining=group.items.length-from;
+        // Four prints carry the chapter; every fourth page gets more breathing
+        // room. Small, exact groups of four don't gain a nearly empty last page.
+        let room=page%4===0&&!(group.items.length<=16&&group.items.length%4===0)?3:4;
+        if(remaining<=4)room=remaining;else if(remaining===5)room=3;
+        list.push({type:'city',group,items:group.items.slice(from,from+room),first:page===0,from});from+=room;page++;
+      }
+    }
     if(!photos.length)list.push({type:'empty'});
     // Side by side, the closing endpaper falls on a right-hand page, so the back cover closes the book alone.
     if(twoPage()&&list.length%2)list.push({type:'blank'});
@@ -822,6 +838,7 @@
   // Page numbers change with the layout (one page or two, and how many ports a contents page holds),
   // so the album keeps its place by what is on the page: the back cover, the endpapers, or the same page.
   function placeAt(index,two){
+    if(drawn?.place&&index===albumPage&&two===drawn.two)return drawn.place;
     const shown=(two?[index-1,index]:[index]).map(i=>pages[i]);
     if(shown.some(other=>other?.type==='back'))return {back:true,index};
     // The chosen city's page anchors the place, or else the first page with something on it.
@@ -836,8 +853,8 @@
   }
   function renderAlbum(){
     if(turning){const token=turning;turning=null;token.animations.forEach(animation=>animation.cancel());albumPage=token.target;}
-    const two=twoPage(),rows=contentsRows(),place=reopen||(drawn&&(drawn.two!==two||drawn.rows!==rows)?placeAt(albumPage,drawn.two):null);
-    reopen=null;pages=albumPages();albumPage=clampPage(place?pageAt(place):albumPage);drawn={two,rows,trip:current?.id};
+    const two=twoPage(),rows=contentsRows(),reflow=drawn&&(drawn.two!==two||drawn.rows!==rows),place=reopen||(reflow?placeAt(albumPage,drawn.two):null);
+    reopen=null;pages=albumPages();albumPage=clampPage(place?pageAt(place):albumPage);drawn={two,rows,trip:current?.id,place:reflow?place:null};
     const root=$('album-pages');root.classList.toggle('single',!two);
     root.replaceChildren(...visiblePages(albumPage).map((index,i)=>pageElement(pages[index],index,two?(i?'right':'left'):'single')));
     stateClasses(albumPage);updateAlbumNav();
@@ -912,11 +929,14 @@
 
   // "All photos": a contact sheet, where photos are selected, moved, and deleted.
   function renderSheet(groups){
-    const container=$('photo-gallery');container.replaceChildren();
+    const container=$('photo-gallery');
+    const key=JSON.stringify([current?.id,busy,selecting,groups.map(group=>[group.id,group.name,group.country,group.stop,group.items.map(photo=>[photo.id,photo.thumbUrl||photo.url,photo.captionRevision,photo.postcardRevision,hasPostcard(photo)])])]);
+    if(sheetKey===key)return;sheetKey=key;
+    const fragment=document.createDocumentFragment();
     if(!photos.length){
       const empty=document.createElement('div'),art=document.createElement('div'),label=document.createElement('p'),hint=document.createElement('p'),add=document.createElement('button');empty.className='photo-empty';
       art.innerHTML=icons.photos;art.className='photo-empty-art';label.textContent='No photos yet';hint.className='photo-empty-hint';hint.textContent='Drop photos here or add them from your device. Photos with location data find their city on your route.';
-      add.type='button';add.className='small-button';add.textContent='Add photos';add.disabled=busy;add.addEventListener('click',()=>$('choose-photos').click());empty.append(art,label,hint,add);container.append(empty);
+      add.type='button';add.className='small-button';add.textContent='Add photos';add.disabled=busy;add.addEventListener('click',()=>$('choose-photos').click());empty.append(art,label,hint,add);fragment.append(empty);
     }
     for(const group of groups){
       const section=document.createElement('section'),top=document.createElement('div'),place=document.createElement('div'),heading=document.createElement('h3'),count=document.createElement('span'),grid=document.createElement('div');
@@ -934,8 +954,9 @@
         if(hasPostcard(photo)){const card=document.createElement('span');card.className='postcard-badge';card.title='Postcard written';card.innerHTML=icons.postcard;tile.append(card);}
         tile.prepend(button);grid.append(tile);
       });
-      section.append(top,grid);container.append(section);
+      section.append(top,grid);fragment.append(section);
     }
+    container.replaceChildren(fragment);
   }
   function setSelecting(value){
     if(selecting===value)return;selecting=value;chosen.clear();anchor=null;
@@ -1007,7 +1028,7 @@
   async function exportTrips(all,tripId=current?.id){
     if(busy)return;const focus=listFocus();let saved=false;busy=true;update();
     try{
-      const own=!all&&tripId===current?.id;
+      const own=!!current&&(all||tripId===current.id);
       if(own&&dirty){if(!current)throw Error('Name and save this trip before exporting.');await saveCurrent();saved=true;}
       if(own&&pending.length)throw Error('Save the pending photos before exporting.');
       if(!all&&!tripId)throw Error('Name and save this trip before exporting.');

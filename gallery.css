@@ -1,5 +1,5 @@
 /* The photo album, All photos, import review, and the photo viewer with its postcard. */
-:root { --hand: "Bradley Hand", "Segoe Print", "Ink Free", "Noteworthy", "Chalkboard SE", cursive; --page: #f4ecdb; --page-ink: #46392a; --gold: #d8b878; --leather: radial-gradient(130% 100% at 30% 15%, #5c4633, #3b2c21 58%, #2a1f17); }
+:root { --hand: "Bradley Hand", "Segoe Print", "Ink Free", "Noteworthy", "Chalkboard SE", cursive; --page: #f2e8d5; --page-ink: #423327; --gold: #c9ad79; --leather: radial-gradient(130% 100% at 30% 15%, #5c4633, #3b2c21 58%, #2a1f17); }
 .close-panel { display: grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: none; color: #7b6b54; transition: background-color .2s, color .2s, transform .2s var(--ease-out); }
 .close-panel svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
 .close-panel:hover { background: #b4a58b26; color: var(--red); }
@@ -116,7 +116,7 @@
 .album-snapshot.album-pages { perspective: none; }
 .album-snapshot .gallery-city-heading { -webkit-backdrop-filter: none; backdrop-filter: none; }
 .album-view-layer { position: absolute; z-index: 4; inset: var(--pad) calc(var(--pad) + 2px); isolation: isolate; pointer-events: none; }
-.album-view-surface { position: absolute; top: 0; bottom: 0; left: 0; width: 50%; overflow: hidden; }
+.album-view-surface { contain: layout paint; position: absolute; top: 0; bottom: 0; left: 0; width: 50%; overflow: hidden; }
 .album-view-surface.right { left: 50%; }
 .album-view-surface > .album-snapshot { position: absolute; top: 0; bottom: auto; right: auto; height: 100%; margin: 0; transform: none; }
 .album-view-preparation { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
@@ -278,7 +278,7 @@
 :is(#move-photos, .album-copy-move-photos) { max-width: 160px; }
 .photo-progress { flex: none; height: 3px; overflow: hidden; background: #b4a58b33; }
 .photo-progress span { display: block; width: calc(var(--progress, 0) * 100%); height: 100%; background: var(--red); transition: width .3s var(--ease-out); }
-.photo-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 0 24px; scrollbar-width: thin; scrollbar-color: #bdac90 transparent; }
+.photo-scroll { contain: layout paint; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 0 24px; scrollbar-width: thin; scrollbar-color: #bdac90 transparent; }
 .gallery-city-heading { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 16px 22px 10px; background: var(--page); }
 .gallery-stop-number { align-self: flex-start; margin-top: 7px; color: var(--red); font: 10px Georgia, serif; }
 .gallery-city-place { flex: 1; min-width: 0; }
