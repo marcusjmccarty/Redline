@@ -38,6 +38,8 @@ input::placeholder { color: var(--muted); }
 /* The map */
 main { position: relative; width: 100%; height: 100%; }
 .map-shell { position: absolute; inset: 0; overflow: hidden; background: var(--ocean); }
+/* One small reused paper tile, fixed in scale so zoom never magnifies the grain. */
+.map-shell::after, .unfold-face::after, .unfold-back::after { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: var(--paper-grain); background-size: 80px 64px; background-position: var(--paper-offset, 0 0); opacity: .38; }
 /* A restrained double neatline: paper between two fine cartographic rules. */
 .atlas-frame { position: absolute; z-index: 2; inset: 8px; border: 1px solid #a79778; outline: 8px solid #eee3cc; box-shadow: inset 0 0 0 4px #f0e5cf; pointer-events: none; }
 .atlas-frame::after { content: ''; position: absolute; inset: 4px; border: 1px solid #9f8d6b99; }
@@ -47,26 +49,31 @@ main { position: relative; width: 100%; height: 100%; }
 #graticule { fill: none; pointer-events: none; }
 #graticule path { vector-effect: non-scaling-stroke; }
 #graticule .graticule-line { stroke: #7d8071; stroke-width: .55; stroke-opacity: .13; }
-#graticule .crease-soft { stroke: #736a55; stroke-width: 3.4; stroke-opacity: .035; }
+#graticule .crease-soft { stroke: #736a55; stroke-width: 7.2; stroke-opacity: .028; }
 #graticule .crease-edge { stroke: #736a55; stroke-width: 1.5; stroke-opacity: .11; }
 #graticule .crease-light { stroke: #fff8e7; stroke-width: .65; stroke-opacity: .38; }
 
 /* A temporary four-panel sheet reuses the live SVG, then leaves no layers behind. */
 .map-arriving .map-shell { background: transparent; }
 .map-arriving :is(#map, #place-labels, .atlas-frame, .route-dock, .zoom-controls) { opacity: 0; }
-.map-unfold { position: absolute; z-index: 4; inset: 0; perspective: 2400px; perspective-origin: 50% 45%; pointer-events: none; }
-.unfold-paper { position: absolute; inset: 0; transform-origin: 0 0; transform-style: preserve-3d; }
-.unfold-right { position: absolute; top: 0; left: 50%; width: 50%; height: 100%; transform-origin: 0 50%; transform-style: preserve-3d; }
+.map-arriving .map-shell::after { opacity: 0; }
+.map-arriving.map-revealing :is(#map, #place-labels) { opacity: 1; }
+.map-arriving.map-revealing .map-shell { background: var(--ocean); }
+.map-arriving.map-revealing .map-shell::after { opacity: .38; }
+.map-unfold { position: absolute; z-index: 4; inset: 0; perspective: max(4800px, 600vh); perspective-origin: 50% 45%; pointer-events: none; }
+.unfold-paper { position: absolute; inset: 0; transform-origin: 0 0; transform-style: preserve-3d; will-change: transform; }
+.unfold-right { position: absolute; top: 0; left: 50%; width: 50%; height: 100%; transform-origin: 0 50%; transform-style: preserve-3d; will-change: transform; }
 .unfold-quarter { position: absolute; width: 50%; height: 50%; transform-style: preserve-3d; }
 .unfold-right .unfold-quarter { width: 100%; }
-.unfold-bottom { top: 50%; transform-origin: 50% 0; }
+.unfold-bottom { top: 50%; transform-origin: 50% 0; will-change: transform; }
 .unfold-face, .unfold-back { position: absolute; inset: 0; backface-visibility: hidden; }
-.unfold-face { background: var(--ocean); transform: translateZ(.1px); }
+.unfold-face { background: var(--ocean); transform: translateZ(.3px); }
 .unfold-face svg { display: block; width: 100%; height: 100%; overflow: hidden; }
-.unfold-back { background: var(--paper-grain), linear-gradient(120deg, #f3e9d2, #e7d8b9); transform: rotateY(180deg) translateZ(.1px); box-shadow: 0 2px 12px #57452d22; }
+.unfold-back { background: linear-gradient(120deg, #f3e9d2, #e7d8b9); transform: rotateY(180deg) translateZ(.3px); box-shadow: 0 2px 12px #57452d22; }
 .unfold-shade { position: absolute; inset: 0; background: linear-gradient(90deg, #53432e26, #53432e00 55%); pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   .map-arriving .map-shell { background: var(--ocean); }
+  .map-arriving .map-shell::after { opacity: .38; }
   .map-arriving :is(#map, #place-labels, .atlas-frame, .route-dock, .zoom-controls) { opacity: 1; }
   .map-unfold { display: none; }
 }
