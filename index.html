@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#efe5d2">
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
-  <link rel="stylesheet" href="style.css?v=c1d0a558b2ae">
+  <link rel="stylesheet" href="style.css?v=8ffbe07a7f36">
   <link rel="stylesheet" href="gallery.css?v=5679034758b0">
   <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
   <script src="map-layout.js?v=eb31b38a5551" defer></script>
@@ -29,12 +29,13 @@
       <svg id="map" viewBox="0 0 1440 720" preserveAspectRatio="none" aria-label="World map showing your travel route" role="img" tabindex="-1">
         <g id="land"></g>
         <g id="antarctica" aria-hidden="true"></g>
-        <image id="atlas-tones" href="atlas-tones.png?v=fb506dfe98c3" width="1440" height="720" preserveAspectRatio="none" pointer-events="none" aria-hidden="true"/>
+        <image id="atlas-tones" href="atlas-tones.png?v=00df948c015e" width="1440" height="720" preserveAspectRatio="none" pointer-events="none" aria-hidden="true"/>
         <g id="graticule" aria-hidden="true">
-          <defs><path id="graticule-lines" d="M120 0V720M240 0V720M360 0V720M480 0V720M600 0V720M720 0V720M840 0V720M960 0V720M1080 0V720M1200 0V720M1320 0V720M0 120H1440M0 240H1440M0 360H1440M0 480H1440M0 600H1440"/></defs>
-          <use href="#graticule-lines" class="crease-soft"/>
-          <use href="#graticule-lines" class="crease-edge"/>
-          <use href="#graticule-lines" class="crease-light"/>
+          <path class="graticule-line" d="M120 0V720M240 0V720M360 0V720M480 0V720M600 0V720M840 0V720M960 0V720M1080 0V720M1200 0V720M1320 0V720M0 120H1440M0 240H1440M0 480H1440M0 600H1440"/>
+          <defs><path id="graticule-folds" d="M720 0V720M0 360H1440"/></defs>
+          <use href="#graticule-folds" class="crease-soft"/>
+          <use href="#graticule-folds" class="crease-edge"/>
+          <use href="#graticule-folds" class="crease-light"/>
         </g>
         <g id="country-borders" aria-hidden="true"></g>
         <g id="regions" aria-hidden="true"></g>
