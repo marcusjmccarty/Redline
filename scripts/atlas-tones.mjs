@@ -72,9 +72,11 @@ export function atlasTones(data,width=1024,height=512){
   const pixels=new Uint8Array(width*height*4);
   for(let y=0;y<height;y++)for(let x=0;x<width;x++){
     const i=y*width+x,land=mask[i],tone=wash(x/width*2,y/height,land?0x2d7289:0x629138);
-    const dark=land?[227,204,158]:[161,185,198],light=land?[255,244,212]:[234,236,223];
-    for(let c=0;c<3;c++)pixels[i*4+c]=Math.round(dark[c]+(light[c]-dark[c])*tone);
-    pixels[i*4+3]=Math.round(fade(clamp(distance[i]/3))*148);
+    const dark=land?[216,185,125]:[147,181,198],middle=land?[255,244,204]:[194,214,222],light=land?[255,249,222]:[239,242,227];
+    // A continuous three-colour curve keeps the golden cream and blue lively,
+    // with no stop boundaries between the shadows, middle tones, and highlights.
+    for(let c=0;c<3;c++)pixels[i*4+c]=Math.round(dark[c]*(1-tone)**2+middle[c]*2*tone*(1-tone)+light[c]*tone**2);
+    pixels[i*4+3]=Math.round(fade(clamp(distance[i]/3))*164);
   }
   return {png:png(width,height,pixels),pixels,mask,width,height};
 }

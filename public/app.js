@@ -680,4 +680,5 @@
   const overlayObserver=new ResizeObserver(()=>{if(!animation)scheduleView();});
   overlayObserver.observe($('route-dock'));overlayObserver.observe($('trip-panel'));
   drawRoute();resizeMap();
+  window.RedlineMapIntro?.start();
 })();
