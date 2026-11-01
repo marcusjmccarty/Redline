@@ -29,6 +29,7 @@ function setup(t,{reduced=false,hidden=false,supported=true,decode=()=>Promise.r
   const expire=()=>{const batch=[...timers.values()];timers.clear();for(const callback of batch)callback();};
   const assertClean=()=>{
     assert.equal(root.classList.contains('map-arriving'),false,'The real map and controls are visible');
+    assert.equal(root.classList.contains('map-revealing'),false,'The prepaint state is fully cleared');
     assert.equal(w.document.querySelector('.map-unfold'),null,'No temporary rendering layers remain');
     assert.equal(timers.size,0);assert.equal(frames.size,0);
   };
@@ -44,9 +45,21 @@ test('the opening sheet shares the live artwork and hands off without replacing 
   assert.ok(faces.every(face=>face.querySelector('use').getAttribute('href')==='#map-artwork'));
   assert.equal(w.document.querySelectorAll('#map-artwork').length,1,'The atlas is referenced, not copied into four expensive DOM trees');
   w.RedlineMapIntro.start();assert.equal(w.document.querySelectorAll('.map-unfold').length,1);
-  for(const motion of motions)motion.complete();await tick();env.assertClean();
+  for(const motion of motions)motion.complete();await tick();
+  assert.ok(env.root.classList.contains('map-revealing'),'The real map is exposed beneath the finished paper');
+  assert.ok(w.document.querySelector('.map-unfold'),'The cover stays until the live map has painted');
+  env.flushFrames();assert.ok(w.document.querySelector('.map-unfold'));
+  env.flushFrames();env.assertClean();
   assert.equal(w.document.getElementById('map'),map);assert.equal(w.document.getElementById('map-artwork'),art);
   w.RedlineMapIntro.start();await tick();assert.equal(w.document.querySelector('.map-unfold'),null,'The intro runs once per page load');
+});
+
+test('interaction during the final paint handoff cancels pending frames without restoring the cover',async t=>{
+  const env=setup(t);await env.ready();
+  for(const motion of env.motions)motion.complete();await tick();
+  assert.ok(env.root.classList.contains('map-revealing'));
+  env.w.dispatchEvent(new env.w.Event('pointerdown'));env.assertClean();
+  env.flushFrames();await tick();env.assertClean();
 });
 
 test('reduced motion, background tabs and missing animation support reveal the map immediately',async t=>{
@@ -67,6 +80,14 @@ test('a late image decode cannot restart an intro dismissed by the user',async t
   let release;const env=setup(t,{decode:()=>new Promise(resolve=>{release=resolve;})});
   env.w.RedlineMapIntro.start();env.w.dispatchEvent(new env.w.Event('pointerdown'));env.assertClean();
   release();await tick();env.flushFrames();env.assertClean();assert.equal(env.motions.length,0);
+});
+
+test('initial viewport sizing does not dismiss a fold that has not begun',async t=>{
+  let release;const env=setup(t,{decode:()=>new Promise(resolve=>{release=resolve;})});
+  env.w.RedlineMapIntro.start();env.w.dispatchEvent(new env.w.Event('resize'));
+  assert.ok(env.root.classList.contains('map-arriving'));
+  release();await tick();env.flushFrames();
+  assert.ok(env.w.document.querySelector('.map-unfold'),'The fold uses the settled viewport');
 });
 
 test('resizing, hiding the page or enabling reduced motion safely settles the opening sheet',async t=>{
