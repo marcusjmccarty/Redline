@@ -30,7 +30,12 @@
         <g id="land"></g>
         <g id="antarctica" aria-hidden="true"></g>
         <image id="atlas-tones" href="atlas-tones.png" width="1440" height="720" preserveAspectRatio="none" pointer-events="none" aria-hidden="true"/>
-        <path id="graticule" d="M120 0V720M240 0V720M360 0V720M480 0V720M600 0V720M720 0V720M840 0V720M960 0V720M1080 0V720M1200 0V720M1320 0V720M0 120H1440M0 240H1440M0 360H1440M0 480H1440M0 600H1440" aria-hidden="true"/>
+        <g id="graticule" aria-hidden="true">
+          <defs><path id="graticule-lines" d="M120 0V720M240 0V720M360 0V720M480 0V720M600 0V720M720 0V720M840 0V720M960 0V720M1080 0V720M1200 0V720M1320 0V720M0 120H1440M0 240H1440M0 360H1440M0 480H1440M0 600H1440"/></defs>
+          <use href="#graticule-lines" class="crease-soft"/>
+          <use href="#graticule-lines" class="crease-edge"/>
+          <use href="#graticule-lines" class="crease-light"/>
+        </g>
         <g id="country-borders" aria-hidden="true"></g>
         <g id="regions" aria-hidden="true"></g>
         <g id="map-labels" aria-hidden="true">
