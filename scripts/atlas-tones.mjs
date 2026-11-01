@@ -12,10 +12,12 @@ function noise(x,y,seed){
   return (a+(b-a)*u)*(1-v)+(c+(d-c)*u)*v;
 }
 function wash(x,y,seed){
-  const u=x+(noise(x*2+7,y*2-9,seed+71)-.5)*.48;
-  const v=y+(noise(x*2-13,y*2+5,seed+97)-.5)*.48;
-  const value=noise(u*2.8,v*2.8,seed)*.46+noise(u*6.8+9,v*6.8-5,seed+11)*.38+noise(u*15.7-7,v*15.7+11,seed+31)*.16;
-  return clamp(.5+(value-.5)*1.65);
+  // Broad, irregular washes carry the colour; smaller variations merely soften
+  // their transitions. Avoid clipped contrast and conspicuous mottled patches.
+  const u=x+(noise(x*2+7,y*2-9,seed+71)-.5)*.34;
+  const v=y+(noise(x*2-13,y*2+5,seed+97)-.5)*.34;
+  const value=noise(u*3.2,v*3.2,seed)*.6+noise(u*6.2+9,v*6.2-5,seed+11)*.32+noise(u*11.4-7,v*11.4+11,seed+31)*.08;
+  return clamp(.5+(value-.5)*1.45);
 }
 const crcTable=Uint32Array.from({length:256},(_,n)=>{for(let i=0;i<8;i++)n=n&1?0xedb88320^(n>>>1):n>>>1;return n>>>0;});
 function chunk(type,data){
@@ -70,7 +72,7 @@ export function atlasTones(data,width=1024,height=512){
   const pixels=new Uint8Array(width*height*4);
   for(let y=0;y<height;y++)for(let x=0;x<width;x++){
     const i=y*width+x,land=mask[i],tone=wash(x/width*2,y/height,land?0x2d7289:0x629138);
-    const dark=land?[214,187,143]:[159,190,201],light=land?[252,240,210]:[218,234,231];
+    const dark=land?[227,204,158]:[161,185,198],light=land?[255,244,212]:[234,236,223];
     for(let c=0;c<3;c++)pixels[i*4+c]=Math.round(dark[c]+(light[c]-dark[c])*tone);
     pixels[i*4+3]=Math.round(fade(clamp(distance[i]/3))*148);
   }
