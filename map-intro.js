@@ -2,6 +2,7 @@
 (() => {
   'use strict';
   const root=document.documentElement,media=window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const foldEase='cubic-bezier(.45,0,.25,1)';
   let active=!media?.matches&&!document.hidden&&typeof Element.prototype.animate==='function';
   let started=false,stage=null,frame=0,timer=0,motions=[];
   const events=['pointerdown','keydown','wheel','resize','pagehide'];
@@ -30,7 +31,7 @@
     return {panel,shade};
   }
   function animate(node,keys,options){
-    const motion=node.animate(keys,{fill:'both',easing:'cubic-bezier(.22,.68,.26,1)',...options});
+    const motion=node.animate(keys,{fill:'both',easing:foldEase,...options});
     // Attach rejection handling immediately, including partially built sequences.
     motion.finished.catch(()=>{});motions.push(motion);return motion;
   }
@@ -42,16 +43,25 @@
       stage=element('map-unfold',document.querySelector('main'));stage.setAttribute('aria-hidden','true');
       const paper=element('unfold-paper',stage),leftTop=quarter(paper,0,0,false),leftBottom=quarter(paper,0,360,true);
       const right=element('unfold-right',paper),rightTop=quarter(right,720,0,false),rightBottom=quarter(right,720,360,true);
-      animate(stage,[{opacity:0},{opacity:1}],{duration:100});
+      // Let the folded sheet register, open one hinge, pause, then open the
+      // other. Translation follows each hinge instead of racing ahead of it.
+      const arrival=320,acrossDuration=1050,pause=180,downDuration=1200,settle=180;
+      const acrossEnd=arrival+acrossDuration,downStart=acrossEnd+pause,flat=downStart+downDuration,total=flat+settle;
+      const folded='translate(26%, 26%) scale(.92)',half='translate(0, 24%) scale(.985)',open='translate(0, 0) scale(1)';
+      animate(stage,[{opacity:0},{opacity:1}],{duration:180});
       animate(paper,[
-        {transform:'translate(26%, 26%) scale(.92)',offset:0},
-        {transform:'translate(0, 24%) scale(.985)',offset:.55},
-        {transform:'translate(0, 0) scale(1)',offset:1}
-      ],{duration:920});
-      animate(right,[{transform:'rotateY(-165deg)'},{transform:'rotateY(0deg)'}],{duration:560});
-      for(const {panel} of [leftBottom,rightBottom])animate(panel,[{transform:'rotateX(165deg)'},{transform:'rotateX(0deg)'}],{duration:540,delay:340});
-      for(const {shade} of [leftTop,leftBottom,rightTop,rightBottom])animate(shade,[{opacity:1},{opacity:0}],{duration:800,delay:80});
-      guard(1250);
+        {transform:folded,offset:0},
+        {transform:folded,offset:arrival/total,easing:foldEase},
+        {transform:half,offset:acrossEnd/total},
+        {transform:half,offset:downStart/total,easing:foldEase},
+        {transform:open,offset:flat/total},
+        {transform:open,offset:1}
+      ],{duration:total,easing:'linear'});
+      animate(right,[{transform:'rotateY(-176deg)'},{transform:'rotateY(0deg)'}],{duration:acrossDuration,delay:arrival});
+      for(const {panel} of [leftBottom,rightBottom])animate(panel,[{transform:'rotateX(176deg)'},{transform:'rotateX(0deg)'}],{duration:downDuration,delay:downStart});
+      for(const {shade} of [leftTop,rightTop])animate(shade,[{opacity:1},{opacity:0}],{duration:acrossDuration,delay:arrival});
+      for(const {shade} of [leftBottom,rightBottom])animate(shade,[{opacity:1},{opacity:0}],{duration:downDuration,delay:downStart});
+      guard(total+350);
       Promise.all(motions.map(motion=>motion.finished)).then(finish,finish);
     }catch{finish();}
   }
