@@ -6,15 +6,16 @@
   <meta name="theme-color" content="#efe5d2">
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
-  <link rel="stylesheet" href="style.css?v=8ffbe07a7f36">
+  <link rel="stylesheet" href="style.css?v=2646f3a2eedb">
   <link rel="stylesheet" href="gallery.css?v=5679034758b0">
+  <script src="map-intro.js?v=b242147be1d0"></script>
   <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
   <script src="map-layout.js?v=eb31b38a5551" defer></script>
   <script src="atlas-geography.js?v=5a63514c3186" defer></script>
   <script src="trace.js?v=7b2126928463" defer></script>
   <script src="labels.js?v=11c241450648" defer></script>
   <script src="map-paint.js?v=77266050f248" defer></script>
-  <script src="app.js?v=8e9c938198e4" defer></script>
+  <script src="app.js?v=5f4c0b693b2f" defer></script>
   <script src="postcard-export.js?v=048b39ce6827" defer></script>
   <script src="postcards.js?v=d93a41ee70f8" defer></script>
   <script src="jpeg.js?v=c37b5b32449f" defer></script>
@@ -27,9 +28,10 @@
   <main aria-label="Travel map">
     <div class="map-shell" id="map-shell">
       <svg id="map" viewBox="0 0 1440 720" preserveAspectRatio="none" aria-label="World map showing your travel route" role="img" tabindex="-1">
+        <g id="map-artwork">
         <g id="land"></g>
         <g id="antarctica" aria-hidden="true"></g>
-        <image id="atlas-tones" href="atlas-tones.png?v=00df948c015e" width="1440" height="720" preserveAspectRatio="none" pointer-events="none" aria-hidden="true"/>
+        <image id="atlas-tones" href="atlas-tones.png?v=104744be7521" width="1440" height="720" preserveAspectRatio="none" pointer-events="none" aria-hidden="true"/>
         <g id="graticule" aria-hidden="true">
           <path class="graticule-line" d="M120 0V720M240 0V720M360 0V720M480 0V720M600 0V720M840 0V720M960 0V720M1080 0V720M1200 0V720M1320 0V720M0 120H1440M0 240H1440M0 480H1440M0 600H1440"/>
           <defs><path id="graticule-folds" d="M720 0V720M0 360H1440"/></defs>
@@ -52,6 +54,7 @@
         </g>
         <g id="route-lines"></g>
         <g id="route-stops"></g>
+        </g>
       </svg>
       <svg id="place-labels" aria-hidden="true"></svg>
     </div>
