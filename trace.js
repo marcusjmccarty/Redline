@@ -5,6 +5,14 @@
   const maxZoom=240,autoZoomLimit=118;
   const duration=length=>Math.max(1600,Math.min(3600,length*6));
   const ease=value=>{const t=clamp(value,0,1);return t*t*t*(t*(t*6-15)+10);};
+  // Ramp velocity smoothly over the first and last 30% of a move. The
+  // constant-speed middle avoids a sudden rush on a multi-octave zoom.
+  function cameraPhase(t){
+    const ramp=.3,edge=Math.min(t,1-t);
+    if(edge>=ramp)return (t-ramp/2)/(1-ramp);
+    const u=edge/ramp,shoulder=ramp*u*u*u*(1-u/2)/(1-ramp);
+    return t<.5?shoulder:1-shoulder;
+  }
   // Analytic critical damping keeps velocity when a wheel gesture retargets mid-move.
   function spring(state,target,seconds,frequency=16){
     const offset=state.value-target,term=(state.velocity+frequency*offset)*seconds,decay=Math.exp(-frequency*seconds);
@@ -27,11 +35,12 @@
   }
 
   function measure(path){
-    const points=[],commands=[],segments=[];
+    const points=[],segments=[];let prefix='',moves=0;
     for(const match of path.matchAll(/([ML])([\d.e+-]+),([\d.e+-]+)/gi)){
       const x=Number(match[2]),y=Number(match[3]),previous=points.at(-1),move=match[1]==='M';
       const distance=previous&&!move?Math.hypot(x-previous.x,y-previous.y):0;
-      points.push({x,y,distance:(previous?.distance||0)+distance});commands.push(match[0]);
+      prefix+=match[0];if(move)moves++;
+      points.push({x,y,distance:(previous?.distance||0)+distance,end:prefix.length});
       if(distance)segments.push({a:[previous.x,previous.y],b:[x,y],start:previous.distance,end:previous.distance+distance});
     }
     const length=points.at(-1)?.distance||0;
@@ -47,7 +56,7 @@
     function pathAt(amount){
       if(amount>=1||!points.length)return path;
       const {index,point}=locate(amount);
-      return commands.slice(0,index+1).join('')+'L'+point.join(',');
+      return prefix.slice(0,points[index].end)+'L'+point.join(',');
     }
     const pointAt=amount=>locate(amount).point;
     function segmentsAt(amount){
@@ -61,7 +70,7 @@
     }
     const xs=points.map(p=>p.x),ys=points.map(p=>p.y);
     const bounds=points.length?{left:Math.min(...xs),right:Math.max(...xs),top:Math.min(...ys),bottom:Math.max(...ys)}:{left:0,right:0,top:0,bottom:0};
-    return {length,path,pathAt,pointAt,segmentsAt,bounds,points:points.map(p=>[p.x,p.y]),crossesSeam:commands.filter(c=>c[0]==='M').length>1};
+    return {length,path,pathAt,pointAt,segmentsAt,bounds,points:points.map(p=>[p.x,p.y]),crossesSeam:moves>1};
   }
 
   function pointFrame(point,space,world,zoom){
@@ -100,7 +109,7 @@
   }
   function cameraView(start,plan,point,amount){
     if(amount>=1)return {...plan.arrival};
-    const target=plan.follow(point),blend=ease(amount);
+    const target=plan.follow(point),blend=cameraPhase(clamp(amount,0,1));
     // Zoom by equal ratios. Interpolate the corners by that same change in width
     // to keep the departure in frame while pulling out for the next leg.
     const ratio=Math.log(target.w/start.w);
@@ -119,7 +128,7 @@
       const time=total?elapsed/total:1;
       // A long leg emerging from a close view can only reveal the fraction
       // that fits. On a short leg keep some ink moving as the camera comes in.
-      const fit=Math.exp(-Math.abs(Math.log(widthRatio))*(1-ease(time)));
+      const fit=Math.exp(-Math.abs(Math.log(widthRatio))*(1-cameraPhase(time)));
       // Round the start and end of the ink stroke without pausing at a city.
       let travel=time;
       if(ramp){

@@ -6,32 +6,35 @@
   <meta name="theme-color" content="#efe5d2">
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
-  <link rel="stylesheet" href="style.css?v=d3b62980f6ca">
-  <link rel="stylesheet" href="gallery.css?v=9bb1428ea8e7">
+  <link rel="stylesheet" href="style.css?v=d0373fe22fa3">
+  <link rel="stylesheet" href="gallery.css?v=97fd4fb43e48">
   <script src="map-intro.js?v=e8197bd28f08"></script>
   <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
   <script src="map-layout.js?v=eb31b38a5551" defer></script>
   <script src="atlas-geography.js?v=5a63514c3186" defer></script>
-  <script src="trace.js?v=d23d401f2757" defer></script>
+  <script src="trace.js?v=6989306e288d" defer></script>
   <script src="labels.js?v=0e761c11f184" defer></script>
-  <script src="map-paint.js?v=77266050f248" defer></script>
-  <script src="app.js?v=ee9d5fa86770" defer></script>
+  <script src="relief/index.js?v=b019ce04df05" defer></script>
+  <script src="map-paint.js?v=dc022ce3ffd2" defer></script>
+  <script src="app.js?v=53123f2e9679" defer></script>
   <script src="postcard-export.js?v=048b39ce6827" defer></script>
   <script src="postcards.js?v=bb3aca0cbd97" defer></script>
   <script src="jpeg.js?v=c37b5b32449f" defer></script>
   <script src="archive.js?v=bc17aed962a3" defer></script>
   <script src="storage.js?v=ebd36216a640" defer></script>
   <script src="album-motion.js?v=427d599dad6d" defer></script>
-  <script src="trips.js?v=9a64d77ade1f" defer></script>
+  <script src="trips.js?v=1a2356e7aab8" defer></script>
 </head>
 <body>
   <main aria-label="Travel map">
     <div class="map-shell" id="map-shell">
       <svg id="map" viewBox="0 0 1440 720" preserveAspectRatio="none" aria-label="World map showing your travel route" role="img" tabindex="-1">
         <g id="map-artwork">
+        <rect width="1440" height="720" fill="var(--ocean)" aria-hidden="true"/>
         <g id="land"></g>
         <g id="antarctica" aria-hidden="true"></g>
         <image id="atlas-tones" href="atlas-tones.png?v=104744be7521" width="1440" height="720" preserveAspectRatio="none" pointer-events="none" aria-hidden="true"/>
+        <g id="atlas-relief" pointer-events="none" aria-hidden="true"></g>
         <g id="graticule" aria-hidden="true">
           <path class="graticule-line" d="M120 0V720M240 0V720M360 0V720M480 0V720M600 0V720M840 0V720M960 0V720M1080 0V720M1200 0V720M1320 0V720M0 120H1440M0 240H1440M0 480H1440M0 600H1440"/>
           <defs><path id="graticule-folds" d="M720 0V720M0 360H1440"/></defs>
@@ -115,7 +118,8 @@
       </div>
     <dialog id="photo-panel" class="album" aria-labelledby="photos-heading" tabindex="-1">
       <div id="album-display">
-        <div class="album-top">
+        <button id="album-top-edge" type="button" hidden aria-controls="album-toolbar" aria-expanded="false" aria-label="Show photo toolbar"></button>
+        <div class="album-top" id="album-toolbar">
           <div class="album-title"><h2 id="photos-heading">Photos</h2><p class="album-subtitle"><span id="photo-trip-name"></span><span id="gallery-count"></span></p></div>
           <div id="album-modes" class="album-modes" role="group" aria-label="Show photos as"><button id="album-view" type="button" aria-pressed="true">Album</button><button id="sheet-view" type="button" aria-pressed="false">All photos</button></div>
           <button id="choose-photos" class="small-button primary-button" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span>Add photos</span></button>
