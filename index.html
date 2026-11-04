@@ -6,23 +6,23 @@
   <meta name="theme-color" content="#efe5d2">
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
-  <link rel="stylesheet" href="style.css?v=2d57b4274978">
-  <link rel="stylesheet" href="gallery.css?v=7c66b06ac22d">
+  <link rel="stylesheet" href="style.css?v=002f634e1320">
+  <link rel="stylesheet" href="gallery.css?v=ea10a69da291">
   <script src="map-intro.js?v=e8197bd28f08"></script>
   <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
   <script src="map-layout.js?v=eb31b38a5551" defer></script>
   <script src="atlas-geography.js?v=5a63514c3186" defer></script>
-  <script src="trace.js?v=7b2126928463" defer></script>
-  <script src="labels.js?v=11c241450648" defer></script>
+  <script src="trace.js?v=4197c1dd48c7" defer></script>
+  <script src="labels.js?v=0e761c11f184" defer></script>
   <script src="map-paint.js?v=77266050f248" defer></script>
-  <script src="app.js?v=5f4c0b693b2f" defer></script>
+  <script src="app.js?v=d9d575b53045" defer></script>
   <script src="postcard-export.js?v=048b39ce6827" defer></script>
-  <script src="postcards.js?v=d93a41ee70f8" defer></script>
+  <script src="postcards.js?v=bb3aca0cbd97" defer></script>
   <script src="jpeg.js?v=c37b5b32449f" defer></script>
   <script src="archive.js?v=bc17aed962a3" defer></script>
   <script src="storage.js?v=ebd36216a640" defer></script>
-  <script src="album-motion.js?v=5486af76a9af" defer></script>
-  <script src="trips.js?v=d43e03dc53da" defer></script>
+  <script src="album-motion.js?v=682a302d5408" defer></script>
+  <script src="trips.js?v=d56060d9669c" defer></script>
 </head>
 <body>
   <main aria-label="Travel map">
@@ -89,17 +89,19 @@
       <div id="trip-panel" class="logbook route-log" hidden role="region" aria-labelledby="trips-heading" tabindex="-1">
         <div class="logbook-inner"><div class="logbook-scroll">
           <div class="logbook-head"><h2 id="trips-heading">Logbook</h2><p id="trips-summary"></p><button class="close-panel icon-button" data-close="trip-panel" aria-label="Close the logbook" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>
+          <div class="trip-navigation">
           <details id="trip-switcher" class="trip-switcher"><summary>Switch trip <span aria-hidden="true">⌄</span></summary>
           <div class="trip-list-heading"><h3>Saved trips</h3><label id="trip-search-label" class="trip-search" hidden><span class="sr-only">Find a trip</span><input id="trip-search" type="search" placeholder="Find a trip" autocomplete="off"></label></div>
           <ul id="trip-list" class="trip-grid" aria-label="Saved trips"></ul>
           </details>
+          <div class="current-actions"><button id="new-trip" class="text-button" type="button">+ New trip</button><button id="export-trip" class="text-button" type="button">Export trip</button></div>
+          </div>
           <section class="current-trip" aria-labelledby="current-trip-label">
             <div id="current-trip-map" hidden class="trip-map current-map" aria-hidden="true"></div>
             <div class="current-trip-info">
               <p id="current-trip-label" class="eyebrow">Trip</p>
               <form id="trip-name-form"><label for="trip-name" class="sr-only">Trip name</label><input id="trip-name" placeholder="Trip name" maxlength="80" required autocomplete="off"><button type="submit">Save</button></form>
               <p id="trip-state" class="trip-state"></p>
-              <div class="current-actions"><button id="new-trip" class="text-button" type="button">+ New trip</button><button id="export-trip" class="text-button" type="button">Export trip</button></div>
             </div>
           </section>
           <div class="log-route-heading"><span>Stops</span><button id="undo-route" class="text-button" type="button" title="Undo route edit (Ctrl / ⌘ + Z)" aria-keyshortcuts="Control+Z Meta+Z" disabled>↶ Undo</button><button id="clear" class="text-button" type="button">Clear route</button><button id="toggle-stops" type="button" aria-controls="route-stops-panel" aria-expanded="true" hidden></button></div>
@@ -116,6 +118,7 @@
         <div class="album-title"><h2 id="photos-heading">Photos</h2><p class="album-subtitle"><span id="photo-trip-name"></span><span id="gallery-count"></span></p></div>
         <div id="album-modes" class="album-modes" role="group" aria-label="Show photos as"><button id="album-view" type="button" aria-pressed="true">Album</button><button id="sheet-view" type="button" aria-pressed="false">All photos</button></div>
         <button id="choose-photos" class="small-button primary-button" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span>Add photos</span></button>
+        <button id="album-fullscreen" class="close-panel" type="button" aria-label="Full screen" title="Full screen" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="expand-icon" d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/><path class="restore-icon" d="M8 3v5H3m14 0h-5V3m0 14v-5h5M3 12h5v5"/></svg></button>
         <button class="close-panel" data-close="photo-panel" aria-label="Close photos" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
         <input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif" multiple hidden>
       </div>

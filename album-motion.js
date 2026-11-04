@@ -91,12 +91,21 @@
     }));
     return decoded.every(Boolean);
   }
+  // WebKit can leave decode() pending for a lazy image in hidden paper.
+  // Missing artwork must never keep the book inert or trap its cover.
+  async function prepareImages(images,options){
+    let timer;
+    try{return await Promise.race([decodeImages(images,options),new Promise(resolve=>{timer=setTimeout(()=>resolve(false),900);})]);}
+    finally{clearTimeout(timer);}
+  }
   function inertCopy(node,deep=true){
     const copy=node.cloneNode(false);
     if(node.nodeType!==1)return copy;
     if(copy.id){copy.classList.add(`album-copy-${copy.id}`);copy.removeAttribute('id');}
     copy.removeAttribute('autofocus');
     if(deep)for(const child of node.childNodes)copy.append(inertCopy(child));
+    if(node.tagName==='OPTION')copy.toggleAttribute('selected',node.selected);
+    if(node.tagName==='INPUT'&&node.type==='checkbox')copy.toggleAttribute('checked',node.checked);
     return copy;
   }
   // Freeze only the visible contact sheet. A moving page must not carry a
@@ -122,6 +131,15 @@
       if(child!==scroll){template.append(capture(child,rect,bounds));continue;}
       const viewportCopy=place(inertCopy(scroll,false),viewport,bounds);
       viewportCopy.classList.add('album-frozen-scroll');
+      const review=scroll.querySelector('#photo-review');
+      if(review&&!review.hidden){
+        template.append(viewportCopy);
+        for(const tile of review.children){
+          const rect=tile.getBoundingClientRect();
+          if(rect.bottom>=viewport.top&&rect.top<=viewport.bottom)viewportCopy.append(capture(tile,rect,viewport));
+        }
+        continue;
+      }
       const gallery=scroll.querySelector('#photo-gallery'),copy=inertCopy(gallery,false);
       copy.classList.add('album-frozen-gallery');viewportCopy.append(copy);template.append(viewportCopy);
       for(const section of gallery.children){
@@ -235,7 +253,7 @@
     let animations=[],direction=opening?'opening':'closing',disposed=false,started=false;
     const pose=state=>{leaf.style.transform=state.leaf;scene.style.transform=state.scene;};
     pose(opening?closedFrames:openFrames);
-    const ready=decodeImages([...scene.querySelectorAll('img')])
+    const ready=prepareImages([...scene.querySelectorAll('img')])
       .then(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
       .then(()=>{
         if(disposed)return;
@@ -308,7 +326,9 @@
     // The real destination is the stationary paper underneath the turn. Keep
     // it painted throughout; visibility:hidden can discard its scroll/image
     // layers and force a fresh rasterization exactly as the leaf disappears.
-    const incoming=apply();
+    const outgoingCapture=captures.get(source),incoming=apply();
+    // Import pages share their sheet element. Its next contents need a new snapshot.
+    if(incoming===source)captures.delete(source);
     const arriving=two?surface(incoming,!forward):forward?null:surface(incoming);
     const frontShade=make('page-shade album-view-shade'),backShade=make('page-shade album-view-shade'),cast=make('page-shade cast');
     front.classList.add(forward?'right':'left');back.classList.add(forward?'left':'right');
@@ -334,7 +354,7 @@
     // Even a single-page forward turn needs to warm its live destination,
     // although that view no longer needs any duplicate stationary snapshot.
     if(!captures.has(incoming))captures.set(incoming,viewCapture(incoming,{two,width,closed:false}));
-    const ready=decodeImages([...captures.values()].flatMap(capture=>capture.images).concat([...layer.querySelectorAll('img')]),{reveal:()=>!disposed&&!started});
+    const ready=decodeImages([...new Set([outgoingCapture,...captures.values()])].flatMap(capture=>capture.images).concat([...layer.querySelectorAll('img')]),{reveal:()=>!disposed&&!started});
     return {
       async play(){
         if(disposed)return;
@@ -362,5 +382,5 @@
       dispose(){disposed=true;clearTimeout(readyTimer);cancelReady();tabs.style.translate=tabTranslate;layer.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.viewMotion;[book.style.width,book.style.height,book.style.flex]=savedSize;resumePreviews();}
     };
   }
-  window.RedlineAlbumMotion={create,changeView,turnLeaf,preload,clearPreloads,idle};
+  window.RedlineAlbumMotion={create,changeView,turnLeaf,preload,clearPreloads,idle,prepareImages};
 })();

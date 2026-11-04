@@ -12,7 +12,7 @@
   const empty=()=>Object.fromEntries(fields.map(key=>[key,'']));
   const motion=el=>typeof el?.animate==='function'&&'finished' in (window.Animation?.prototype||{})&&!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const settle=animation=>animation?.finished?.catch(()=>{});
-  const decode=url=>{const image=new Image();image.decoding='async';image.src=url;return image.decode?image.decode().catch(()=>{}):Promise.resolve();};
+  const decode=url=>{const image=new Image();image.decoding='async';image.src=url;return window.RedlineAlbumMotion.prepareImages([image]);};
   const cardDirty=state=>JSON.stringify(state.value)!==state.saved;
   const captionDirty=state=>state.caption.trim()!==state.savedCaption;
   const dirty=state=>cardDirty(state)||captionDirty(state);
@@ -171,7 +171,10 @@
     if(previous&&(dirty(previous)||previous.promise||previous.captionPromise))active=previous;
     else {const value={...empty(),...photo.postcard};active={photo,value,saved:JSON.stringify(value),revision:photo.postcardRevision||1,promise:null,preview:!api,caption:photo.caption||'',savedCaption:photo.caption||'',captionRevision:photo.captionRevision||1,captionPromise:null};if(api)states.set(photo.id,active);}
     const place=photo.city?.name||'';
-    $('postcard-error').textContent='';$('full-photo').src=photo.url;$('full-photo').alt=place?`Photo in ${place}`:'Trip photo';
+    const full=$('full-photo');
+    if(photo.width&&photo.height){full.width=photo.width;full.height=photo.height;}
+    else {full.removeAttribute('width');full.removeAttribute('height');}
+    $('postcard-error').textContent='';full.src=photo.url;$('full-photo').alt=place?`Photo in ${place}`:'Trip photo';
     captionEditor(false);$('edit-caption').hidden=active.preview;$('postcard-place').textContent=place;
     for(const key of fields)$(`postcard-${key}`).value=active.value[key];
     // A new photo starts face up, without playing the previous postcard's reverse flip.
@@ -184,7 +187,12 @@
     status();updateOrientation();updateNavigation();renderCity();wakeArrows(window.matchMedia?.('(hover: none)').matches?'touch':'mouse');
     if(!wasOpen){
       const viewer=$('photo-viewer');viewer.getAnimations?.().forEach(animation=>animation.cancel());viewer.showModal();
-      if(motion(viewer)&&origin){viewer.style.opacity='0';decode(photo.url).then(()=>{viewer.style.opacity='';if(active?.photo===photo)zoomFrom(origin);});}
+      if(motion(viewer)&&origin){
+        const image=$('full-photo'),version=navigationVersion;
+        const reveal=()=>{if(viewer.open&&!closing&&version===navigationVersion&&active?.photo.id===photo.id)zoomFrom(origin);};
+        if(image.complete&&image.naturalWidth)reveal();
+        else image.addEventListener('load',reveal,{once:true});
+      }
     }
     // A new photo always shows its front, so focus on the back moves to the front's paper.
     if(!wasOpen||onBack)$('postcard-front').focus({preventScroll:true});
@@ -219,6 +227,7 @@
     const photo=$('full-photo');
     $('postcard-stage').classList.toggle('portrait',photo.naturalHeight>photo.naturalWidth);
   }
+  $('full-photo').addEventListener('error',()=>{if($('photo-viewer').open)$('postcard-error').textContent='This photo could not be loaded.';});
   $('full-photo').draggable=false;
   $('full-photo').addEventListener('load',()=>{updateOrientation();if($('photo-viewer').classList.contains('flipped'))queueShare();});
   $('viewer-previous').addEventListener('click',()=>navigate(-1));
