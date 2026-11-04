@@ -189,17 +189,17 @@
     const bottom=!document.body.classList.contains('map-only')&&dock.top>bounds.top+height*.25?Math.min(height-padding,dock.top-bounds.top-28):height-padding;
     return {width,height,left:padding,right:width-padding,top:padding,bottom:Math.max(padding+60,bottom)};
   }
-  function cameraFor(leg,direction){
-    return RedlineTrace.camera(geometry[leg],cameraSpace(),baseView,project(stops[direction>0?leg+1:leg]),traceZoom);
+  function cameraFor(leg,direction,zoom=traceZoom){
+    return RedlineTrace.camera(geometry[leg],cameraSpace(),baseView,project(stops[direction>0?leg+1:leg]),zoom,geometry[leg-1],geometry[leg+1]);
   }
   function manualCamera(width){return {width,tracker:RedlineTrace.trackingCamera(view,cameraSpace(),baseView,MAX_ZOOM)};}
   function frameDistance(a,b){const space=cameraSpace();return Math.max(Math.abs(a.x-b.x)*space.width/b.w,Math.abs(a.y-b.y)*space.height/b.h,Math.abs(a.w-b.w)*space.width/b.w);}
   function beginLeg(target,direction,returnToOverview=false){
     const leg=direction>0?Math.floor(progress+1e-7):Math.ceil(progress-1e-7)-1;
     activeLeg={origin:direction>0?leg:leg+1,destination:direction>0?leg+1:leg};
-    const defaultFrame=RedlineTrace.camera(geometry[leg],cameraSpace(),baseView,project(stops[activeLeg.destination])).arrival;
-    playback={leg,target,direction,returnToOverview,nominalWidth:defaultFrame.w,manual:traceZoom?manualCamera(baseView.w/traceZoom):null,from:progress-leg,to:direction>0?1:0,startView:{...view},camera:cameraFor(leg,direction),timeline:RedlineTrace.timeline({
-      from:progress-leg,to:direction>0?1:0,duration:RedlineTrace.duration(geometry[leg].length),widthRatio:traceZoom?1:defaultFrame.w/view.w
+    const autoCamera=cameraFor(leg,direction,null),defaultFrame=autoCamera.arrival;
+    playback={leg,target,direction,returnToOverview,nominalWidth:defaultFrame.w,manual:traceZoom?manualCamera(baseView.w/traceZoom):null,from:progress-leg,to:direction>0?1:0,startView:{...view},camera:traceZoom?cameraFor(leg,direction):autoCamera,timeline:RedlineTrace.timeline({
+      from:progress-leg,to:direction>0?1:0,duration:RedlineTrace.duration(geometry[leg].length),widthRatio:traceZoom?1:defaultFrame.w/view.w,easeStops:!traceZoom
     })};
     paintProgress();
   }

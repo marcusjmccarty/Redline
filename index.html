@@ -7,22 +7,22 @@
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
   <link rel="stylesheet" href="style.css?v=d3b62980f6ca">
-  <link rel="stylesheet" href="gallery.css?v=ebc107f4b808">
+  <link rel="stylesheet" href="gallery.css?v=9bb1428ea8e7">
   <script src="map-intro.js?v=e8197bd28f08"></script>
   <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
   <script src="map-layout.js?v=eb31b38a5551" defer></script>
   <script src="atlas-geography.js?v=5a63514c3186" defer></script>
-  <script src="trace.js?v=61116942ae57" defer></script>
+  <script src="trace.js?v=d23d401f2757" defer></script>
   <script src="labels.js?v=0e761c11f184" defer></script>
   <script src="map-paint.js?v=77266050f248" defer></script>
-  <script src="app.js?v=d8bd897a6041" defer></script>
+  <script src="app.js?v=ee9d5fa86770" defer></script>
   <script src="postcard-export.js?v=048b39ce6827" defer></script>
   <script src="postcards.js?v=bb3aca0cbd97" defer></script>
   <script src="jpeg.js?v=c37b5b32449f" defer></script>
   <script src="archive.js?v=bc17aed962a3" defer></script>
   <script src="storage.js?v=ebd36216a640" defer></script>
   <script src="album-motion.js?v=427d599dad6d" defer></script>
-  <script src="trips.js?v=b377317563ea" defer></script>
+  <script src="trips.js?v=9a64d77ade1f" defer></script>
 </head>
 <body>
   <main aria-label="Travel map">
@@ -119,7 +119,7 @@
           <div class="album-title"><h2 id="photos-heading">Photos</h2><p class="album-subtitle"><span id="photo-trip-name"></span><span id="gallery-count"></span></p></div>
           <div id="album-modes" class="album-modes" role="group" aria-label="Show photos as"><button id="album-view" type="button" aria-pressed="true">Album</button><button id="sheet-view" type="button" aria-pressed="false">All photos</button></div>
           <button id="choose-photos" class="small-button primary-button" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span>Add photos</span></button>
-          <button id="album-fullscreen" class="close-panel" type="button" aria-label="Full screen" title="Full screen" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="expand-icon" d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/><path class="restore-icon" d="M8 3v5H3m14 0h-5V3m0 14v-5h5M3 12h5v5"/></svg></button>
+          <button id="album-fullscreen" class="close-panel" type="button" aria-label="Fill window with album" title="Fill window · Esc to exit · Right edge for city tabs" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="expand-icon" d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/><path class="restore-icon" d="M8 3v5H3m14 0h-5V3m0 14v-5h5M3 12h5v5"/></svg></button>
           <button class="close-panel" data-close="photo-panel" aria-label="Close photos" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
           <input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif" multiple hidden>
         </div>
@@ -144,6 +144,12 @@
             </div>
             <div id="photo-drop-hint" aria-hidden="true" hidden><span>Drop photos to add them</span></div>
             <nav id="gallery-filter" class="album-tabs" aria-label="Go to a city"></nav>
+          </div>
+        </div>
+        <div id="album-index" hidden>
+          <button id="album-edge" type="button" aria-label="Show album controls and city tabs" aria-controls="album-drawer" aria-expanded="false"></button>
+          <div id="album-drawer" inert>
+            <button id="album-restore" type="button">Exit window view <span aria-hidden="true">↙</span></button>
           </div>
         </div>
         <div id="album-foot" class="album-foot">
