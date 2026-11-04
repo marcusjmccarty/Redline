@@ -128,3 +128,26 @@ test('nearby legs get a readable local scale without changing long-haul framing'
   assert.ok(short.separation>150&&regional.separation>150);
   assert.ok(frame([-80.19,25.76],[-78.47,-.18]).level<=2.35);
 });
+
+test('the ink stays on screen and zoom changes at a bounded rate across long and short legs',()=>{
+  const places=[[-80.19,25.76],[-78.47,-.18],[-78.424,-1.396],[-78.062,-1.505],[-78.145,.04],[-3.7038,40.4168]];
+  const space={width:1200,height:800,left:40,right:1160,top:40,bottom:640};
+  for(const stops of [places,[...places].reverse()]){
+    let view=worldFrame;
+    for(let i=1;i<stops.length;i++){
+      const geometry=measure(route(stops[i-1],stops[i])),start=view,plan=camera(geometry,space,worldFrame,geometry.pointAt(1));
+      const widthRatio=plan.arrival.w/start.w,run=timeline({from:0,to:1,duration:duration(geometry.length),widthRatio});
+      let state;
+      do{
+        state=run.advance(16);
+        const tip=geometry.pointAt(state.position),frame=cameraView(start,plan,tip,state.time);
+        assert.ok(Math.abs(Math.log2(frame.w/view.w))/.016<1.8,'At normal speed the zoom changes by less than 1.8 doublings per second');
+        const x=(tip[0]-frame.x)*space.width/frame.w,y=(tip[1]-frame.y)*space.height/frame.h;
+        assert.ok(x>=0&&x<=space.width&&y>=0&&y<=space.bottom,'The ink stays in the available map area');
+        if(widthRatio>4&&state.time<.5)assert.ok(state.position<state.time/2,'A long leg waits for the map to pull back');
+        view=frame;
+      }while(!state.done);
+      assert.equal(state.position,1);assert.deepEqual(view,plan.arrival);
+    }
+  }
+});

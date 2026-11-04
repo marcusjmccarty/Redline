@@ -1431,15 +1431,48 @@ test('import review turns between distinct pages without losing location assignm
   assert.equal($('photo-review').querySelector('select').value,paris.id);assert.equal($('album-book').inert,false);
 });
 
+test('review arrows queue during a turn, work on checkboxes, and leave city pickers alone',async t=>{
+  const {w,$,choose,press}=await setup(t);
+  choose(Array.from({length:100},(_,i)=>`review-${i}.jpg`));
+  await wait(()=>$('photo-selection-count').textContent==='100 selected'&&!$('choose-photos').disabled);
+  const motion=controlledMotion(w),review=$('photo-review');
+  assert.equal(press('ArrowRight',review.querySelector('select')),true);
+  press('ArrowRight',review.querySelector('input'));
+  await wait(()=>motion.running.size===4);
+  assert.equal($('review-range').textContent,'49–96 of 100');
+  const copies=$('album-book').querySelectorAll('.album-view-layer select');
+  assert.ok(copies.length>0&&[...copies].every(select=>select.options.length<=1));
+  press('ArrowRight');await motion.finish();await wait(()=>motion.running.size===4);
+  assert.equal($('review-range').textContent,'97–100 of 100');
+  press('ArrowLeft');await motion.finish();await wait(()=>motion.running.size===4);
+  await motion.finish();assert.equal($('review-range').textContent,'49–96 of 100');
+  assert.equal($('album-book').inert,false);
+});
+
+test('delayed WebKit fullscreen events handle both an exit button and a close before entry',async t=>{
+  const {w,$}=await setup(t),doc=w.document,display=$('album-display'),button=$('album-fullscreen');
+  let owner=null,exits=0;
+  Object.defineProperty(doc,'webkitFullscreenElement',{get:()=>owner});
+  display.webkitRequestFullscreen=()=>{};
+  doc.webkitExitFullscreen=()=>{exits++;owner=null;doc.dispatchEvent(new w.Event('webkitfullscreenchange'));};
+  const enter=()=>{owner=display;doc.dispatchEvent(new w.Event('webkitfullscreenchange'));};
+  button.click();await tick();enter();button.click();
+  assert.equal(owner,null);assert.equal(exits,1);
+  button.click();await tick();$('photo-panel').querySelector('[data-close]').click();enter();
+  assert.equal(owner,null);assert.equal(exits,2);assert.equal(button.getAttribute('aria-pressed'),'false');
+});
+
 test('fullscreen follows native exit, falls back when unavailable, and closing resets the book',async t=>{
   const {w,$,press}=await setup(t),doc=w.document,button=$('album-fullscreen');
   let owner=null;
   Object.defineProperty(doc,'fullscreenElement',{get:()=>owner});
-  doc.documentElement.requestFullscreen=async()=>{owner=doc.documentElement;};
+  const display=$('album-display');
+  assert.ok(display.contains(button)&&display.contains($('photo-viewer')));
+  display.requestFullscreen=async()=>{owner=display;};
   doc.exitFullscreen=async()=>{owner=null;doc.dispatchEvent(new w.Event('fullscreenchange'));};
-  button.click();await tick();assert.equal(owner,doc.documentElement);assert.equal(button.getAttribute('aria-pressed'),'true');
+  button.click();await tick();assert.equal(owner,display);assert.equal(button.getAttribute('aria-pressed'),'true');
   await doc.exitFullscreen();assert.equal(button.getAttribute('aria-pressed'),'false');
-  doc.documentElement.requestFullscreen=async()=>{throw Error('Unavailable');};
+  display.requestFullscreen=async()=>{throw Error('Unavailable');};
   button.click();await tick();assert.ok($('photo-panel').classList.contains('expanded'));
   press('Escape');assert.equal($('photo-panel').open,true);assert.equal(button.getAttribute('aria-pressed'),'false');
   button.click();await tick();$('photo-panel').querySelector('[data-close]').click();assert.equal($('photo-panel').open,false);assert.equal(button.getAttribute('aria-pressed'),'false');

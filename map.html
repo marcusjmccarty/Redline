@@ -114,67 +114,69 @@
         </div></div>
       </div>
     <dialog id="photo-panel" class="album" aria-labelledby="photos-heading" tabindex="-1">
-      <div class="album-top">
-        <div class="album-title"><h2 id="photos-heading">Photos</h2><p class="album-subtitle"><span id="photo-trip-name"></span><span id="gallery-count"></span></p></div>
-        <div id="album-modes" class="album-modes" role="group" aria-label="Show photos as"><button id="album-view" type="button" aria-pressed="true">Album</button><button id="sheet-view" type="button" aria-pressed="false">All photos</button></div>
-        <button id="choose-photos" class="small-button primary-button" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span>Add photos</span></button>
-        <button id="album-fullscreen" class="close-panel" type="button" aria-label="Full screen" title="Full screen" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="expand-icon" d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/><path class="restore-icon" d="M8 3v5H3m14 0h-5V3m0 14v-5h5M3 12h5v5"/></svg></button>
-        <button class="close-panel" data-close="photo-panel" aria-label="Close photos" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
-        <input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif" multiple hidden>
-      </div>
-      <div class="album-stage">
-        <div id="album-book" class="album-book">
-          <div id="album-pages" class="album-pages"></div>
-          <div id="album-sheet" class="album-sheet" hidden>
-            <div id="gallery-toolbar" class="gallery-toolbar" hidden><span class="sheet-label">Every photo, by city</span><button id="select-photos" class="text-button toolbar-button" type="button">Select</button></div>
-            <div id="gallery-actions" class="gallery-actions" hidden role="toolbar" aria-label="Selected photos"><span id="gallery-selection-count" role="status" aria-live="polite"></span><button id="select-visible" class="text-button" type="button">Select all</button><span class="toolbar-spacer"></span><label for="move-photos" class="sr-only">Move selected photos to a city</label><select id="move-photos"><option value="">Move to…</option></select><button id="delete-photos" class="text-button danger-button" type="button">Delete</button><button id="done-selecting" class="small-button" type="button">Done</button></div>
-            <div id="photo-bulk" class="photo-bulk" hidden><label class="photo-select-all"><input id="select-all-photos" type="checkbox"><span id="photo-selection-count">Select all</span></label><select id="bulk-photo-city" aria-label="Assign a city to the selected photos"><option value="">Assign a city…</option></select></div>
-            <nav id="review-pager" class="review-pager" aria-label="Import review pages" hidden>
-              <button id="review-prev" class="text-button" type="button">Previous</button>
-              <span id="review-range" aria-live="polite"></span>
-              <button id="review-next" class="text-button" type="button">Next</button>
-            </nav>
-            <div id="photo-progress" class="photo-progress" role="progressbar" aria-label="Processing photos" aria-valuemin="0" hidden><span></span></div>
-            <div id="photo-scroll" class="photo-scroll">
-              <div id="photo-review" class="import-list" hidden aria-label="Photos to import"></div>
-              <div id="photo-gallery"></div>
-            </div>
-            <div id="photo-import-actions" class="photo-import-actions" hidden><button id="cancel-photo-import" class="text-button" type="button">Cancel</button><span id="photo-ready-count"></span><button id="upload-photos" class="small-button primary-button" type="button">Save photos</button></div>
-          </div>
-          <div id="photo-drop-hint" aria-hidden="true" hidden><span>Drop photos to add them</span></div>
-          <nav id="gallery-filter" class="album-tabs" aria-label="Go to a city"></nav>
+      <div id="album-display">
+        <div class="album-top">
+          <div class="album-title"><h2 id="photos-heading">Photos</h2><p class="album-subtitle"><span id="photo-trip-name"></span><span id="gallery-count"></span></p></div>
+          <div id="album-modes" class="album-modes" role="group" aria-label="Show photos as"><button id="album-view" type="button" aria-pressed="true">Album</button><button id="sheet-view" type="button" aria-pressed="false">All photos</button></div>
+          <button id="choose-photos" class="small-button primary-button" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span>Add photos</span></button>
+          <button id="album-fullscreen" class="close-panel" type="button" aria-label="Full screen" title="Full screen" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="expand-icon" d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/><path class="restore-icon" d="M8 3v5H3m14 0h-5V3m0 14v-5h5M3 12h5v5"/></svg></button>
+          <button class="close-panel" data-close="photo-panel" aria-label="Close photos" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
+          <input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif" multiple hidden>
         </div>
-      </div>
-      <div id="album-foot" class="album-foot">
-        <button id="album-previous" class="album-turn" type="button" aria-label="Previous page" title="Previous page (←)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button>
-        <div class="album-where"><span id="album-position" role="status" aria-live="polite"></span><input id="album-scrub" type="range" min="0" max="0" value="0" step="1" aria-label="Turn to page"></div>
-        <button id="album-next" class="album-turn" type="button" aria-label="Next page" title="Next page (→)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button>
-      </div>
-      <p id="photo-message" class="panel-message" role="status" aria-live="polite"></p>
-    </dialog>
-    <dialog id="photo-viewer" aria-label="Photo and postcard" tabindex="-1">
-      <span id="postcard-save-status" class="sr-only" role="status"></span>
-      <div id="postcard-stage"><div id="postcard-card">
-        <div id="postcard-front" class="postcard-face" tabindex="-1"><div class="viewer-photo"><img id="full-photo" alt="" draggable="false"><button id="viewer-previous" class="viewer-edge previous" type="button" aria-label="Previous photo" title="Previous photo (←)" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button><button id="viewer-next" class="viewer-edge next" type="button" aria-label="Next photo" title="Next photo (→)" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button></div>
-          <div class="photo-viewer-footer">
-            <p class="photo-viewer-caption"><span id="photo-caption"></span><span id="photo-note" hidden></span></p>
-            <div class="photo-viewer-tools">
-              <span id="photo-position" class="sr-only" role="status" aria-live="polite" hidden></span>
-              <button id="edit-caption" class="viewer-tool" type="button" aria-expanded="false" aria-controls="caption-form">Caption</button>
-              <button id="flip-postcard" class="viewer-tool" type="button" title="Write on the back (F)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5.5h14v9H3zM10.5 8h4M10.5 10.5h4M5.5 8h3"/></svg><span>Postcard</span></button>
-              <button id="delete-photo" class="viewer-tool" type="button" title="Delete photo" aria-label="Delete photo" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6h11M8 6V4.2h4V6M6.2 6l.7 10h6.2l.7-10M8.6 8.6v5M11.4 8.6v5"/></svg></button>
+        <div class="album-stage">
+          <div id="album-book" class="album-book">
+            <div id="album-pages" class="album-pages"></div>
+            <div id="album-sheet" class="album-sheet" hidden>
+              <div id="gallery-toolbar" class="gallery-toolbar" hidden><span class="sheet-label">Every photo, by city</span><button id="select-photos" class="text-button toolbar-button" type="button">Select</button></div>
+              <div id="gallery-actions" class="gallery-actions" hidden role="toolbar" aria-label="Selected photos"><span id="gallery-selection-count" role="status" aria-live="polite"></span><button id="select-visible" class="text-button" type="button">Select all</button><span class="toolbar-spacer"></span><label for="move-photos" class="sr-only">Move selected photos to a city</label><select id="move-photos"><option value="">Move to…</option></select><button id="delete-photos" class="text-button danger-button" type="button">Delete</button><button id="done-selecting" class="small-button" type="button">Done</button></div>
+              <div id="photo-bulk" class="photo-bulk" hidden><label class="photo-select-all"><input id="select-all-photos" type="checkbox"><span id="photo-selection-count">Select all</span></label><select id="bulk-photo-city" aria-label="Assign a city to the selected photos"><option value="">Assign a city…</option></select></div>
+              <nav id="review-pager" class="review-pager" aria-label="Import review pages" hidden>
+                <button id="review-prev" class="text-button" type="button">Previous</button>
+                <span id="review-range" aria-live="polite"></span>
+                <button id="review-next" class="text-button" type="button">Next</button>
+              </nav>
+              <div id="photo-progress" class="photo-progress" role="progressbar" aria-label="Processing photos" aria-valuemin="0" hidden><span></span></div>
+              <div id="photo-scroll" class="photo-scroll">
+                <div id="photo-review" class="import-list" hidden aria-label="Photos to import"></div>
+                <div id="photo-gallery"></div>
+              </div>
+              <div id="photo-import-actions" class="photo-import-actions" hidden><button id="cancel-photo-import" class="text-button" type="button">Cancel</button><span id="photo-ready-count"></span><button id="upload-photos" class="small-button primary-button" type="button">Save photos</button></div>
+            </div>
+            <div id="photo-drop-hint" aria-hidden="true" hidden><span>Drop photos to add them</span></div>
+            <nav id="gallery-filter" class="album-tabs" aria-label="Go to a city"></nav>
+          </div>
+        </div>
+        <div id="album-foot" class="album-foot">
+          <button id="album-previous" class="album-turn" type="button" aria-label="Previous page" title="Previous page (←)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button>
+          <div class="album-where"><span id="album-position" role="status" aria-live="polite"></span><input id="album-scrub" type="range" min="0" max="0" value="0" step="1" aria-label="Turn to page"></div>
+          <button id="album-next" class="album-turn" type="button" aria-label="Next page" title="Next page (→)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button>
+        </div>
+        <p id="photo-message" class="panel-message" role="status" aria-live="polite"></p>
+        <dialog id="photo-viewer" aria-label="Photo and postcard" tabindex="-1">
+          <span id="postcard-save-status" class="sr-only" role="status"></span>
+          <div id="postcard-stage"><div id="postcard-card">
+            <div id="postcard-front" class="postcard-face" tabindex="-1"><div class="viewer-photo"><img id="full-photo" alt="" draggable="false"><button id="viewer-previous" class="viewer-edge previous" type="button" aria-label="Previous photo" title="Previous photo (←)" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button><button id="viewer-next" class="viewer-edge next" type="button" aria-label="Next photo" title="Next photo (→)" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button></div>
+              <div class="photo-viewer-footer">
+                <p class="photo-viewer-caption"><span id="photo-caption"></span><span id="photo-note" hidden></span></p>
+                <div class="photo-viewer-tools">
+                  <span id="photo-position" class="sr-only" role="status" aria-live="polite" hidden></span>
+                  <button id="edit-caption" class="viewer-tool" type="button" aria-expanded="false" aria-controls="caption-form">Caption</button>
+                  <button id="flip-postcard" class="viewer-tool" type="button" title="Write on the back (F)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5.5h14v9H3zM10.5 8h4M10.5 10.5h4M5.5 8h3"/></svg><span>Postcard</span></button>
+                  <button id="delete-photo" class="viewer-tool" type="button" title="Delete photo" aria-label="Delete photo" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6h11M8 6V4.2h4V6M6.2 6l.7 10h6.2l.7-10M8.6 8.6v5M11.4 8.6v5"/></svg></button>
 
+                </div>
+              </div>
+              <form id="caption-form" hidden><input id="caption-input" maxlength="180" aria-label="Photo caption" placeholder="Caption" autocomplete="off"><button id="save-caption" class="viewer-tool" type="submit">Save</button></form>
             </div>
-          </div>
-          <form id="caption-form" hidden><input id="caption-input" maxlength="180" aria-label="Photo caption" placeholder="Caption" autocomplete="off"><button id="save-caption" class="viewer-tool" type="submit">Save</button></form>
-        </div>
-        <div id="postcard-back" class="postcard-face" aria-hidden="true" inert>
-          <div class="postcard-heading"><span id="postcard-place"></span><span class="postcard-stamp" aria-hidden="true"></span></div>
-          <div class="postcard-columns"><textarea id="postcard-message" maxlength="1200" placeholder="Message" aria-label="Postcard message"></textarea><div class="postcard-address"><input id="postcard-recipient" maxlength="120" placeholder="To" aria-label="Postcard recipient"><textarea id="postcard-address" maxlength="400" placeholder="Address" aria-label="Postcard address"></textarea><input id="postcard-sender" maxlength="120" placeholder="From" aria-label="Postcard sender"></div></div>
-          <div class="postcard-actions"><span id="postcard-saved" aria-hidden="true"></span><button id="unflip-postcard" type="button" title="Show the photo (F)">← Photo</button><button id="print-postcard" type="button">Print</button><button id="share-postcard" type="button" disabled>Share</button><button id="save-postcard" type="button">Save</button></div>
-        </div>
-      </div></div>
-      <p id="postcard-error" class="panel-message error" role="alert"></p>
+            <div id="postcard-back" class="postcard-face" aria-hidden="true" inert>
+              <div class="postcard-heading"><span id="postcard-place"></span><span class="postcard-stamp" aria-hidden="true"></span></div>
+              <div class="postcard-columns"><textarea id="postcard-message" maxlength="1200" placeholder="Message" aria-label="Postcard message"></textarea><div class="postcard-address"><input id="postcard-recipient" maxlength="120" placeholder="To" aria-label="Postcard recipient"><textarea id="postcard-address" maxlength="400" placeholder="Address" aria-label="Postcard address"></textarea><input id="postcard-sender" maxlength="120" placeholder="From" aria-label="Postcard sender"></div></div>
+              <div class="postcard-actions"><span id="postcard-saved" aria-hidden="true"></span><button id="unflip-postcard" type="button" title="Show the photo (F)">← Photo</button><button id="print-postcard" type="button">Print</button><button id="share-postcard" type="button" disabled>Share</button><button id="save-postcard" type="button">Save</button></div>
+            </div>
+          </div></div>
+          <p id="postcard-error" class="panel-message error" role="alert"></p>
+        </dialog>
+      </div>
     </dialog>
     <dialog id="info-dialog" aria-labelledby="info-title">
       <div class="panel-top"><h2 id="info-title">A few bearings</h2><button id="close-info" class="close-panel" aria-label="Close information" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>

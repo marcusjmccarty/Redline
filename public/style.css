@@ -205,15 +205,19 @@ form[aria-busy=true] .add-button { opacity: .45; }
 .log-route-heading .text-button { padding: 8px 0; }
 .log-route-heading > span { flex: 1; }
 .log-route-heading { gap: 16px; }
-.route-log #stop-list { display: block; max-height: min(calc(46svh + 54px), 484px); margin: 0; border-top: 1px solid #b7a68855; scrollbar-width: thin; scrollbar-color: var(--paper-edge) transparent; }
-.route-log #stop-list li { min-height: 42px; border-bottom: 1px solid #b7a68855; border-radius: 0; font: 17px Georgia, serif; }
+.route-log #stop-list { --stop-height: clamp(32px, calc((100svh - 240px) / 12), 42px); display: block; max-height: calc(12 * var(--stop-height) + 1px); margin: 0; border-top: 1px solid #b7a68855; scrollbar-width: thin; scrollbar-color: var(--paper-edge) transparent; }
+.route-log #stop-list li { height: var(--stop-height); border-bottom: 1px solid #b7a68855; border-radius: 0; font: 17px Georgia, serif; }
 .route-log #stop-list li::after { display: none; }
-.route-log .stop-grip { flex: 1; min-width: 0; min-height: 41px; text-align: left; white-space: normal; }
+.route-log .stop-grip { flex: 1; min-width: 0; height: 100%; text-align: left; }
+.route-log .stop-grip span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .route-log .stop-number { flex: none; width: 22px; margin-right: 12px; border: 0; border-radius: 0; background: none !important; color: var(--red) !important; font: 11px Georgia, serif; }
-.route-log .remove-stop { flex: none; width: 36px; height: 42px; padding: 0; }
+.route-log .remove-stop { flex: none; width: 36px; height: 100%; padding: 0; }
 .route-log #empty-hint { padding: 14px 0; font-size: 14px; }
 #saved-trips { margin-top: 24px; padding-top: 16px; border-top: 1px solid #b7a68855; }
-#saved-trips > summary { cursor: pointer; color: var(--muted); font: 13px Georgia, serif; }
+#saved-trips > summary { list-style: none; cursor: pointer; color: var(--muted); font: 13px Georgia, serif; }
+#saved-trips > summary::-webkit-details-marker { display: none; }
+#saved-trips > summary::before { content: ''; display: inline-block; margin-right: 6px; vertical-align: 1px; border-block: 3px solid transparent; border-left: 5px solid currentColor; }
+#saved-trips[open] > summary::before { transform: rotate(90deg); }
 #trip-switcher .trip-list-heading h3 { display: none; }
 #trip-switcher .trip-list-heading:has(.trip-search[hidden]) { display: none; }
 #trip-switcher .trip-list-heading { margin-top: 12px; }
