@@ -1415,3 +1415,39 @@ test('a failed thumbnail decode never starts a blank page turn or traps the cont
   $('sheet-view').click();await wait(()=>!$('album-book').dataset.viewMotion);
   assert.equal(motion.running.size,0);assert.equal($('album-sheet').hidden,false);assert.equal($('album-book').inert,false);
 });
+
+test('import review turns between distinct pages without losing location assignments',async t=>{
+  const {w,$,choose,change,press}=await setup(t);
+  choose(Array.from({length:55},(_,i)=>`travel-${i+1}.jpg`));
+  await wait(()=>$('photo-selection-count').textContent==='55 selected'&&!$('choose-photos').disabled);
+  change('bulk-photo-city',paris.id);
+  const first=$('photo-review').firstElementChild.dataset.pendingId,motion=controlledMotion(w);
+  $('review-next').click();await wait(()=>motion.running.size===4);
+  const layer=$('album-book').querySelector('.album-view-layer'),second=$('photo-review').firstElementChild.dataset.pendingId;
+  assert.notEqual(first,second);assert.ok(layer.querySelector(`.album-view-front [data-pending-id="${first}"]`));
+  assert.ok(layer.querySelector(`.album-view-back [data-pending-id="${second}"]`));
+  assert.equal($('review-range').textContent,'49–55 of 55');await motion.finish();
+  press('ArrowLeft');await wait(()=>motion.running.size===4);await motion.finish();assert.equal($('review-range').textContent,'1–48 of 55');
+  assert.equal($('photo-review').querySelector('select').value,paris.id);assert.equal($('album-book').inert,false);
+});
+
+test('fullscreen follows native exit, falls back when unavailable, and closing resets the book',async t=>{
+  const {w,$,press}=await setup(t),doc=w.document,button=$('album-fullscreen');
+  let owner=null;
+  Object.defineProperty(doc,'fullscreenElement',{get:()=>owner});
+  doc.documentElement.requestFullscreen=async()=>{owner=doc.documentElement;};
+  doc.exitFullscreen=async()=>{owner=null;doc.dispatchEvent(new w.Event('fullscreenchange'));};
+  button.click();await tick();assert.equal(owner,doc.documentElement);assert.equal(button.getAttribute('aria-pressed'),'true');
+  await doc.exitFullscreen();assert.equal(button.getAttribute('aria-pressed'),'false');
+  doc.documentElement.requestFullscreen=async()=>{throw Error('Unavailable');};
+  button.click();await tick();assert.ok($('photo-panel').classList.contains('expanded'));
+  press('Escape');assert.equal($('photo-panel').open,true);assert.equal(button.getAttribute('aria-pressed'),'false');
+  button.click();await tick();$('photo-panel').querySelector('[data-close]').click();assert.equal($('photo-panel').open,false);assert.equal(button.getAttribute('aria-pressed'),'false');
+});
+
+test('a first-open photo stays visible when the browser has not finished decoding its bitmap',async t=>{
+  const {w,$,tab,prints}=await setup(t);tab(paris.id).click();controlledMotion(w);
+  w.HTMLImageElement.prototype.decode=()=>new Promise(()=>{});
+  prints()[0].click();assert.ok($('photo-viewer').open);assert.notEqual($('photo-viewer').style.opacity,'0');
+  assert.ok($('full-photo').src.startsWith('blob:'));
+});

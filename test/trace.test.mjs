@@ -111,3 +111,20 @@ test('one smooth camera move fits both cities and has no zoom reversals or date-
     assert.ok(Math.abs(nearStart.w-worldFrame.w)<.000001&&Math.abs(nearEnd.w-plan.arrival.w)<.000001,'Camera starts and lands with zero velocity');
   }
 });
+
+test('nearby legs get a readable local scale without changing long-haul framing',()=>{
+  const space={width:1200,height:800,left:40,right:1160,top:40,bottom:640};
+  function frame(from,to){
+    const geometry=measure(route(from,to)),dest=project(to),start=project(from);
+    const view=camera(geometry,space,worldFrame,dest).arrival;
+    for(const [x,y] of [start,dest]){
+      const sx=(x-view.x)*space.width/view.w,sy=(y-view.y)*space.height/view.h;
+      assert.ok(sx>=space.left-1&&sx<=space.right+1&&sy>=space.top-1&&sy<=space.bottom+1);
+    }
+    return {level:worldFrame.w/view.w,separation:Math.hypot((dest[0]-start[0])*space.width/view.w,(dest[1]-start[1])*space.height/view.h)};
+  }
+  const short=frame([-78.424,-1.396],[-78.062,-1.505]),regional=frame([-78.062,-1.505],[-78.145,.04]);
+  assert.ok(short.level>regional.level&&regional.level>10);
+  assert.ok(short.separation>150&&regional.separation>150);
+  assert.ok(frame([-80.19,25.76],[-78.47,-.18]).level<=2.35);
+});

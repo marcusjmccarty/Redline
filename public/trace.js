@@ -2,6 +2,7 @@
 (() => {
   'use strict';
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
+  const maxZoom=240;
   const duration=length=>Math.max(1600,Math.min(3600,length*6));
   const ease=value=>{const t=clamp(value,0,1);return t*t*t*(t*(t*6-15)+10);};
   // Analytic critical damping keeps velocity when a wheel gesture retargets mid-move.
@@ -70,7 +71,11 @@
     const xs=geometry.points.map(p=>p[0]),ys=geometry.points.map(p=>p[1]);
     const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...ys),bottom=Math.max(...ys);
     const center=[(left+right)/2,(top+bottom)/2];
-    const level=Math.max(1,Math.min(2.35,
+    const spanX=Math.max(1e-6,right-left),spanY=Math.max(1e-6,bottom-top);
+    // Keep the familiar long-haul framing. On a local leg, let the route
+    // occupy roughly a quarter of the map, with room around both cities.
+    const localLevel=Math.min(world.w*.28/spanX,world.h*.24/spanY);
+    const level=Math.max(1,Math.min(maxZoom,Math.max(2.35,localLevel),
       (space.right-space.left)*world.w/(Math.max(1,right-left)*space.width*1.16),
       (space.bottom-space.top)*world.h/(Math.max(1,bottom-top)*space.height*1.16)));
     const w=world.w/level,h=world.h/level,sx=space.width/w,sy=space.height/h;
@@ -101,5 +106,5 @@
       return {position:from+(to-from)*t,arrived:elapsed>=total,done:elapsed>=total};
     }};
   }
-  globalThis.RedlineTrace=Object.freeze({measure,duration,timeline,ease,camera,cameraView,pointFrame,spring,trackingCamera});
+  globalThis.RedlineTrace=Object.freeze({maxZoom,measure,duration,timeline,ease,camera,cameraView,pointFrame,spring,trackingCamera});
 })();

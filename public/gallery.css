@@ -57,6 +57,13 @@
 .album-modes button[aria-pressed=true] { background: var(--paper); color: var(--ink); }
 .album-modes button:hover:not([aria-pressed=true]):not(:disabled) { background: #ffffff1a; }
 .album .close-panel { color: var(--paper-low); }
+.album #album-fullscreen svg { width: 19px; height: 19px; }
+#album-fullscreen .restore-icon, #album-fullscreen[aria-pressed=true] .expand-icon { display: none; }
+#album-fullscreen[aria-pressed=true] .restore-icon { display: inline; }
+.album.expanded { height: 100dvh; }
+@media (min-width: 900px), (min-width: 600px) and (orientation: landscape) {
+  .album.expanded .album-book { width: min(calc(100cqw - 2 * var(--tab-width) - 12px), calc((100cqh - 4px) * 1.85)); height: calc(100cqh - 4px); aspect-ratio: auto; }
+}
 .album .close-panel:hover { background: #ffffff1f; color: #fff; }
 .album .small-button { min-height: 34px; padding: 7px 13px; font-size: 12px; }
 .album-stage { container-type: size; position: relative; display: flex; align-items: center; justify-content: center; gap: 0; min-height: 0; height: 100%; padding: 4px 24px; }
@@ -293,7 +300,7 @@
 /* "All photos" and import review share one wide sheet inside the book. */
 .album-sheet { position: absolute; z-index: 2; inset: var(--pad) calc(var(--pad) + 2px); display: flex; flex-direction: column; overflow: hidden; border-radius: 3px; color: var(--page-ink); background: var(--page); box-shadow: inset 0 0 40px #8a6a3c1f; animation: none; }
 .album-book:is([data-mode=sheet], [data-mode=review])::before { opacity: 1; }
-.album-book[data-mode=sheet] .album-sheet::after, .album-view-layer .album-sheet::after { content: ''; position: absolute; z-index: 4; pointer-events: none; top: 0; bottom: 0; left: 50%; width: 32px; transform: translateX(-50%); background: linear-gradient(90deg, #0000, #74563208 35%, #74563220 49%, #fff8e84a 52%, #74563208 67%, #0000); }
+.album-book:is([data-mode=sheet], [data-mode=review]) .album-sheet::after, .album-view-layer .album-sheet::after { content: ''; position: absolute; z-index: 4; pointer-events: none; top: 0; bottom: 0; left: 50%; width: 32px; transform: translateX(-50%); background: linear-gradient(90deg, #0000, #74563208 35%, #74563220 49%, #fff8e84a 52%, #74563208 67%, #0000); }
 .gallery-toolbar, .gallery-actions, .photo-bulk { flex: none; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 9px 22px; border-bottom: 1px solid #b7a68844; }
 .sheet-label { flex: 1; color: var(--muted); font: italic 15px Georgia, serif; }
 .toolbar-button { flex: none; padding: 6px 4px; font-size: 13px; }
@@ -350,8 +357,7 @@
 .photo-select-all input { width: 16px; height: 16px; margin: 0; accent-color: var(--red); cursor: pointer; }
 :is(#bulk-photo-city, .album-copy-bulk-photo-city) { max-width: 62%; }
 :is(#photo-review, .album-copy-photo-review) { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 22px 16px; padding: 20px 22px 0; }
-.review-photo { position: relative; min-width: 0; transform: rotate(var(--tilt, 0deg)); transition: transform .35s var(--ease-out); animation: drop-in .45s var(--ease-out) both; }
-.review-photo:hover, .review-photo:focus-within { transform: rotate(0deg); }
+.review-photo { position: relative; min-width: 0; }
 .review-photo .photo-image { position: relative; display: block; width: 100%; aspect-ratio: 4 / 3; padding: 0; border: 4px solid var(--mat); border-radius: 1px; overflow: hidden; background: var(--paper-low); box-shadow: 0 1px 2px #43372a40, 0 8px 14px -8px #43372a66; cursor: zoom-in; }
 .review-photo .photo-image img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .4s ease; }
 .review-photo .photo-image.loaded img { opacity: 1; }
@@ -469,7 +475,8 @@
 }
 @media (max-width: 650px) {
   .album-top { flex-wrap: wrap; gap: 10px; padding: calc(10px + env(safe-area-inset-top)) 12px 6px; }
-  .album-title { flex-basis: calc(100% - 50px); }
+  .album-title { flex-basis: calc(100% - 100px); }
+  #album-fullscreen { order: 1; }
   .album .close-panel { order: 1; }
   .album-modes { order: 2; }
   #choose-photos { order: 3; margin-left: auto; }

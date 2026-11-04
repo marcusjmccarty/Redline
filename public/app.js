@@ -46,7 +46,7 @@
   let traceZoom=null,idleZoom=null,suppressStopClickUntil=0,focused=null,cityFrame=null;
   const held=new Map();
   const labelSlots=new Map(),labelWidths=new Map(),zoomControls=document.querySelector('.zoom-controls');
-  const WORLD_W=1440,WORLD_H=720,MAX_ZOOM=(4/3)**9;
+  const WORLD_W=1440,WORLD_H=720,MAX_ZOOM=RedlineTrace.maxZoom;
   let view={x:0,y:0,w:WORLD_W,h:WORLD_H};
   let baseView={...view},viewFrame=0,zoomLevel=1,activeStopId=null;
   let atlas=null,lastLayout='',lastLayoutGeometry=null,mapOccluded=false,viewportBounds=null;
@@ -120,7 +120,7 @@
       const [x,y]=project(place),group=svg('g',{'data-index':index,transform:`translate(${x} ${y})`}),dot=svg('circle',{cx:0,cy:0,r:4.5,class:'stop-dot'});
       const label=svg('text',{x:10,y:-12,class:'stop-label label-hidden'});
       label.textContent=place.name.toUpperCase();
-      group.append(dot,label);group._point=[x,y];group._label=label;$('route-stops').append(group);
+      const leader=svg('path',{class:'stop-leader','aria-hidden':'true'});group.append(leader,dot,label);group._leader=leader;group._point=[x,y];group._label=label;$('route-stops').append(group);
       group.setAttribute('role','button');group.setAttribute('aria-label',`Go to ${place.name}, stop ${index+1}`);
       group.addEventListener('pointerdown',event=>event.stopPropagation());
       // A mouse click focuses the city without leaving a keyboard focus ring on its dot, and keys then act on the map.
@@ -449,15 +449,18 @@
       // Unreached stops stay out of the layout while a trace reveals them.
       if(!stopShown(index))return;
       const sx=x*matrix.a+matrix.e-bounds.left,sy=y*matrix.d+matrix.f-bounds.top,id=stops[index].id;
-      if(labelOwner(index)!==index){text.classList.add('label-hidden');occupied.push({x:sx-7,y:sy-7,w:14,h:14});return;}
+      if(labelOwner(index)!==index){group._leader.removeAttribute('d');text.classList.add('label-hidden');occupied.push({x:sx-7,y:sy-7,w:14,h:14});return;}
       items.push({id,x:sx,y:sy,width:text._width??text.textContent.length*8.3,height:17,priority:id===activeStopId?-1:index});texts.push(text);
       occupied.push({x:sx-7,y:sy-7,w:14,h:14});
     });
     const flip=item=>{const end=item.x>bounds.width-180;return {name:end?'left-above':'right-above',x:end?-10:10,y:-12,anchor:end?'end':'start',box:{x:end?item.x-12-item.width:item.x+8,y:item.y-23,w:item.width+4,h:14}};};
-    const placed=window.RedlineLabels?RedlineLabels.place(items,{width:bounds.width,height:bounds.height,obstacles,previous:labelSlots,routes}):items.map(flip);
+    const placed=window.RedlineLabels?RedlineLabels.place(items,{width:bounds.width,height:bounds.height,obstacles,previous:labelSlots,clusterDistance:9,routes}):items.map(flip);
     labelSlots.clear();
     placed.forEach((slot,i)=>{
-      const text=texts[i];text.classList.toggle('label-hidden',!slot);if(!slot)return;
+      const text=texts[i],leader=text.parentNode._leader;
+      if(slot?.leader){const [[x,y],[tx,ty]]=slot.leader;changed(leader,'d',`M0,0L${(tx-x).toFixed(1)},${(ty-y).toFixed(1)}`);}
+      else if(leader.hasAttribute('d'))leader.removeAttribute('d');
+      text.classList.toggle('label-hidden',!slot);if(!slot)return;
       labelSlots.set(items[i].id,slot.name);occupied.push(slot.box);
       if(text._slot!==slot.name){text._slot=slot.name;text.setAttribute('x',slot.x);text.setAttribute('y',slot.y);text.setAttribute('text-anchor',slot.anchor);}
     });

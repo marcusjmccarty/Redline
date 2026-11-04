@@ -134,3 +134,14 @@ test('a cached map-coordinate route index matches screen-space clearance at ever
     for(let x=10;x<1000;x+=37)for(let y=10;y<600;y+=43){const box={x,y,w:82,h:20};assert.equal(projected.hits(box,5),screen.some(segment=>crosses(segment,box,5)));}
   }
 });
+
+test('indistinguishable pins show the active name and separate into individually labelled stops at city scale',()=>{
+  const cities=[item('MANDALAY',400,300,0),item('AMARAPURA',399,301,1),item('MINGUN',398,298,-1)];
+  const view={width:960,height:650,clusterDistance:9};
+  const overview=place(cities,view);
+  assert.deepEqual(Array.from(overview,Boolean),[false,false,true]);
+  const local=cities.map(city=>({...city,x:400+(city.x-400)*16,y:300+(city.y-300)*16}));
+  const result=place(local,view);
+  assert.ok(result.every(Boolean));assertClear(local,result,view);
+  result.forEach((slot,i)=>{if(slot.leader)for(const [j,other] of result.entries())if(i!==j)assert.ok(!crosses(slot.leader,other.box));});
+});
