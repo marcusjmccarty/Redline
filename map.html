@@ -37,10 +37,9 @@
         <g id="atlas-relief" pointer-events="none" aria-hidden="true"></g>
         <g id="graticule" aria-hidden="true">
           <path class="graticule-line" d="M120 0V720M240 0V720M360 0V720M480 0V720M600 0V720M840 0V720M960 0V720M1080 0V720M1200 0V720M1320 0V720M0 120H1440M0 240H1440M0 480H1440M0 600H1440"/>
-          <defs><path id="graticule-folds" d="M720 0V720M0 360H1440"/></defs>
-          <use href="#graticule-folds" class="crease-soft"/>
-          <use href="#graticule-folds" class="crease-edge"/>
-          <use href="#graticule-folds" class="crease-light"/>
+          <path class="crease-soft" d="M720 0V720M0 360H1440" vector-effect="non-scaling-stroke"/>
+          <path class="crease-edge" d="M720 0V720M0 360H1440" vector-effect="non-scaling-stroke"/>
+          <path class="crease-light" d="M720 0V720M0 360H1440" vector-effect="non-scaling-stroke"/>
         </g>
         <g id="country-borders" aria-hidden="true"></g>
         <g id="regions" aria-hidden="true"></g>
@@ -123,7 +122,7 @@
           <div class="album-title"><h2 id="photos-heading">Photos</h2><p class="album-subtitle"><span id="photo-trip-name"></span><span id="gallery-count"></span></p></div>
           <div id="album-modes" class="album-modes" role="group" aria-label="Show photos as"><button id="album-view" type="button" aria-pressed="true">Album</button><button id="sheet-view" type="button" aria-pressed="false">All photos</button></div>
           <button id="choose-photos" class="small-button primary-button" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span>Add photos</span></button>
-          <button id="album-fullscreen" class="close-panel" type="button" aria-label="Fill window with album" title="Fill window · Esc to exit · Right edge for city tabs" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="expand-icon" d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/><path class="restore-icon" d="M8 3v5H3m14 0h-5V3m0 14v-5h5M3 12h5v5"/></svg></button>
+          <button id="album-fullscreen" class="close-panel" type="button" aria-label="Fill window with album" title="Fill window · Top edge for toolbar · Right edge for city tabs" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="expand-icon" d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/><path class="restore-icon" d="M8 3v5H3m14 0h-5V3m0 14v-5h5M3 12h5v5"/></svg></button>
           <button class="close-panel" data-close="photo-panel" aria-label="Close photos" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
           <input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif" multiple hidden>
         </div>
