@@ -76,6 +76,7 @@ The current app is entirely static. [Hosting notes](docs/HOSTING.md) cover GitHu
 
 ## Data and libraries
 
+- Zoomed relief uses the public-domain [Natural Earth shaded relief plate](https://www.naturalearthdata.com/downloads/10m-raster-data/10m-shaded-relief/). The optional `scripts/build-relief.py` bakes the warm and cool slope tones into local WebP tiles. The world view loads no tiles.
 - [Natural Earth](https://www.naturalearthdata.com/): world outlines, labels, and administrative boundaries; public domain.
 - [GeoNames](https://www.geonames.org/): bundled city data; CC BY 4.0.
 - [Open-Meteo Geocoding](https://open-meteo.com/en/docs/geocoding-api): live destination search, based on GeoNames.

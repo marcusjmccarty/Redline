@@ -1485,3 +1485,25 @@ test('a first-open photo stays visible when the browser has not finished decodin
   prints()[0].click();assert.ok($('photo-viewer').open);assert.notEqual($('photo-viewer').style.opacity,'0');
   assert.ok($('full-photo').src.startsWith('blob:'));
 });
+
+test('window contact sheets fit five prints per leaf, turn in order and reveal the toolbar',async t=>{
+  const {w,$,press,tab}=await setup(t,{seedStops:Array(12).fill(paris).concat(madrid)});
+  $('sheet-view').click();$('album-fullscreen').click();
+  const edge=$('album-top-edge'),toolbar=$('album-toolbar'),root=$('photo-gallery');
+  assert.equal(toolbar.inert,true);
+  edge.dispatchEvent(new w.Event('pointerenter'));assert.equal(toolbar.inert,false);
+  toolbar.dispatchEvent(new w.Event('pointerleave'));assert.equal(toolbar.inert,true);
+  edge.click();assert.equal(w.document.activeElement,$('album-view'));
+  const counts=()=>[...root.querySelectorAll('.contact-leaf')].map(leaf=>leaf.querySelectorAll('.photo-image').length);
+  assert.deepEqual(counts(),[5,5]);
+  press('ArrowRight');assert.deepEqual(counts(),[3,0]);
+  assert.match(root.querySelector('.photo-image').getAttribute('aria-label'),/photo 11 in Paris/);
+  press('ArrowLeft');assert.deepEqual(counts(),[5,5]);
+  $('album-edge').click();tab(madrid.id).click();assert.deepEqual(counts(),[3,0]);
+  root.querySelector('.photo-image').click();assert.equal($('photo-viewer').open,true);
+  $('photo-viewer').dispatchEvent(new w.Event('cancel',{cancelable:true}));await wait(()=>!$('photo-viewer').open);
+  w.innerWidth=400;w.innerHeight=800;w.dispatchEvent(new w.Event('resize'));await wait(()=>counts().length===1);
+  assert.deepEqual(counts(),[3]);
+  edge.click();$('album-fullscreen').click();
+  assert.equal(toolbar.inert,false);assert.ok(edge.hidden);assert.equal(root.querySelectorAll('.photo-image').length,13);
+});

@@ -44,6 +44,7 @@ main { position: relative; width: 100%; height: 100%; }
 .atlas-frame { position: absolute; z-index: 2; inset: 8px; border: 1px solid #a79778; outline: 8px solid #eee3cc; box-shadow: inset 0 0 0 4px #f0e5cf; pointer-events: none; }
 .atlas-frame::after { content: ''; position: absolute; inset: 4px; border: 1px solid #9f8d6b99; }
 @media (max-width: 600px) { .atlas-frame { inset: 6px; outline-width: 6px; box-shadow: inset 0 0 0 3px #f0e5cf; } .atlas-frame::after { inset: 3px; } }
+#atlas-relief image { mix-blend-mode: multiply; }
 #atlas-tones { opacity: .96; }
 /* Fine coordinates, with shallow folds only at 0° latitude and longitude. */
 #graticule { fill: none; pointer-events: none; }

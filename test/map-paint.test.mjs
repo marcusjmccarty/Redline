@@ -76,3 +76,32 @@ test('the generated atlas retains the original land coverage and deterministical
   const vertices=paths=>paths.reduce((count,path)=>count+(path.match(/,/g)||[]).length,0);
   assert.ok(vertices(generated.land)<vertices(w.WORLD_PATHS)/2,'Less than half as many coordinates need filled-area painting');
 });
+
+test('relief is local, bounded to the visible terrain, and released at overview',t=>{
+  const {w}=atlas(t);w.eval(source('public/relief/index.js'));
+  const layer=w.document.createElementNS('http://www.w3.org/2000/svg','g'),paint=w.RedlineAtlas.relief(layer,w.REDLINE_RELIEF);
+  paint(world,1);assert.equal(layer.children.length,0);
+  let maxPixels=0;
+  for(const zoom of [2.3,3,6,10.1,12,25,118,240]){
+    for(let y=0;y<720;y+=27)for(let x=0;x<1440;x+=57){
+      const view={x,y,w:1440/zoom,h:720/zoom};
+      paint(view,zoom);let pixels=0;
+      for(const tile of layer.children){
+        const href=tile.getAttribute('href'),match=/^relief\/(4|16)-(\d+)-(\d+)\.webp$/.exec(href);assert.ok(match);
+        const size=1440/Number(match[1]),left=Number(match[2])*size,top=Number(match[3])*size;
+        assert.ok(left<view.x+view.w&&left+size>view.x&&top<view.y+view.h&&top+size>view.y);
+        pixels+=match[1]==='4'?384**2:1024**2;
+      }
+      maxPixels=Math.max(maxPixels,pixels);
+    }
+  }
+  assert.ok(maxPixels*4<=27*1024*1024,`Visible RGBA pixels: ${maxPixels*4} bytes`);
+  paint(world,1);assert.equal(layer.children.length,0);
+  for(const [i,rows] of w.REDLINE_RELIEF.entries()){
+    const cols=i?16:4;
+    rows.forEach((mask,y)=>{for(let x=0;x<cols;x++)if(mask&(1<<x)){
+      const tile=readFileSync(new URL(`../public/relief/${cols}-${x}-${y}.webp`,import.meta.url));
+      assert.equal(tile.toString('ascii',8,12),'WEBP');
+    }});
+  }
+});

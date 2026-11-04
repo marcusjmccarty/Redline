@@ -75,6 +75,7 @@
   persist();
   const project=p=>RedlineLayout.project([p.longitude,p.latitude]);
   const backgroundPoints=window.MAP_CITIES.map(project);
+  const paintRelief=RedlineAtlas.relief($('atlas-relief'),window.REDLINE_RELIEF);
   let hiddenMapCities=new Set(),stopPeers=[],routeIndex=null,routeIndexGeometry=null,routeIndexKey='';
   function rebuildGeometry(){
     const names=stops.map(stop=>normalize(stop.name));
@@ -212,13 +213,17 @@
     if(Math.abs(progress-target)<1e-7){activeLeg=null;paintProgress();return;}
     if(matchMedia('(prefers-reduced-motion: reduce)').matches){finishLeg(direction>0?target-1:target,direction);if(returnToOverview)goToStep(0);return;}
     beginLeg(target,direction,returnToOverview);setPlayState(true);lastTick=performance.now();
+    let speed=1;
     function nextLeg(run){
       if(Math.abs(progress-run.target)<1e-7){if(run.returnToOverview)returnToWorld();else stopAnimation();return false;}
       beginLeg(run.target,run.direction,run.returnToOverview);return true;
     }
     function tick(now){
-      const speed=[...held.values()].some(since=>now-since>=180)?2:1;
+      const targetSpeed=[...held.values()].some(since=>now-since>=180)?2:1;
       const elapsed=lastTick===null?0:Math.max(0,Math.min(80,now-lastTick));lastTick=now;
+      // Integrate the speed ramp over this frame so 60 and 120 Hz cover the same distance.
+      const decay=Math.exp(-elapsed/110),travel=targetSpeed*elapsed+(speed-targetSpeed)*110*(1-decay);
+      speed=targetSpeed+(speed-targetSpeed)*decay;
       const run=playback;
       if(run.settling){
         run.settling.elapsed+=elapsed;
@@ -230,7 +235,7 @@
       }
       // Keep the visible drawing speed comfortable as the user moves closer.
       const pace=run.manual?Math.min(1,view.w/run.nominalWidth):1;
-      const state=run.timeline.advance(elapsed*speed*pace);
+      const state=run.timeline.advance(travel*pace);
       progress=run.leg+state.position;
       if(state.arrived)activeLeg=null;
       if(run.manual){
@@ -353,14 +358,16 @@
     const visible=new Set();
     const screen=(x,y)=>[x*matrix.a+matrix.e-bounds.left,y*matrix.d+matrix.f-bounds.top];
     function placeLabel(key,name,x,y,isCity) {
-      const [sx,sy]=screen(x,y),font=isCity?11:12,w=typeWidth(name,isCity?'11px Arial':'12px Georgia',isCity?0:1)+8;
+      const [sx,sy]=screen(x,y);
+      if(sy<22||sy>height+16||sx<0||sx>width)return;
+      const w=typeWidth(name,isCity?'11px Arial':'12px Georgia',isCity?0:1)+8;
       const box={x:isCity?sx-4:sx-w/2,y:sy-(isCity?16:12),w:w+(isCity?7:0),h:22};
       if(box.x<30||box.x+box.w>width-30||box.y<22||box.y+box.h>height-22)return;
       if(occupied.some(b=>RedlineLabels.overlaps(box,b,6)))return;
       if(routes?.hits(box,4))return;
       occupied.push(box);visible.add(key);
       let node=labelNodes.get(key);
-      if(!node){node=svg('g',{class:isCity?'city-label':'country-label'});if(isCity)node.append(svg('circle',{r:2}));const text=svg('text',{'font-size':font,'text-anchor':isCity?'start':'middle',x:isCity?7:0,y:isCity?-4:4});text.textContent=name;node.append(text);labelNodes.set(key,node);layer.append(node);}
+      if(!node){node=svg('g',{class:isCity?'city-label':'country-label'});if(isCity)node.append(svg('circle',{r:2}));const text=svg('text',{'font-size':isCity?11:12,'text-anchor':isCity?'start':'middle',x:isCity?7:0,y:isCity?-4:4});text.textContent=name;node.append(text);labelNodes.set(key,node);layer.append(node);}
       changed(node,'transform',`translate(${sx.toFixed(1)} ${sy.toFixed(1)})`);
     }
     if(zoomLevel>=1.3){
@@ -382,13 +389,14 @@
     $('map-labels').style.display=zoomLevel>=1.6?'none':'';
   }
   function paintAtlasNames(matrix,bounds,occupied,routes){
+    if(zoomLevel>=1.6)return;
     for(const label of $('map-labels').children){
       const x=Number(label.dataset.mapX),y=Number(label.dataset.mapY),angle=Number(label.dataset.mapRotation),ocean=label.classList.contains('ocean');
       changed(label,'transform',`translate(${x} ${y}) scale(${1/matrix.a} ${1/matrix.d}) rotate(${angle})`);
       const width=typeWidth(label.textContent,ocean?'italic 15px Georgia':'15px Georgia',ocean?1:4)+8,radians=angle*Math.PI/180;
       const w=Math.abs(width*Math.cos(radians))+Math.abs(24*Math.sin(radians)),h=Math.abs(width*Math.sin(radians))+Math.abs(24*Math.cos(radians));
       const box={x:x*matrix.a+matrix.e-bounds.left+6*Math.sin(radians)-w/2,y:y*matrix.d+matrix.f-bounds.top-6*Math.cos(radians)-h/2,w,h};
-      const hidden=zoomLevel>=1.6||occupied.some(other=>RedlineLabels.overlaps(box,other,6))||routes?.hits(box,5);
+      const hidden=occupied.some(other=>RedlineLabels.overlaps(box,other,6))||routes?.hits(box,5);
       label.style.visibility=hidden?'hidden':'';if(!hidden)occupied.push(box);
     }
   }
@@ -428,7 +436,7 @@
     zoomLevel=baseView.w/view.w;
     $('zoom-in').disabled=zoomLevel>=MAX_ZOOM-.001;$('zoom-out').disabled=zoomLevel<=1.001;
     map.classList.toggle('zoomed-out',zoomLevel<=1.001);
-    atlas?.paint(view,zoomLevel>=1.6);
+    atlas?.paint(view,zoomLevel>=1.6);paintRelief(view,zoomLevel);
     if(window.RedlineLabels&&(routeIndexGeometry!==geometry||routeIndexKey!==key)){
       routeIndex=RedlineLabels.indexLines(geometry.flatMap((leg,i)=>leg.segmentsAt(amounts[i])),{width:WORLD_W,height:WORLD_H});
       routeIndexGeometry=geometry;routeIndexKey=key;
@@ -664,7 +672,7 @@
   const photoVisibility=new MutationObserver(()=>{
     const hidden=$('photo-panel').open||$('photo-viewer').open;
     if(hidden===mapOccluded)return;mapOccluded=hidden;
-    if(!hidden){lastLayout='';scheduleView();}
+    if(hidden)paintRelief(view,0);else{lastLayout='';scheduleView();}
   });
   for(const id of ['photo-panel','photo-viewer'])photoVisibility.observe($(id),{attributes:true,attributeFilter:['open']});
   window.RedlineApp={

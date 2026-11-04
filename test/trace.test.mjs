@@ -166,3 +166,17 @@ test('an isolated local leg eases the zoom peak while successive nearby legs ret
     assert.ok(Math.abs(to-run.advance(950).position)<.01);assert.equal(run.advance(50).position,to);
   }
 });
+
+test('long automatic zooms ease into a steady middle speed in either direction',()=>{
+  for(const ratio of [1/32,32]){
+    const start={x:0,y:0,w:100,h:50},end={x:0,y:0,w:100*ratio,h:50*ratio};
+    const plan={follow:()=>end,arrival:end},run=timeline({from:0,to:1,duration:1600,widthRatio:ratio,easeStops:true});
+    let last=start,maxSpeed=0;
+    for(let i=0;i<400;i++){
+      const state=run.advance(16),frame=cameraView(start,plan,[0,0],state.time);
+      maxSpeed=Math.max(maxSpeed,Math.abs(Math.log2(frame.w/last.w))/.016);last=frame;
+      if(state.done)break;
+    }
+    assert.deepEqual(last,end);assert.ok(maxSpeed<1.38);
+  }
+});
