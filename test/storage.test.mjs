@@ -58,6 +58,21 @@ test('binary backup restores routes, image bytes and postcards on a different de
   await target.importArchive(backup);assert.equal((await target.api('/trips')).trips.length,3);
 });
 
+test('a 512-photo trip survives backup, restore, and bulk edits',async()=>{
+  const store=library().store,trip=await create(store);
+  for(let i=0;i<512;i++)await upload(store,trip);
+  const restored=library().store;
+  const result=await restored.importArchive(await store.exportArchive(trip.id));
+  assert.equal(result.photoCount,512);
+  const [copy]=(await restored.api('/trips')).trips;
+  const photosPath=`/trips/${copy.id}/photos`;
+  const ids=(await restored.api(`/trips/${copy.id}`)).photos.map(photo=>photo.id);
+  const moved=await restored.api(photosPath,{method:'PUT',body:{ids,stopId:paris.id}});
+  assert.equal(moved.photos.length,512);
+  assert.equal((await restored.api(photosPath,{method:'DELETE',body:{ids}})).deleted,512);
+  assert.equal((await restored.api('/trips')).trips[0].photoCount,0);
+});
+
 test('invalid or truncated imports make no partial changes',async()=>{
   const {store,archive}=library(),trip=await create(store);
   const valid={trip,photos:[{photo:{stopId:paris.id,city:paris,postcard:card},blob:new Blob([jpeg])}]};

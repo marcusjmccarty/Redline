@@ -40,7 +40,7 @@ Click a photo to expand it; it grows out of its print and shrinks back when clos
 
 **Print** or Ctrl/Command + P prints two 6 × 4 inch pages. **Share** prepares one JPEG containing the photograph and written back, then opens the device's available share menu. If file sharing is unavailable, it downloads the image. The share file contains pixels, not a private photo URL.
 
-Limits include 100 stops and 300 photos per trip, 200 trips in this browser, 30 images per import, and 4 MB per processed image. Browser support for HEIC/HEIF varies.
+Select or drop as many photos as you like in one import. Large selections appear on review pages. Select all, city assignment, and Save work across those pages. Trips have no photo-count limit. Capacity depends on available browser storage. Each processed image can be up to 4 MB. The existing limits of 100 stops per trip, 200 trips per browser, and 2 GB per backup file still apply. Browser support for HEIC/HEIF varies.
 
 ## Development
 

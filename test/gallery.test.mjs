@@ -265,16 +265,38 @@ test('a partial photo save preserves remaining imports and retry never duplicate
   const restored=await w.RedlineArchive.unpack(await storage.exportArchive(trip.id));assert.equal(restored[0].photos.length,3);
 });
 
-test('file drops, batch limits, and cancelling imports leave saved photos untouched',async t=>{
+test('a single large import reviews in pages and saves every page into an existing trip',async t=>{
+  const {w,$,choose,api,trip,change}=await setup(t);
+  choose(Array.from({length:320},(_,i)=>`vacation-${i+1}.jpg`));
+  await wait(()=>$('photo-selection-count').textContent==='320 selected'&&!$('choose-photos').disabled);
+  const review=$('photo-review');
+  assert.equal(review.children.length,48);
+  assert.equal($('review-range').textContent,'1–48 of 320');
+  change('bulk-photo-city',paris.id);
+  $('review-next').click();
+  assert.equal($('review-range').textContent,'49–96 of 320');
+  const select=review.querySelector('select');
+  assert.equal(select.value,paris.id);
+  select.value=madrid.id;select.dispatchEvent(new w.Event('change'));
+  $('review-prev').click();
+  assert.equal($('upload-photos').textContent,'Save 320 photos');
+  $('upload-photos').click();await wait(()=>$('photo-count').textContent==='323'&&!$('choose-photos').disabled);
+  const photos=(await api(`/trips/${trip.id}`)).photos;
+  assert.equal(photos.length,323);
+  assert.equal(photos.filter(photo=>photo.stopId===madrid.id).length,2);
+  assert.equal($('review-pager').hidden,true);
+});
+
+test('large file selections can be extended by dropping more files, then cancelled',async t=>{
   const {w,$,choose,api,trip}=await setup(t);
-  choose(Array.from({length:31},(_,i)=>`${i}.jpg`));assert.equal($('photo-review').children.length,0);
-  assert.match($('photo-message').textContent,/up to 30/);
+  choose(Array.from({length:31},(_,i)=>`${i}.jpg`));
+  await wait(()=>$('photo-review').children.length===31&&!$('choose-photos').disabled);
   const event=new w.Event('drop',{bubbles:true,cancelable:true});
   Object.defineProperty(event,'dataTransfer',{value:{types:['Files'],files:[new File([jpeg],'drop.jpg',{type:'image/jpeg'}),new File(['no'],'notes.txt',{type:'text/plain'})]}});
   $('photo-panel').dispatchEvent(event);
-  await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+  await wait(()=>$('photo-review').children.length===32&&!$('choose-photos').disabled);
   assert.equal(event.defaultPrevented,true);assert.match($('photo-message').textContent,/1 photo could not be read/);
-  w.confirm=()=>false;$('cancel-photo-import').click();assert.equal($('photo-review').children.length,1);
+  w.confirm=()=>false;$('cancel-photo-import').click();assert.equal($('photo-review').children.length,32);
   w.confirm=()=>true;$('cancel-photo-import').click();assert.equal($('photo-review').children.length,0);
   assert.equal($('album-pages').hidden,false);assert.equal((await api(`/trips/${trip.id}`)).photos.length,3);
 });

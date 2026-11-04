@@ -35,7 +35,7 @@
     if (manifest.version !== 1 || !Array.isArray(manifest.trips) || manifest.trips.length > 200) invalid();
     const records = [];
     for (const record of manifest.trips) {
-      if (!record?.trip || !Array.isArray(record.photos) || record.photos.length > 300) invalid();
+      if (!record?.trip || !Array.isArray(record.photos)) invalid();
       const photos = [];
       for (const photo of record.photos) {
         if (!Number.isInteger(photo?.bytes) || photo.bytes <= 0 || photo.bytes > 4*1024*1024 || offset + photo.bytes > file.size) invalid();

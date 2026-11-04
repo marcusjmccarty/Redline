@@ -126,6 +126,11 @@
             <div id="gallery-toolbar" class="gallery-toolbar" hidden><span class="sheet-label">Every photo, by city</span><button id="select-photos" class="text-button toolbar-button" type="button">Select</button></div>
             <div id="gallery-actions" class="gallery-actions" hidden role="toolbar" aria-label="Selected photos"><span id="gallery-selection-count" role="status" aria-live="polite"></span><button id="select-visible" class="text-button" type="button">Select all</button><span class="toolbar-spacer"></span><label for="move-photos" class="sr-only">Move selected photos to a city</label><select id="move-photos"><option value="">Move to…</option></select><button id="delete-photos" class="text-button danger-button" type="button">Delete</button><button id="done-selecting" class="small-button" type="button">Done</button></div>
             <div id="photo-bulk" class="photo-bulk" hidden><label class="photo-select-all"><input id="select-all-photos" type="checkbox"><span id="photo-selection-count">Select all</span></label><select id="bulk-photo-city" aria-label="Assign a city to the selected photos"><option value="">Assign a city…</option></select></div>
+            <nav id="review-pager" class="review-pager" aria-label="Import review pages" hidden>
+              <button id="review-prev" class="text-button" type="button">Previous</button>
+              <span id="review-range" aria-live="polite"></span>
+              <button id="review-next" class="text-button" type="button">Next</button>
+            </nav>
             <div id="photo-progress" class="photo-progress" role="progressbar" aria-label="Processing photos" aria-valuemin="0" hidden><span></span></div>
             <div id="photo-scroll" class="photo-scroll">
               <div id="photo-review" class="import-list" hidden aria-label="Photos to import"></div>
