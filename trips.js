@@ -82,6 +82,7 @@
     (back?.isConnected&&back!==document.body&&!back.closest('[hidden],[inert]')?back:$(triggers[id])).focus({preventScroll:true});
   }
   const albumPanel=$('photo-panel'),fullscreenButton=$('album-fullscreen');
+  const albumDisplay=$('album-display');
   const nativeFull=()=>document.fullscreenElement||document.webkitFullscreenElement;
   let albumOwnsFullscreen=false;
   function expandAlbum(expanded){
@@ -92,24 +93,31 @@
   }
   function leaveFullscreen(){
     expandAlbum(false);
-    if(albumOwnsFullscreen&&nativeFull()===document.documentElement){
+    if(nativeFull()===albumDisplay){
       const exit=document.exitFullscreen||document.webkitExitFullscreen;
       Promise.resolve(exit?.call(document)).catch(()=>{});
     }
     albumOwnsFullscreen=false;
   }
+  function syncFullscreen(){
+    if(nativeFull()===albumDisplay){
+      albumOwnsFullscreen=true;
+      if(!albumPanel.open||!albumPanel.classList.contains('expanded'))leaveFullscreen();
+    }else if(albumOwnsFullscreen){
+      albumOwnsFullscreen=false;expandAlbum(false);
+    }
+  }
   fullscreenButton.addEventListener('click',async()=>{
     if(albumPanel.classList.contains('expanded')){leaveFullscreen();return;}
     expandAlbum(true);
-    const root=document.documentElement,enter=root.requestFullscreen||root.webkitRequestFullscreen;
+    // Promote the book and its photo viewer together, above the map's modal backdrop.
+    const enter=albumDisplay.requestFullscreen||albumDisplay.webkitRequestFullscreen;
     if(enter&&!nativeFull()){
-      try{await enter.call(root);albumOwnsFullscreen=nativeFull()===root;if(!albumPanel.open||!albumPanel.classList.contains('expanded'))leaveFullscreen();}
-      catch{/* The expanded book also works on devices without native fullscreen. */}
+      try{await enter.call(albumDisplay);syncFullscreen();}
+      catch{/* The expanded layout fills the viewport when native fullscreen is unavailable. */}
     }
   });
-  for(const name of ['fullscreenchange','webkitfullscreenchange'])document.addEventListener(name,()=>{
-    if(albumOwnsFullscreen&&!nativeFull()){albumOwnsFullscreen=false;expandAlbum(false);}
-  });
+  for(const name of ['fullscreenchange','webkitfullscreenchange'])document.addEventListener(name,syncFullscreen);
   function finishAlbumClose(focus){
     leaveFullscreen();
     clearTimeout(sheetWarmTimer);
@@ -406,11 +414,11 @@
       if(isOpen('trip-panel')){event.preventDefault();closePanel('trip-panel',{focus:true});return;}
       if($('photo-panel').open){event.preventDefault();if(albumPanel.classList.contains('expanded')){leaveFullscreen();return;}if(selecting){setSelecting(false);$('select-photos').focus({preventScroll:true});return;}closePanel('photo-panel',{focus:true});return;}
     }
-    if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"]'))return;
+    if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input:not([type=checkbox]):not(#album-scrub),textarea,select,[contenteditable="true"]'))return;
     // Keep keyboard turns from racing a cover that is opening or closing.
-    if((albumMotion||viewMotion||reviewTurn)&&['ArrowRight','ArrowLeft','PageDown','PageUp','Home','End'].includes(event.key)){event.preventDefault();return;}
+    if(!viewer&&(albumMotion||viewMotion)&&['ArrowRight','ArrowLeft','PageDown','PageUp','Home','End'].includes(event.key)){event.preventDefault();return;}
     if($('photo-panel').open&&!viewer&&mode()==='review'&&['ArrowLeft','ArrowRight','PageUp','PageDown'].includes(event.key)){
-      event.preventDefault();turnReview(['ArrowLeft','PageUp'].includes(event.key)?-1:1);return;
+      event.preventDefault();if(!event.repeat)turnReview(['ArrowLeft','PageUp'].includes(event.key)?-1:1);return;
     }
     // The album turns like a book from the keyboard.
     if($('photo-panel').open&&!viewer&&mode()==='album'){
@@ -614,17 +622,19 @@
     const lastPage=Math.max(0,Math.ceil(pending.length/reviewPageSize)-1);
     reviewPage=Math.min(reviewPage,lastPage);
     const start=reviewPage*reviewPageSize,end=Math.min(start+reviewPageSize,pending.length);
+    const citySelect=document.createElement('select');
+    if(!incremental||pending.length-1<end)cityOptions(citySelect,'Choose city…');
     // While decoding, append just the new visible print. Bulk controls refresh once at the end.
     for(let index=incremental?Math.max(start,pending.length-1):start;index<end;index++){
       const entry=pending[index];
-      const row=document.createElement('div'),tools=document.createElement('div'),select=document.createElement('select'),pick=document.createElement('label'),checkbox=document.createElement('input'),mark=document.createElement('span');
+      const row=document.createElement('div'),tools=document.createElement('div'),select=citySelect.cloneNode(true),pick=document.createElement('label'),checkbox=document.createElement('input'),mark=document.createElement('span');
       row.className='photo-tile review-photo';row.classList.toggle('selected',entry.checked);row.dataset.pendingId=entry.id;tools.className='photo-tile-tools';pick.className='photo-pick';checkbox.type='checkbox';checkbox.checked=entry.checked;checkbox.disabled=busy;checkbox.setAttribute('aria-label',`Select ${entry.name||`photo ${index+1}`}`);mark.className='photo-check';mark.innerHTML=icons.check;pick.append(checkbox,mark);
       checkbox.addEventListener('change',()=>{entry.checked=checkbox.checked;updateBulkSelection();});
       const image=previewButton(entry,(event,button)=>{
         const collection=pending.map(p=>({...p,city:p.selected==='match'?p.candidate:app.getStops().find(s=>s.id===p.selected)}));
         window.RedlinePostcards.open(collection.find(p=>p.id===entry.id),null,collection,null,button);
       });image.disabled=busy;
-      cityOptions(select,'Choose city…');select.setAttribute('aria-label',`City for ${entry.name||`photo ${index+1}`}`);
+      select.setAttribute('aria-label',`City for ${entry.name||`photo ${index+1}`}`);
       if(entry.candidate&&!entry.candidate.existing)select.add(new Option(`${entry.candidate.name} (from GPS, new stop)`,'match'));
       if(entry.selected!=='match'&&!stops.some(s=>s.id===entry.selected))entry.selected='';select.value=entry.selected;select.disabled=busy;row.classList.toggle('needs-city',!entry.selected);select.addEventListener('change',()=>{entry.selected=select.value;row.classList.toggle('needs-city',!entry.selected);updateUploadButton();});
       if(entry.candidate){const badge=document.createElement('span');badge.className='gps-badge';badge.innerHTML=icons.pin;badge.append(entry.candidate.existing?'Matched':'GPS');badge.title=`Location data suggests ${entry.candidate.name}`;tools.append(badge);}
@@ -650,14 +660,23 @@
     const turn=reviewTurn;reviewTurn=null;turn.scene?.dispose();renderPhotoMode();
   }
   async function turnReview(delta){
-    const next=reviewPage+delta,book=$('album-book'),sheet=$('album-sheet');
-    if(busy||albumMotion||reviewTurn||next<0||next*reviewPageSize>=pending.length)return;
-    const apply=()=>{reviewPage=next;renderReview();$('photo-scroll').scrollTop=0;return sheet;};
-    if(!canAnimate(book)){apply();return;}
-    const turn={};reviewTurn=turn;
+    const last=Math.ceil(pending.length/reviewPageSize)-1;
+    if(busy||albumMotion||mode()!=='review')return;
+    if(reviewTurn){
+      reviewTurn.target=Math.max(0,Math.min(last,reviewTurn.target+delta));return;
+    }
+    const target=reviewPage+delta,book=$('album-book'),sheet=$('album-sheet');
+    if(target<0||target>last)return;
+    const turn={target,scene:null};reviewTurn=turn;
     try{
-      turn.scene=window.RedlineAlbumMotion.changeView({book,source:sheet,apply,direction:-delta,two:twoPage()});
-      await turn.scene.play();
+      while(reviewTurn===turn&&reviewPage!==turn.target){
+        const direction=Math.sign(turn.target-reviewPage);
+        const apply=()=>{reviewPage+=direction;renderReview();$('photo-scroll').scrollTop=0;return sheet;};
+        if(!canAnimate(book)){apply();continue;}
+        turn.scene=window.RedlineAlbumMotion.changeView({book,source:sheet,apply,direction:-direction,two:twoPage()});
+        await turn.scene.play();
+        if(reviewTurn===turn){turn.scene.dispose();turn.scene=null;}
+      }
     }finally{if(reviewTurn===turn)finishReviewTurn();}
   }
   for(const [id,delta] of [['review-prev',-1],['review-next',1]])$(id).addEventListener('click',()=>turnReview(delta));

@@ -69,6 +69,7 @@
       if(clone.id){clone.classList.add(`album-copy-${clone.id}`);clone.removeAttribute('id');}
       clone.removeAttribute('autofocus');
       if(omitted.has(node)){clone.style.height=`${omitted.get(node)}px`;clone.style.visibility='hidden';return clone;}
+      if(node.tagName==='SELECT')return inertCopy(node);
       for(const child of node.childNodes)clone.append(copy(child));
       return clone;
     }
@@ -103,7 +104,10 @@
     if(node.nodeType!==1)return copy;
     if(copy.id){copy.classList.add(`album-copy-${copy.id}`);copy.removeAttribute('id');}
     copy.removeAttribute('autofocus');
-    if(deep)for(const child of node.childNodes)copy.append(inertCopy(child));
+    // A painted city picker only needs its displayed option on a turning leaf.
+    if(deep&&node.tagName==='SELECT'){
+      const option=node.options[node.selectedIndex];if(option)copy.append(option.cloneNode(true));
+    }else if(deep)for(const child of node.childNodes)copy.append(inertCopy(child));
     if(node.tagName==='OPTION')copy.toggleAttribute('selected',node.selected);
     if(node.tagName==='INPUT'&&node.type==='checkbox')copy.toggleAttribute('checked',node.checked);
     return copy;

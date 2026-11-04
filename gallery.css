@@ -44,7 +44,8 @@
 
 /* The album: a leather-bound book over the dimmed map. */
 .album { width: 100vw; height: 100svh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; overflow: hidden; background: transparent; color: var(--paper); }
-.album[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.album[open] { display: block; }
+#album-display { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: 100%; height: 100%; }
 .album:focus { outline: none; }
 .album-top { display: flex; align-items: center; gap: 14px; padding: 16px 22px 6px; }
 .album-title { flex: 1; min-width: 0; }
@@ -61,8 +62,12 @@
 #album-fullscreen .restore-icon, #album-fullscreen[aria-pressed=true] .expand-icon { display: none; }
 #album-fullscreen[aria-pressed=true] .restore-icon { display: inline; }
 .album.expanded { height: 100dvh; }
+.album.expanded #album-display { background: #29221c; }
+.album.expanded .album-foot.away { display: none; }
 @media (min-width: 900px), (min-width: 600px) and (orientation: landscape) {
-  .album.expanded .album-book { width: min(calc(100cqw - 2 * var(--tab-width) - 12px), calc((100cqh - 4px) * 1.85)); height: calc(100cqh - 4px); aspect-ratio: auto; }
+  .album.expanded .album-stage { justify-content: flex-start; padding: 4px 12px; }
+  .album.expanded .album-book { width: calc(100% - var(--tab-width)); height: 100%; aspect-ratio: auto; }
+  .album.expanded .album-book:has(> .album-tabs.away) { width: 100%; }
 }
 .album .close-panel:hover { background: #ffffff1f; color: #fff; }
 .album .small-button { min-height: 34px; padding: 7px 13px; font-size: 12px; }

@@ -199,7 +199,7 @@
     activeLeg={origin:direction>0?leg:leg+1,destination:direction>0?leg+1:leg};
     const defaultFrame=RedlineTrace.camera(geometry[leg],cameraSpace(),baseView,project(stops[activeLeg.destination])).arrival;
     playback={leg,target,direction,returnToOverview,nominalWidth:defaultFrame.w,manual:traceZoom?manualCamera(baseView.w/traceZoom):null,from:progress-leg,to:direction>0?1:0,startView:{...view},camera:cameraFor(leg,direction),timeline:RedlineTrace.timeline({
-      from:progress-leg,to:direction>0?1:0,duration:RedlineTrace.duration(geometry[leg].length)
+      from:progress-leg,to:direction>0?1:0,duration:RedlineTrace.duration(geometry[leg].length),widthRatio:traceZoom?1:defaultFrame.w/view.w
     })};
     paintProgress();
   }
@@ -233,15 +233,13 @@
       const state=run.timeline.advance(elapsed*speed*pace);
       progress=run.leg+state.position;
       if(state.arrived)activeLeg=null;
-      const amount=Math.abs(state.position-run.from)/Math.max(1e-9,Math.abs(run.to-run.from));
-      const look=run.from+(run.to-run.from)*RedlineTrace.ease(amount);
       if(run.manual){
         const lead=run.direction*90*speed*pace/RedlineTrace.duration(geometry[run.leg].length);
         const position=Math.max(0,Math.min(1,state.position+lead));
         const point=geometry[run.leg].pointAt(position),here=geometry[run.leg].pointAt(state.position);
         // Never anticipate a jump across the map's date-line seam.
         view=run.manual.tracker.step(Math.abs(point[0]-here[0])>WORLD_W/2?here:point,traceZoom,elapsed);
-      }else view=RedlineTrace.cameraView(run.startView,run.camera,geometry[run.leg].pointAt(look),amount);
+      }else view=RedlineTrace.cameraView(run.startView,run.camera,geometry[run.leg].pointAt(state.position),state.time);
       paintView();
       if(state.arrived)reachedCity();
       if(state.done){
@@ -549,9 +547,10 @@
     if(matchMedia('(prefers-reduced-motion: reduce)').matches||path.length<1e-4){finish();return;}
     // Arrow keys during an overview move finish it instantly.
     if(overview)playback={phase:'overview'};
+    const duration=overview?Math.max(path.duration,RedlineTrace.zoomDuration(target.w/view.w)):path.duration;
     const began=performance.now();
     const tick=now=>{
-      const amount=Math.max(0,Math.min(1,(now-began-hold)/path.duration));
+      const amount=Math.max(0,Math.min(1,(now-began-hold)/duration));
       view=path.at(RedlineTrace.ease(amount));paintView();
       if(amount===1){finish();return;}animation=requestAnimationFrame(tick);
     };

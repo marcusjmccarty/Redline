@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
-  const maxZoom=240;
+  const maxZoom=240,autoZoomLimit=118;
   const duration=length=>Math.max(1600,Math.min(3600,length*6));
   const ease=value=>{const t=clamp(value,0,1);return t*t*t*(t*(t*6-15)+10);};
   // Analytic critical damping keeps velocity when a wheel gesture retargets mid-move.
@@ -75,7 +75,7 @@
     // Keep the familiar long-haul framing. On a local leg, let the route
     // occupy roughly a quarter of the map, with room around both cities.
     const localLevel=Math.min(world.w*.28/spanX,world.h*.24/spanY);
-    const level=Math.max(1,Math.min(maxZoom,Math.max(2.35,localLevel),
+    const level=Math.max(1,Math.min(autoZoomLimit,Math.max(2.35,localLevel),
       (space.right-space.left)*world.w/(Math.max(1,right-left)*space.width*1.16),
       (space.bottom-space.top)*world.h/(Math.max(1,bottom-top)*space.height*1.16)));
     const w=world.w/level,h=world.h/level,sx=space.width/w,sy=space.height/h;
@@ -94,17 +94,26 @@
   function cameraView(start,plan,point,amount){
     if(amount>=1)return {...plan.arrival};
     const target=plan.follow(point),blend=ease(amount);
-    return Object.fromEntries(['x','y','w','h'].map(key=>[key,start[key]+(target[key]-start[key])*blend]));
+    // Zoom by equal ratios. Interpolate the corners by that same change in width
+    // to keep the departure in frame while pulling out for the next leg.
+    const ratio=Math.log(target.w/start.w);
+    const share=Math.abs(ratio)<1e-6?blend:Math.expm1(ratio*blend)/Math.expm1(ratio);
+    return Object.fromEntries(['x','y','w','h'].map(key=>[key,start[key]+(target[key]-start[key])*share]));
   }
 
-  function timeline({from,to,duration}){
+  const zoomDuration=ratio=>1050*Math.abs(Math.log2(ratio));
+  function timeline({from,to,duration,widthRatio=1}){
     let elapsed=0;
-    const total=Math.abs(to-from)*duration;
+    const total=Math.max(Math.abs(to-from)*duration,zoomDuration(widthRatio));
     return {advance(delta){
       elapsed=clamp(elapsed+Math.max(0,delta),0,total);
-      const t=total?elapsed/total:1;
-      return {position:from+(to-from)*t,arrived:elapsed>=total,done:elapsed>=total};
+      const time=total?elapsed/total:1;
+      // A long leg emerging from a close view can only reveal the fraction
+      // that fits. On a short leg keep some ink moving as the camera comes in.
+      const fit=Math.exp(-Math.abs(Math.log(widthRatio))*(1-ease(time)));
+      const drawn=time*(widthRatio>=1?fit:.35+.65*fit);
+      return {time,position:from+(to-from)*drawn,arrived:elapsed>=total,done:elapsed>=total};
     }};
   }
-  globalThis.RedlineTrace=Object.freeze({maxZoom,measure,duration,timeline,ease,camera,cameraView,pointFrame,spring,trackingCamera});
+  globalThis.RedlineTrace=Object.freeze({maxZoom,measure,duration,zoomDuration,timeline,ease,camera,cameraView,pointFrame,spring,trackingCamera});
 })();
