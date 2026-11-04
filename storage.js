@@ -111,7 +111,7 @@
   }
   function photoIds(body) {
     const ids=body?.ids;
-    if (!Array.isArray(ids) || !ids.length || ids.length>300 || !ids.every(idValid) || new Set(ids).size!==ids.length) fail('Choose photos from this trip.');
+    if (!Array.isArray(ids) || !ids.length || !ids.every(idValid) || new Set(ids).size!==ids.length) fail('Choose photos from this trip.');
     return ids;
   }
   async function tripPhotos(stores,trip,ids) {
@@ -176,7 +176,6 @@
       const record=await transaction(['trips','photos'],'readwrite',async stores=>{
         const trip=await ownTrip(stores.trips,parts[1]),stop=trip.stops.find(s=>s.id===stopId);
         if (!stop) fail('Save this city in your trip before adding its photos.');
-        if (await request(stores.photos.index('tripId').count(trip.id))>=300) fail('This trip already has 300 photos.',409);
         const photo={id:crypto.randomUUID(),tripId:trip.id,stopId:stop.id,city:stop,blob,...more,createdAt:now(),postcard:{},postcardRevision:1};
         await request(stores.photos.add(photo)); return photo;
       });

@@ -7,7 +7,7 @@
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
   <link rel="stylesheet" href="style.css?v=2d57b4274978">
-  <link rel="stylesheet" href="gallery.css?v=5679034758b0">
+  <link rel="stylesheet" href="gallery.css?v=7c66b06ac22d">
   <script src="map-intro.js?v=e8197bd28f08"></script>
   <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
   <script src="map-layout.js?v=eb31b38a5551" defer></script>
@@ -19,10 +19,10 @@
   <script src="postcard-export.js?v=048b39ce6827" defer></script>
   <script src="postcards.js?v=d93a41ee70f8" defer></script>
   <script src="jpeg.js?v=c37b5b32449f" defer></script>
-  <script src="archive.js?v=f6fb167e0946" defer></script>
-  <script src="storage.js?v=c5183d65dceb" defer></script>
+  <script src="archive.js?v=bc17aed962a3" defer></script>
+  <script src="storage.js?v=ebd36216a640" defer></script>
   <script src="album-motion.js?v=5486af76a9af" defer></script>
-  <script src="trips.js?v=29aa62cc3408" defer></script>
+  <script src="trips.js?v=d43e03dc53da" defer></script>
 </head>
 <body>
   <main aria-label="Travel map">
@@ -126,6 +126,11 @@
             <div id="gallery-toolbar" class="gallery-toolbar" hidden><span class="sheet-label">Every photo, by city</span><button id="select-photos" class="text-button toolbar-button" type="button">Select</button></div>
             <div id="gallery-actions" class="gallery-actions" hidden role="toolbar" aria-label="Selected photos"><span id="gallery-selection-count" role="status" aria-live="polite"></span><button id="select-visible" class="text-button" type="button">Select all</button><span class="toolbar-spacer"></span><label for="move-photos" class="sr-only">Move selected photos to a city</label><select id="move-photos"><option value="">Move to…</option></select><button id="delete-photos" class="text-button danger-button" type="button">Delete</button><button id="done-selecting" class="small-button" type="button">Done</button></div>
             <div id="photo-bulk" class="photo-bulk" hidden><label class="photo-select-all"><input id="select-all-photos" type="checkbox"><span id="photo-selection-count">Select all</span></label><select id="bulk-photo-city" aria-label="Assign a city to the selected photos"><option value="">Assign a city…</option></select></div>
+            <nav id="review-pager" class="review-pager" aria-label="Import review pages" hidden>
+              <button id="review-prev" class="text-button" type="button">Previous</button>
+              <span id="review-range" aria-live="polite"></span>
+              <button id="review-next" class="text-button" type="button">Next</button>
+            </nav>
             <div id="photo-progress" class="photo-progress" role="progressbar" aria-label="Processing photos" aria-valuemin="0" hidden><span></span></div>
             <div id="photo-scroll" class="photo-scroll">
               <div id="photo-review" class="import-list" hidden aria-label="Photos to import"></div>

@@ -3,6 +3,8 @@
   const $=id=>document.getElementById(id),app=window.RedlineApp,SVG='http://www.w3.org/2000/svg';
   let current=null,photos=[],pending=[],busy=false,dirty=false,suppress=false,resumePhotos=false,cityIndex=null,exifReady=null,photoPanelRequest=0,photosRequested=false;
   let activeCity='',galleryItems=[],importing=false,photoMode='',dragDepth=0,selecting=false,thumbQueue=Promise.resolve();
+  const reviewPageSize=48;
+  let reviewPage=0;
   let sheetKey='',tabsKey='',sheetWarmTimer=0;
   let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0,anchor=null,drawn=null,reopen=null,albumMotion=null,viewMotion=null;
   const chosen=new Set(),thumbJobs=new Set(),lastPages=new Map(),lastScrolls=new Map();
@@ -449,7 +451,6 @@
   function setProgress(done,total){const bar=$('photo-progress');bar.hidden=!total;bar.style.setProperty('--progress',total?String(done/total):'0');bar.setAttribute('aria-valuenow',String(done));bar.setAttribute('aria-valuemax',String(total||1));}
   async function importPhotos(files){
     if(!files.length||busy||!current)return;
-    if(files.length+pending.length>30){message('photo-message','Choose up to 30 photos at a time.',true);return;}
     setSelecting(false);busy=true;importing=true;photoPanelRequest++;photosRequested=false;update();let failed=0,lastError='';
     try{
       await loadExif().catch(()=>{});
@@ -463,7 +464,7 @@
           pending.push(entry);renderReview(true);
         }catch(error){failed++;lastError=error.message;}
       }
-      message('photo-message',failed?`${failed} photo${failed===1?'':'s'} could not be read. ${lastError}`:'',failed>0);renderReview();
+      message('photo-message',failed?`${failed} photo${failed===1?'':'s'} could not be read. ${lastError}`:'',failed>0);
     }catch(error){showError('photo-message',error);}finally{busy=false;importing=false;setProgress(0,0);update();renderReview();}
   }
   const fileDrag=event=>Array.from(event.dataTransfer?.types||[]).includes('Files');
@@ -575,11 +576,15 @@
   }
   function renderReview(incremental=false){
     if(albumMotion?.scene){albumMotion.refresh=true;return;}
-    const container=$('photo-review'),fragment=document.createDocumentFragment(),existing=new Set(incremental?[...container.children].map(row=>row.dataset.pendingId):[]),stops=app.getStops();
-    pending.forEach((entry,index)=>{
-      if(existing.has(entry.id))return;
+    const container=$('photo-review'),fragment=document.createDocumentFragment(),stops=app.getStops();
+    const lastPage=Math.max(0,Math.ceil(pending.length/reviewPageSize)-1);
+    reviewPage=Math.min(reviewPage,lastPage);
+    const start=reviewPage*reviewPageSize,end=Math.min(start+reviewPageSize,pending.length);
+    // While decoding, append just the new visible print. Bulk controls refresh once at the end.
+    for(let index=incremental?Math.max(start,pending.length-1):start;index<end;index++){
+      const entry=pending[index];
       const row=document.createElement('div'),tools=document.createElement('div'),select=document.createElement('select'),pick=document.createElement('label'),checkbox=document.createElement('input'),mark=document.createElement('span');
-      row.className='photo-tile review-photo';row.dataset.pendingId=entry.id;row.style.setProperty('--tilt',`${(hash(entry.id)%7-3)*.6}deg`);tools.className='photo-tile-tools';pick.className='photo-pick';checkbox.type='checkbox';checkbox.checked=entry.checked;checkbox.disabled=busy;checkbox.setAttribute('aria-label',`Select ${entry.name||`photo ${index+1}`}`);mark.className='photo-check';mark.innerHTML=icons.check;pick.append(checkbox,mark);
+      row.className='photo-tile review-photo';row.classList.toggle('selected',entry.checked);row.dataset.pendingId=entry.id;row.style.setProperty('--tilt',`${(hash(entry.id)%7-3)*.6}deg`);tools.className='photo-tile-tools';pick.className='photo-pick';checkbox.type='checkbox';checkbox.checked=entry.checked;checkbox.disabled=busy;checkbox.setAttribute('aria-label',`Select ${entry.name||`photo ${index+1}`}`);mark.className='photo-check';mark.innerHTML=icons.check;pick.append(checkbox,mark);
       checkbox.addEventListener('change',()=>{entry.checked=checkbox.checked;updateBulkSelection();});
       const image=previewButton(entry,(event,button)=>{
         const collection=pending.map(p=>({...p,city:p.selected==='match'?p.candidate:app.getStops().find(s=>s.id===p.selected)}));
@@ -591,19 +596,31 @@
       if(entry.candidate){const badge=document.createElement('span');badge.className='gps-badge';badge.innerHTML=icons.pin;badge.append(entry.candidate.existing?'Matched':'GPS');badge.title=`Location data suggests ${entry.candidate.name}`;tools.append(badge);}
       const remove=removeButton(`Remove ${entry.name||`photo ${index+1}`} from import`,()=>{
         URL.revokeObjectURL(entry.url);if(entry.thumbUrl)URL.revokeObjectURL(entry.thumbUrl);pending=pending.filter(p=>p.id!==entry.id);renderReview();
-        (container.children[Math.min(index,pending.length-1)]?.querySelector('.remove-photo')||$('choose-photos')).focus({preventScroll:true});
+        (container.children[Math.min(index-reviewPage*reviewPageSize,container.children.length-1)]?.querySelector('.remove-photo')||$('choose-photos')).focus({preventScroll:true});
       });tools.append(select);row.prepend(image,pick,remove);row.append(tools);fragment.append(row);
-    });
-    if(incremental)container.append(fragment);else container.replaceChildren(fragment);
+    }
+    if(incremental){container.append(fragment);return;}
+    container.replaceChildren(fragment);
+    $('review-pager').hidden=lastPage===0;
+    $('review-prev').disabled=busy||reviewPage===0;
+    $('review-next').disabled=busy||reviewPage===lastPage;
+    $('review-range').textContent=pending.length?`${start+1}–${end} of ${pending.length}`:'';
+
     $('photo-bulk').hidden=!pending.length;
     cityOptions($('bulk-photo-city'),'Assign a city…');
     const seen=new Set();for(const entry of pending){const city=entry.candidate;if(city&&!city.existing){const key=`${city.latitude},${city.longitude}`;if(!seen.has(key)){seen.add(key);$('bulk-photo-city').add(new Option(`${city.name} (from GPS, new stop)`,`gps:${entry.id}`));}}}
     updateBulkSelection();updateUploadButton();renderPhotoMode();
   }
+  for(const [id,delta] of [['review-prev',-1],['review-next',1]]){
+    $(id).addEventListener('click',()=>{
+      if(busy)return;
+      reviewPage+=delta;renderReview();$('photo-scroll').scrollTop=0;
+    });
+  }
   function updateBulkSelection(){
     const selected=pending.filter(p=>p.checked).length,all=$('select-all-photos');all.checked=selected>0&&selected===pending.length;all.indeterminate=selected>0&&selected<pending.length;all.disabled=busy;
     $('photo-selection-count').textContent=selected?`${selected} selected`:'Select all';$('bulk-photo-city').disabled=busy||!selected;
-    document.querySelectorAll('#photo-review .photo-tile').forEach(row=>{const entry=pending.find(p=>p.id===row.dataset.pendingId);row.classList.toggle('selected',!!entry?.checked);row.querySelector('input').checked=!!entry?.checked;});
+    document.querySelectorAll('#photo-review .photo-tile').forEach((row,index)=>{const entry=pending[reviewPage*reviewPageSize+index];row.classList.toggle('selected',!!entry?.checked);row.querySelector('input').checked=!!entry?.checked;});
   }
   $('select-all-photos').addEventListener('change',()=>{pending.forEach(entry=>entry.checked=$('select-all-photos').checked);updateBulkSelection();});
   $('bulk-photo-city').addEventListener('change',()=>{
@@ -620,6 +637,7 @@
   }
   $('upload-photos').addEventListener('click',async()=>{
     if(busy)return;const ready=pending.filter(p=>p.selected);if(!ready.length)return;busy=true;photoPanelRequest++;photosRequested=false;update();renderReview();
+    const saved=new Set();
     let firstSaved=null;
     try{
       for(const entry of ready){if(entry.selected==='match'){const stop=app.addCity(entry.candidate);entry.selected=stop.id;}}
@@ -628,11 +646,12 @@
         const entry=ready[i];message('photo-message',`Saving ${i+1} of ${ready.length}…`);setProgress(i,ready.length);
         const form=new FormData();form.append('photo',entry.blob,'photo.jpg');form.append('stopId',entry.selected);
         if(entry.thumb)form.append('thumb',entry.thumb,'thumb.jpg');if(entry.width&&entry.height){form.append('width',String(entry.width));form.append('height',String(entry.height));}
-        const {photo}=await api(`/trips/${current.id}/photos`,{method:'POST',body:form});photos.push(photo);firstSaved??=photo;pending=pending.filter(p=>p.id!==entry.id);URL.revokeObjectURL(entry.url);if(entry.thumbUrl)URL.revokeObjectURL(entry.thumbUrl);
+        const {photo}=await api(`/trips/${current.id}/photos`,{method:'POST',body:form});photos.push(photo);firstSaved??=photo;saved.add(entry);URL.revokeObjectURL(entry.url);if(entry.thumbUrl)URL.revokeObjectURL(entry.thumbUrl);
       }
-      message('photo-message',pending.length?'Choose a city for the remaining photos.':`${photoLabel(ready.length)} saved.`);
+      message('photo-message',pending.length>saved.size?'Choose a city for the remaining photos.':`${photoLabel(ready.length)} saved.`);
     }catch(error){showError('photo-message',error);}finally{
-      busy=false;setProgress(0,0);update();renderReview();renderGallery();
+      pending=pending.filter(entry=>!saved.has(entry));
+      busy=false;setProgress(0,0);renderReview();update();renderGallery();
       // Land on the page where the new photos were mounted.
       if(!pending.length&&firstSaved&&view==='album')turnTo(pageOfPhoto(firstSaved.id),{instant:true});
       if(!pending.length)$('choose-photos').focus({preventScroll:true});
