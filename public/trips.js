@@ -3,7 +3,7 @@
   const $=id=>document.getElementById(id),app=window.RedlineApp,SVG='http://www.w3.org/2000/svg';
   let current=null,photos=[],pending=[],busy=false,dirty=false,suppress=false,resumePhotos=false,cityIndex=null,exifReady=null,photoPanelRequest=0,photosRequested=false;
   let activeCity='',galleryItems=[],importing=false,photoMode='',dragDepth=0,selecting=false,thumbQueue=Promise.resolve();
-  const reviewPageSize=50;
+  const reviewPageSize=70;
   let reviewPage=0,reviewTurn=null;
   let sheetKey='',tabsKey='',sheetWarmTimer=0;
   let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0,anchor=null,drawn=null,reopen=null,albumMotion=null,viewMotion=null;

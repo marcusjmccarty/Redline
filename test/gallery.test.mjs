@@ -270,11 +270,11 @@ test('a single large import reviews in pages and saves every page into an existi
   choose(Array.from({length:320},(_,i)=>`vacation-${i+1}.jpg`));
   await wait(()=>$('photo-selection-count').textContent==='320 selected'&&!$('choose-photos').disabled);
   const review=$('photo-review');
-  assert.equal(review.children.length,50);
-  assert.equal($('review-range').textContent,'1–50 of 320');
+  assert.equal(review.children.length,70);
+  assert.equal($('review-range').textContent,'1–70 of 320');
   change('bulk-photo-city',paris.id);
   $('review-next').click();
-  assert.equal($('review-range').textContent,'51–100 of 320');
+  assert.equal($('review-range').textContent,'71–140 of 320');
   const select=review.querySelector('select');
   assert.equal(select.value,paris.id);
   select.value=madrid.id;select.dispatchEvent(new w.Event('change'));
@@ -1418,34 +1418,34 @@ test('a failed thumbnail decode never starts a blank page turn or traps the cont
 
 test('import review turns between distinct pages without losing location assignments',async t=>{
   const {w,$,choose,change,press}=await setup(t);
-  choose(Array.from({length:55},(_,i)=>`travel-${i+1}.jpg`));
-  await wait(()=>$('photo-selection-count').textContent==='55 selected'&&!$('choose-photos').disabled);
+  choose(Array.from({length:75},(_,i)=>`travel-${i+1}.jpg`));
+  await wait(()=>$('photo-selection-count').textContent==='75 selected'&&!$('choose-photos').disabled);
   change('bulk-photo-city',paris.id);
   const first=$('photo-review').firstElementChild.dataset.pendingId,motion=controlledMotion(w);
   $('review-next').click();await wait(()=>motion.running.size===4);
   const layer=$('album-book').querySelector('.album-view-layer'),second=$('photo-review').firstElementChild.dataset.pendingId;
   assert.notEqual(first,second);assert.ok(layer.querySelector(`.album-view-front [data-pending-id="${first}"]`));
   assert.ok(layer.querySelector(`.album-view-back [data-pending-id="${second}"]`));
-  assert.equal($('review-range').textContent,'51–55 of 55');await motion.finish();
-  press('ArrowLeft');await wait(()=>motion.running.size===4);await motion.finish();assert.equal($('review-range').textContent,'1–50 of 55');
+  assert.equal($('review-range').textContent,'71–75 of 75');await motion.finish();
+  press('ArrowLeft');await wait(()=>motion.running.size===4);await motion.finish();assert.equal($('review-range').textContent,'1–70 of 75');
   assert.equal($('photo-review').querySelector('select').value,paris.id);assert.equal($('album-book').inert,false);
 });
 
 test('review arrows queue during a turn, work on checkboxes, and leave city pickers alone',async t=>{
   const {w,$,choose,press}=await setup(t);
-  choose(Array.from({length:104},(_,i)=>`review-${i}.jpg`));
-  await wait(()=>$('photo-selection-count').textContent==='104 selected'&&!$('choose-photos').disabled);
+  choose(Array.from({length:144},(_,i)=>`review-${i}.jpg`));
+  await wait(()=>$('photo-selection-count').textContent==='144 selected'&&!$('choose-photos').disabled);
   const motion=controlledMotion(w),review=$('photo-review');
   assert.equal(press('ArrowRight',review.querySelector('select')),true);
   press('ArrowRight',review.querySelector('input'));
   await wait(()=>motion.running.size===4);
-  assert.equal($('review-range').textContent,'51–100 of 104');
+  assert.equal($('review-range').textContent,'71–140 of 144');
   const copies=$('album-book').querySelectorAll('.album-view-layer select');
   assert.ok(copies.length>0&&[...copies].every(select=>select.options.length<=1));
   press('ArrowRight');await motion.finish();await wait(()=>motion.running.size===4);
-  assert.equal($('review-range').textContent,'101–104 of 104');
+  assert.equal($('review-range').textContent,'141–144 of 144');
   press('ArrowLeft');await motion.finish();await wait(()=>motion.running.size===4);
-  await motion.finish();assert.equal($('review-range').textContent,'51–100 of 104');
+  await motion.finish();assert.equal($('review-range').textContent,'71–140 of 144');
   assert.equal($('album-book').inert,false);
 });
 
