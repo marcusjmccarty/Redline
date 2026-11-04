@@ -532,21 +532,14 @@
   visibility: hidden; transform: translateY(-105%); transition: transform .2s var(--ease-out), visibility 0s .2s;
 }
 #album-top-edge[aria-expanded=true] + .album-top { visibility: visible; transform: none; transition-delay: 0s; }
-/* Five prints across each paper leaf, with the fold in the gap between
-   tracks five and six. Symmetric scrollbar space keeps the fold centered. */
+/* Import review uses five prints across each paper leaf. */
 .album { --sheet-columns: 10; --print-gap: clamp(6px, 1.3vmin, 18px); }
-.album.expanded .photo-scroll, .album-book[data-mode=review] .photo-scroll { scrollbar-gutter: stable both-edges; }
-.album.expanded :is(#photo-gallery, .album-copy-photo-gallery) .photo-grid,
+.album-book[data-mode=review] .photo-scroll { scrollbar-gutter: stable both-edges; }
 :is(#photo-review, .album-copy-photo-review) {
   grid-template-columns: repeat(var(--sheet-columns), minmax(0, 1fr));
   gap: var(--print-gap); padding-inline: clamp(8px, 1.6vmin, 24px);
 }
-/* Leave space for the city heading and seven rows in window view. */
-.album.expanded :is(#photo-gallery, .album-copy-photo-gallery) .photo-grid .photo-image {
-  aspect-ratio: 3 / 2; max-height: max(48px, calc((100dvh - 116px) / 7 - var(--print-gap)));
-  border-width: clamp(2px, .4vmin, 6px); border-bottom-width: clamp(4px, .8vmin, 10px);
-}
-.album.expanded .album-sheet::after, .album-book[data-mode=review] .album-sheet::after { width: var(--print-gap); }
+.album-book[data-mode=review] .album-sheet::after { width: var(--print-gap); }
 @media (pointer: coarse) { #album-top-edge { height: max(24px, env(safe-area-inset-top)); } }
 @media (max-width: 599px), (max-width: 899px) and (orientation: portrait) {
   .album { --sheet-columns: 5; }
