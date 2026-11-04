@@ -6,24 +6,24 @@
   <meta name="theme-color" content="#efe5d2">
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
-  <link rel="stylesheet" href="style.css?v=d0373fe22fa3">
-  <link rel="stylesheet" href="gallery.css?v=97fd4fb43e48">
-  <script src="map-intro.js?v=e8197bd28f08"></script>
+  <link rel="stylesheet" href="style.css?v=c8529c3e4fb0">
+  <link rel="stylesheet" href="gallery.css?v=327c585253f1">
+  <script src="map-intro.js?v=42c0f59787e3"></script>
   <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
   <script src="map-layout.js?v=eb31b38a5551" defer></script>
   <script src="atlas-geography.js?v=5a63514c3186" defer></script>
   <script src="trace.js?v=6989306e288d" defer></script>
   <script src="labels.js?v=0e761c11f184" defer></script>
   <script src="relief/index.js?v=b019ce04df05" defer></script>
-  <script src="map-paint.js?v=dc022ce3ffd2" defer></script>
-  <script src="app.js?v=53123f2e9679" defer></script>
+  <script src="map-paint.js?v=275943eacabf" defer></script>
+  <script src="app.js?v=784104e5665c" defer></script>
   <script src="postcard-export.js?v=048b39ce6827" defer></script>
   <script src="postcards.js?v=bb3aca0cbd97" defer></script>
   <script src="jpeg.js?v=c37b5b32449f" defer></script>
   <script src="archive.js?v=bc17aed962a3" defer></script>
   <script src="storage.js?v=ebd36216a640" defer></script>
   <script src="album-motion.js?v=427d599dad6d" defer></script>
-  <script src="trips.js?v=1a2356e7aab8" defer></script>
+  <script src="trips.js?v=41772b460065" defer></script>
 </head>
 <body>
   <main aria-label="Travel map">
@@ -55,10 +55,9 @@
           <text x="1035" y="438" class="ocean">Indian Ocean</text>
         </g>
         <g id="route-lines"></g>
-        <g id="route-stops"></g>
         </g>
       </svg>
-      <svg id="place-labels" aria-hidden="true"></svg>
+      <svg id="place-labels" role="group" aria-label="Route stops"><g id="background-labels" aria-hidden="true"></g><g id="route-stops"></g></svg>
     </div>
     <div class="atlas-frame" aria-hidden="true"></div>
     <div class="zoom-controls" aria-label="Map controls">
@@ -122,7 +121,7 @@
           <div class="album-title"><h2 id="photos-heading">Photos</h2><p class="album-subtitle"><span id="photo-trip-name"></span><span id="gallery-count"></span></p></div>
           <div id="album-modes" class="album-modes" role="group" aria-label="Show photos as"><button id="album-view" type="button" aria-pressed="true">Album</button><button id="sheet-view" type="button" aria-pressed="false">All photos</button></div>
           <button id="choose-photos" class="small-button primary-button" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span>Add photos</span></button>
-          <button id="album-fullscreen" class="close-panel" type="button" aria-label="Fill window with album" title="Fill window · Top edge for toolbar · Right edge for city tabs" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="expand-icon" d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/><path class="restore-icon" d="M8 3v5H3m14 0h-5V3m0 14v-5h5M3 12h5v5"/></svg></button>
+          <button id="album-fullscreen" class="close-panel" type="button" aria-label="Fill window with album" aria-keyshortcuts="F" title="Fill window (F) · Top edge for toolbar · Right edge for city tabs" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="expand-icon" d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/><path class="restore-icon" d="M8 3v5H3m14 0h-5V3m0 14v-5h5M3 12h5v5"/></svg></button>
           <button class="close-panel" data-close="photo-panel" aria-label="Close photos" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
           <input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif" multiple hidden>
         </div>
@@ -195,7 +194,7 @@
         <dt>One city at a time</dt><dd>Click a city to look at it within the whole trip. The arrows beside Trace route, or your arrow keys, then travel from that city to the next or previous one; press again during travel to arrive at once. Backspace (Delete on a Mac), Home, or the globe glides back to the overview.</dd>
         <dt>Just the map</dt><dd>Press H to hide the controls. H, Escape, or a double-click on the map brings them back.</dd>
         <dt>The logbook</dt><dd>S saves the trip. L opens a lined logbook on the left: name the trip, drag stops to reorder them, or remove them. Switch trip at the top opens your other trips and their rename, export, and delete controls. Backed-up trips lists trips exported or imported since backup tracking began. Trips, photos, and postcards stay in this browser with no account; use Back up all regularly and Import backup to restore or move devices. Clearing website data or private browsing can erase them, and backups contain your photos and notes, so keep them private.</dd>
-        <dt>The album</dt><dd>A opens the album to your last page. Click outside or press Escape to close the book. Turn pages with the arrows, ← →, the page corners, a swipe, or the slider; Home and End close it on either cover. The contents page and the tabs on its edge jump to a city, and the pin beside a city’s name finds it on the map. All photos shows every photo at once; press Select, then click photos (Shift-click selects a run) to move or delete them. Add photos, or drag them anywhere onto the page; photos with location data find their city. City locations: <a href="https://www.geonames.org/" target="_blank" rel="noreferrer">GeoNames</a>.</dd>
+        <dt>The album</dt><dd>A opens the album to your last page. Press F to fill the window or return to the regular view. Click outside or press Escape to close the book. Turn pages with the arrows, ← →, the page corners, a swipe, or the slider; Home and End close it on either cover. The contents page and the tabs on its edge jump to a city, and the pin beside a city’s name finds it on the map. All photos shows every photo at once; press Select, then click photos (Shift-click selects a run) to move or delete them. Add photos, or drag them anywhere onto the page; photos with location data find their city. City locations: <a href="https://www.geonames.org/" target="_blank" rel="noreferrer">GeoNames</a>.</dd>
         <dt>Photos and postcards</dt><dd>Click a print to open it; browse its city with ← →, a swipe, or the arrows at the photo’s edges. Use Caption on the photo’s front to write the caption shown in the album. Captions save separately from postcard messages and are included in backups. Use the bin to delete a photo; All photos → Select also lets you move photos. Choose Postcard, press F, or click the photo to turn it over and write on the back; it saves automatically, and Save commits your changes immediately. Click outside or press Escape to close. Print or Ctrl + P (⌘ + P on Mac) prints both sides, and Share sends an image of both sides.</dd>
         <dt>The map</dt><dd>Scroll or use + / − to zoom. Drag to pan when zoomed in. Country, city, and regional detail appears as you zoom.</dd>
       </dl>

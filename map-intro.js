@@ -36,7 +36,11 @@
     svg.setAttribute('viewBox',`${x} ${y} 720 360`);svg.setAttribute('preserveAspectRatio','none');
     // Reference, rather than clone, the actual map: colours, labels and saved
     // routes remain identical when the temporary panels are removed.
-    use.setAttribute('href','#map-artwork');svg.append(use);face.append(svg);
+    use.setAttribute('href','#map-artwork');
+    const pins=document.createElementNS(svg.namespaceURI,'use');
+    pins.setAttribute('href','#route-stops');
+    pins.setAttribute('transform',`scale(${1440/bounds.width} ${720/bounds.height})`);
+    svg.append(use,pins);face.append(svg);
     element('unfold-back',panel);const shade=element('unfold-shade',face);
     return {panel,shade};
   }

@@ -118,7 +118,7 @@
     stopAnimation();traceZoom=null;progress=null;activeLeg=null;activeStopId=null;focused=null;$('route-lines').replaceChildren();$('route-stops').replaceChildren();$('stop-list').replaceChildren();lines=[];
     stops.forEach((place,index)=>{
       if(index) {const path=svg('path',{class:'route-path'});$('route-lines').append(path);lines.push(path);}
-      const [x,y]=project(place),group=svg('g',{'data-index':index,transform:`translate(${x} ${y})`}),dot=svg('circle',{cx:0,cy:0,r:4.5,class:'stop-dot'});
+      const [x,y]=project(place),group=svg('g',{'data-index':index,visibility:'hidden'}),dot=svg('circle',{cx:0,cy:0,r:4.5,class:'stop-dot'});
       const label=svg('text',{x:10,y:-12,class:'stop-label label-hidden'});
       label.textContent=place.name.toUpperCase();
       const leader=svg('path',{class:'stop-leader','aria-hidden':'true'});group.append(leader,dot,label);group._leader=leader;group._point=[x,y];group._label=label;$('route-stops').append(group);
@@ -353,8 +353,7 @@
   }
   // Place names avoid the route's dots, its chosen label boxes, and the dock.
   function renderLabels(matrix,bounds,occupied,routes) {
-    const layer=$('place-labels'),width=bounds.width,height=bounds.height;
-    changed(layer,'viewBox',`0 0 ${width} ${height}`);
+    const layer=$('background-labels'),width=bounds.width,height=bounds.height;
     const visible=new Set();
     const screen=(x,y)=>[x*matrix.a+matrix.e-bounds.left,y*matrix.d+matrix.f-bounds.top];
     function placeLabel(key,name,x,y,isCity) {
@@ -450,11 +449,14 @@
     const items=[],texts=[],occupied=[];
     [...$('route-stops').children].forEach((group,index)=>{
       const [x,y]=group._point,text=group._label;
-      // Keep dots and labels at a fixed screen size while zooming.
-      changed(group,'transform',`translate(${x} ${y}) scale(${1/matrix.a} ${1/matrix.d})`);
+      // The overlay uses CSS pixels. Camera jumps move a pin without ever
+      // scaling its radius, including the first frame that reveals a stop.
+      const sx=x*matrix.a+matrix.e-bounds.left,sy=y*matrix.d+matrix.f-bounds.top;
+      changed(group,'transform',`translate(${sx} ${sy})`);
+      if(group.hasAttribute('visibility'))group.removeAttribute('visibility');
       // Unreached stops stay out of the layout while a trace reveals them.
       if(!stopShown(index))return;
-      const sx=x*matrix.a+matrix.e-bounds.left,sy=y*matrix.d+matrix.f-bounds.top,id=stops[index].id;
+      const id=stops[index].id;
       if(labelOwner(index)!==index){group._leader.removeAttribute('d');text.classList.add('label-hidden');occupied.push({x:sx-7,y:sy-7,w:14,h:14});return;}
       items.push({id,x:sx,y:sy,width:text._width??text.textContent.length*8.3,height:17,priority:id===activeStopId?-1:index});texts.push(text);
       occupied.push({x:sx-7,y:sy-7,w:14,h:14});
@@ -510,7 +512,7 @@
   }
   $('zoom-in').addEventListener('click',()=>zoom(.75));$('zoom-out').addEventListener('click',()=>zoom(4/3));
   $('reset-view').addEventListener('click',()=>showOverview());
-  map.addEventListener('wheel',event=>{event.preventDefault();if(!event.deltaY)return;const units=event.deltaMode===1?16:event.deltaMode===2?(viewportBounds||map.getBoundingClientRect()).height:1;const delta=Math.max(-160,Math.min(160,event.deltaY*units));zoom(Math.exp(delta*(event.ctrlKey?.008:.0018)),event.clientX,event.clientY);},{passive:false});
+  $('map-shell').addEventListener('wheel',event=>{event.preventDefault();if(!event.deltaY)return;const units=event.deltaMode===1?16:event.deltaMode===2?(viewportBounds||map.getBoundingClientRect()).height:1;const delta=Math.max(-160,Math.min(160,event.deltaY*units));zoom(Math.exp(delta*(event.ctrlKey?.008:.0018)),event.clientX,event.clientY);},{passive:false});
   let drag=null;
   map.addEventListener('pointerdown',event=>{if(event.button!==0||baseView.w/view.w<=1.001)return;stopAnimation();const m=mapMatrix(viewportBounds||map.getBoundingClientRect());drag={x:event.clientX,y:event.clientY,vx:view.x,vy:view.y,scaleX:m.a,scaleY:m.d,id:event.pointerId};map.setPointerCapture(event.pointerId);map.classList.add('dragging');});
   map.addEventListener('pointermove',event=>{if(!drag||event.pointerId!==drag.id||baseView.w/view.w<=1.001)return;view.x=drag.vx-(event.clientX-drag.x)/drag.scaleX;view.y=drag.vy-(event.clientY-drag.y)/drag.scaleY;scheduleView();});

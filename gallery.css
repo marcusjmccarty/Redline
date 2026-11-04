@@ -1,5 +1,6 @@
 /* The photo album, All photos, import review, and the photo viewer with its postcard. */
-:root { --hand: "Bradley Hand", "Segoe Print", "Ink Free", "Noteworthy", "Chalkboard SE", cursive; --page: var(--paper); --page-ink: var(--ink); --gold: #c4ad7e; --leather: radial-gradient(130% 100% at 30% 15%, #594b3a, #3d3229 58%, #2a231e); }
+@font-face { font-family: "Redline Album Script"; src: url("fonts/album-script.woff") format("woff"); font-display: swap; }
+:root { --hand: "Redline Album Script", "Snell Roundhand", "Segoe Script", cursive; --page: var(--paper); --page-ink: var(--ink); --gold: #c4ad7e; --leather: radial-gradient(130% 100% at 30% 15%, #594b3a, #3d3229 58%, #2a231e); }
 .close-panel { display: grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); transition: background-color .2s, color .2s, transform .2s var(--ease-out); }
 .close-panel svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
 .close-panel:hover { background: #b7a68826; color: var(--red); }
@@ -319,7 +320,7 @@
 .gallery-map-button { border-radius: 50%; }
 .gallery-map-button:hover { background: #b7a68826; }
 /* Small photographic prints with room for the paper between them. */
-:is(#photo-gallery, .album-copy-photo-gallery) .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 26px; padding: 18px 28px 32px; user-select: none; -webkit-user-select: none; }
+:is(#photo-gallery, .album-copy-photo-gallery) .photo-grid { display: grid; padding-block: 18px 32px; user-select: none; -webkit-user-select: none; }
 :is(#photo-gallery, .album-copy-photo-gallery) .photo-tile { position: relative; min-width: 0; }
 :is(#photo-gallery, .album-copy-photo-gallery) .photo-image { position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; border: 7px solid var(--mat); border-bottom-width: 16px; border-radius: 1px; overflow: hidden; background: var(--paper-low); box-shadow: 0 1px 2px #43372a33, 0 7px 13px -7px #43372a66; cursor: pointer; }
 :is(#photo-gallery, .album-copy-photo-gallery) .photo-image img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .35s ease, filter .2s ease; }
@@ -353,8 +354,13 @@
 .photo-select-all { display: flex; align-items: center; gap: 8px; min-height: 34px; color: var(--ink); font: 12px Arial, sans-serif; white-space: nowrap; cursor: pointer; }
 .photo-select-all input { width: 16px; height: 16px; margin: 0; accent-color: var(--red); cursor: pointer; }
 :is(#bulk-photo-city, .album-copy-bulk-photo-city) { max-width: 62%; }
-:is(#photo-review, .album-copy-photo-review) { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 22px 16px; padding: 20px 22px 0; }
-.review-photo { position: relative; min-width: 0; }
+:is(#photo-review, .album-copy-photo-review) { display: grid; padding-block: 20px 0; }
+.review-photo { position: relative; container-type: inline-size; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; min-width: 0; }
+.review-photo > :is(.photo-image, .photo-tile-tools) { grid-column: 1 / -1; }
+@container (max-width: 99px) {
+  .review-photo > :is(.photo-pick, .remove-photo) { position: relative; inset: auto; width: 100%; height: 38px; }
+  .review-photo > .remove-photo svg { opacity: .8; }
+}
 .review-photo .photo-image { position: relative; display: block; width: 100%; aspect-ratio: 4 / 3; padding: 0; border: 4px solid var(--mat); border-radius: 1px; overflow: hidden; background: var(--paper-low); box-shadow: 0 1px 2px #43372a40, 0 8px 14px -8px #43372a66; cursor: zoom-in; }
 .review-photo .photo-image img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .4s ease; }
 .review-photo .photo-image.loaded img { opacity: 1; }
@@ -373,8 +379,8 @@
 .remove-photo:focus-visible { outline: none; }
 .remove-photo:focus-visible svg { outline: 2px solid var(--red); outline-offset: 2px; }
 @media (hover: none), (any-pointer: coarse) { .remove-photo svg { opacity: .85; } }
-.photo-tile-tools { display: flex; align-items: center; gap: 6px; padding-top: 9px; }
-.photo-tile-tools select { flex: 1; width: 100%; }
+.photo-tile-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 9px; }
+.photo-tile-tools select { flex: 1 1 60px; width: 100%; min-width: 0; }
 .review-photo.needs-city select { color: var(--red); border-color: #a3342b80; background-color: #fbefe8; }
 .gps-badge { flex: none; display: inline-flex; align-items: center; gap: 2px; height: 22px; padding: 0 6px 0 3px; border-radius: 11px; background: #e6dcc6; color: var(--ink); font: 10px Arial, sans-serif; cursor: help; }
 .gps-badge svg { width: 13px; height: 13px; fill: none; stroke: var(--red); stroke-width: 1.4; }
@@ -482,8 +488,7 @@
   .album-foot { gap: 10px; padding-inline: 12px; }
   .gallery-toolbar, .gallery-actions, .photo-bulk { gap: 8px; padding-inline: 14px; }
   .gallery-city-heading { padding-inline: 14px; }
-  :is(#photo-gallery, .album-copy-photo-gallery) .photo-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 20px; padding: 14px 20px 28px; }
-  :is(#photo-review, .album-copy-photo-review) { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 10px; padding-inline: 14px; }
+  :is(#photo-gallery, .album-copy-photo-gallery) .photo-grid { padding-block: 14px 28px; }
   .photo-import-actions { gap: 10px; padding-inline: 14px; }
   .album select, :is(#move-photos, .album-copy-move-photos), :is(#bulk-photo-city, .album-copy-bulk-photo-city) { min-height: 40px; font-size: 16px; }
   :is(#move-photos, .album-copy-move-photos) { max-width: 112px; }
@@ -509,13 +514,13 @@
 /* Window reading view uses the entire spread. Only the far edge opens the index. */
 .album.expanded { inset: 0; width: 100%; height: 100dvh; }
 .album.expanded #album-display { position: relative; grid-template-rows: minmax(0, 1fr); overflow: hidden; background: #29221c; }
-.album.expanded :is(.album-foot, #photo-message, .gallery-toolbar, .gallery-actions, .gallery-map-button, .photo-empty button, .photo-empty-hint, .photo-bulk, .review-pager, .photo-import-actions, .photo-tile-tools, .photo-pick, .remove-photo, .postcard-badge) { display: none; }
+.album.expanded :is(.album-foot, #photo-message:not(.error), .gallery-toolbar, .gallery-actions, .gallery-map-button, .photo-empty button, .photo-empty-hint, .postcard-badge) { display: none; }
+.album.expanded #photo-message.error { position: absolute; inset: auto 16px 16px; z-index: 5; background: var(--paper); }
 .album.expanded .album-stage { padding: clamp(4px, .65vmin, 8px); gap: 0; }
 .album.expanded .album-book { --pad: clamp(10px, 1.75vmin, 18px); flex: none; width: 100%; max-width: none; height: 100%; aspect-ratio: auto; }
 .album.expanded .album-page[data-type=city] { padding: clamp(12px, 3vh, 34px) clamp(12px, 2vw, 40px) clamp(22px, 4vh, 46px); }
 .album.expanded .prints { gap: 3% 4%; }
 .album.expanded .page-corner { opacity: 0; }
-.album.expanded .review-photo .photo-image.loaded img { opacity: 1; filter: none; }
 .album.expanded .album-sheet {
   box-shadow: 0 1px 0 #b9a887, 0 3px 0 #e2d5b9, 0 4px 0 #ad9d82, -3px 0 #d5c8af, 3px 0 #c4b598, -5px 0 #efe4ca, 5px 0 #e6d9be;
 }
@@ -527,25 +532,21 @@
   visibility: hidden; transform: translateY(-105%); transition: transform .2s var(--ease-out), visibility 0s .2s;
 }
 #album-top-edge[aria-expanded=true] + .album-top { visibility: visible; transform: none; transition-delay: 0s; }
-.album.expanded .photo-scroll:has(.contact-spread) { padding: 0; overflow: hidden; }
-.contact-spread { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); height: 100%; }
-.contact-leaf { display: flex; flex-direction: column; min-height: 0; padding: clamp(10px, 3vmin, 36px) clamp(13px, 2.6vw, 48px); }
-.contact-leaf h3 { margin: 0 0 clamp(5px, 1.4vmin, 16px); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink); font: clamp(19px, 3.6vmin, 38px)/1.2 var(--hand); }
-.contact-prints { flex: 1; min-height: 0; display: grid; grid-template: repeat(2, minmax(0, 1fr)) / repeat(6, minmax(0, 1fr)); align-items: center; gap: clamp(6px, 1.8vmin, 22px); }
-.contact-prints > button { grid-column: span 2; }
-.contact-prints > button:nth-child(-n+2) { grid-column: span 3; }
-:is(#photo-gallery, .album-copy-photo-gallery) .contact-prints .photo-image { aspect-ratio: 1; max-height: 100%; min-height: 0; border-width: clamp(3px, .65vmin, 8px); border-bottom-width: clamp(7px, 1.25vmin, 14px); }
-.contact-turn { position: absolute; bottom: 0; z-index: 3; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--muted); font: 30px Georgia, serif; opacity: 0; }
-.contact-turn.previous { left: 0; }
-.contact-turn.next { right: 0; }
-.contact-turn:is(:hover,:focus-visible) { opacity: 1; }
+/* Five prints across each paper leaf, with the fold in the gap between
+   tracks five and six. Symmetric scrollbar space keeps the fold centered. */
+.album { --sheet-columns: 10; --print-gap: clamp(6px, 1.3vmin, 18px); }
+.album-sheet .photo-scroll { scrollbar-gutter: stable both-edges; }
+:is(#photo-gallery, .album-copy-photo-gallery) .photo-grid,
+:is(#photo-review, .album-copy-photo-review) {
+  grid-template-columns: repeat(var(--sheet-columns), minmax(0, 1fr));
+  gap: var(--print-gap); padding-inline: clamp(8px, 1.6vmin, 24px);
+}
+:is(#photo-gallery, .album-copy-photo-gallery) .photo-grid .photo-image { border-width: clamp(2px, .4vmin, 6px); border-bottom-width: clamp(4px, .8vmin, 10px); }
+.album-book:is([data-mode=review], [data-mode=sheet]) .album-sheet::after, .album-view-layer .album-sheet::after { width: var(--print-gap); }
 @media (pointer: coarse) { #album-top-edge { height: max(24px, env(safe-area-inset-top)); } }
 @media (max-width: 599px), (max-width: 899px) and (orientation: portrait) {
-  .contact-spread { grid-template-columns: minmax(0, 1fr); }
-  .album.expanded .album-book[data-mode=sheet] .album-sheet::after { left: 0; }
-  .contact-prints { grid-template: repeat(3, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr)); }
-  .contact-prints > button:nth-child(n) { grid-column: span 1; }
-  .contact-prints > button:first-child { grid-column: span 2; width: auto; max-width: 100%; justify-self: center; }
+  .album { --sheet-columns: 5; }
+  .album-book:is([data-mode=review], [data-mode=sheet]) .album-sheet::after, .album-view-layer.single .album-sheet::after { left: 0; }
 }
 #album-index { position: absolute; z-index: 5; inset: 0 0 0 auto; width: min(235px, 78vw); pointer-events: none; }
 #album-edge { position: absolute; z-index: 1; inset: 0 0 0 auto; width: 6px; padding: 0; border: 0; background: transparent; pointer-events: auto; }
