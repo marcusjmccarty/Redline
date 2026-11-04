@@ -87,7 +87,7 @@ test('relief is local, bounded to the visible terrain, and released at overview'
       const view={x,y,w:1440/zoom,h:720/zoom};
       paint(view,zoom);let pixels=0;
       for(const tile of layer.children){
-        const href=tile.getAttribute('href'),match=/^relief\/(4|16)-(\d+)-(\d+)\.webp$/.exec(href);assert.ok(match);
+        const href=tile.getAttribute('href').split('?')[0],match=/^relief\/(4|16)-(\d+)-(\d+)\.webp$/.exec(href);assert.ok(match);
         const size=1440/Number(match[1]),left=Number(match[2])*size,top=Number(match[3])*size;
         assert.ok(left<view.x+view.w&&left+size>view.x&&top<view.y+view.h&&top+size>view.y);
         pixels+=match[1]==='4'?384**2:1024**2;

@@ -270,11 +270,11 @@ test('a single large import reviews in pages and saves every page into an existi
   choose(Array.from({length:320},(_,i)=>`vacation-${i+1}.jpg`));
   await wait(()=>$('photo-selection-count').textContent==='320 selected'&&!$('choose-photos').disabled);
   const review=$('photo-review');
-  assert.equal(review.children.length,48);
-  assert.equal($('review-range').textContent,'1–48 of 320');
+  assert.equal(review.children.length,50);
+  assert.equal($('review-range').textContent,'1–50 of 320');
   change('bulk-photo-city',paris.id);
   $('review-next').click();
-  assert.equal($('review-range').textContent,'49–96 of 320');
+  assert.equal($('review-range').textContent,'51–100 of 320');
   const select=review.querySelector('select');
   assert.equal(select.value,paris.id);
   select.value=madrid.id;select.dispatchEvent(new w.Event('change'));
@@ -1426,26 +1426,26 @@ test('import review turns between distinct pages without losing location assignm
   const layer=$('album-book').querySelector('.album-view-layer'),second=$('photo-review').firstElementChild.dataset.pendingId;
   assert.notEqual(first,second);assert.ok(layer.querySelector(`.album-view-front [data-pending-id="${first}"]`));
   assert.ok(layer.querySelector(`.album-view-back [data-pending-id="${second}"]`));
-  assert.equal($('review-range').textContent,'49–55 of 55');await motion.finish();
-  press('ArrowLeft');await wait(()=>motion.running.size===4);await motion.finish();assert.equal($('review-range').textContent,'1–48 of 55');
+  assert.equal($('review-range').textContent,'51–55 of 55');await motion.finish();
+  press('ArrowLeft');await wait(()=>motion.running.size===4);await motion.finish();assert.equal($('review-range').textContent,'1–50 of 55');
   assert.equal($('photo-review').querySelector('select').value,paris.id);assert.equal($('album-book').inert,false);
 });
 
 test('review arrows queue during a turn, work on checkboxes, and leave city pickers alone',async t=>{
   const {w,$,choose,press}=await setup(t);
-  choose(Array.from({length:100},(_,i)=>`review-${i}.jpg`));
-  await wait(()=>$('photo-selection-count').textContent==='100 selected'&&!$('choose-photos').disabled);
+  choose(Array.from({length:104},(_,i)=>`review-${i}.jpg`));
+  await wait(()=>$('photo-selection-count').textContent==='104 selected'&&!$('choose-photos').disabled);
   const motion=controlledMotion(w),review=$('photo-review');
   assert.equal(press('ArrowRight',review.querySelector('select')),true);
   press('ArrowRight',review.querySelector('input'));
   await wait(()=>motion.running.size===4);
-  assert.equal($('review-range').textContent,'49–96 of 100');
+  assert.equal($('review-range').textContent,'51–100 of 104');
   const copies=$('album-book').querySelectorAll('.album-view-layer select');
   assert.ok(copies.length>0&&[...copies].every(select=>select.options.length<=1));
   press('ArrowRight');await motion.finish();await wait(()=>motion.running.size===4);
-  assert.equal($('review-range').textContent,'97–100 of 100');
+  assert.equal($('review-range').textContent,'101–104 of 104');
   press('ArrowLeft');await motion.finish();await wait(()=>motion.running.size===4);
-  await motion.finish();assert.equal($('review-range').textContent,'49–96 of 100');
+  await motion.finish();assert.equal($('review-range').textContent,'51–100 of 104');
   assert.equal($('album-book').inert,false);
 });
 
@@ -1486,24 +1486,36 @@ test('a first-open photo stays visible when the browser has not finished decodin
   assert.ok($('full-photo').src.startsWith('blob:'));
 });
 
-test('window contact sheets fit five prints per leaf, turn in order and reveal the toolbar',async t=>{
-  const {w,$,press,tab}=await setup(t,{seedStops:Array(12).fill(paris).concat(madrid)});
-  $('sheet-view').click();$('album-fullscreen').click();
-  const edge=$('album-top-edge'),toolbar=$('album-toolbar'),root=$('photo-gallery');
-  assert.equal(toolbar.inert,true);
-  edge.dispatchEvent(new w.Event('pointerenter'));assert.equal(toolbar.inert,false);
-  toolbar.dispatchEvent(new w.Event('pointerleave'));assert.equal(toolbar.inert,true);
-  edge.click();assert.equal(w.document.activeElement,$('album-view'));
-  const counts=()=>[...root.querySelectorAll('.contact-leaf')].map(leaf=>leaf.querySelectorAll('.photo-image').length);
-  assert.deepEqual(counts(),[5,5]);
-  press('ArrowRight');assert.deepEqual(counts(),[3,0]);
-  assert.match(root.querySelector('.photo-image').getAttribute('aria-label'),/photo 11 in Paris/);
-  press('ArrowLeft');assert.deepEqual(counts(),[5,5]);
-  $('album-edge').click();tab(madrid.id).click();assert.deepEqual(counts(),[3,0]);
-  root.querySelector('.photo-image').click();assert.equal($('photo-viewer').open,true);
-  $('photo-viewer').dispatchEvent(new w.Event('cancel',{cancelable:true}));await wait(()=>!$('photo-viewer').open);
-  w.innerWidth=400;w.innerHeight=800;w.dispatchEvent(new w.Event('resize'));await wait(()=>counts().length===1);
-  assert.deepEqual(counts(),[3]);
-  edge.click();$('album-fullscreen').click();
-  assert.equal(toolbar.inert,false);assert.ok(edge.hidden);assert.equal(root.querySelectorAll('.photo-image').length,13);
+test('F toggles the full scrolling gallery while leaving photo and editing shortcuts in context',async t=>{
+  const {w,$,press,tab}=await setup(t,{seedStops:Array(23).fill(paris).concat(madrid)});
+  $('sheet-view').click();
+  const root=$('photo-gallery'),scroll=$('photo-scroll'),first=root.querySelector('.photo-image'),edge=$('album-top-edge');
+  scroll.scrollTop=120;press('f');assert.ok($('photo-panel').classList.contains('expanded'));
+  assert.equal(scroll.scrollTop,120);assert.equal(root.querySelectorAll('.photo-image').length,24);
+  assert.equal(root.querySelector('.photo-image'),first,'Entering window view retains loaded thumbnails');
+  press('F',w.document,{repeat:true});assert.ok($('photo-panel').classList.contains('expanded'));
+  let travel;scroll.scrollBy=options=>{travel=options.top;};Object.defineProperty(scroll,'clientHeight',{value:300});
+  press('ArrowRight');assert.equal(travel,270);press('ArrowLeft');assert.equal(travel,-270);
+  edge.dispatchEvent(new w.Event('pointerenter'));assert.equal($('album-toolbar').inert,false);
+  $('album-edge').click();tab(madrid.id).click();assert.equal(root.querySelectorAll('.gallery-city').length,2);
+  first.click();press('f');assert.ok($('photo-panel').classList.contains('expanded'));
+  assert.ok($('photo-viewer').classList.contains('flipped'),'F on a photo still turns its postcard');
+  await w.RedlinePostcards.close();press('f',$('trip-name'));assert.ok($('photo-panel').classList.contains('expanded'));
+  press('F');assert.ok(!$('photo-panel').classList.contains('expanded'));assert.equal(root.querySelectorAll('.photo-image').length,24);
+});
+
+test('rapid next-city taps keep the 9px city markers outside the zooming world view',async t=>{
+  const route=[paris,{...paris,id:'near-paris',name:'Saint-Denis',latitude:48.9362,longitude:2.3574},madrid];
+  const {w,$,press}=await setup(t,{realMap:true,route,seed:false});
+  press('Escape');await tick();
+  for(let i=0;i<12;i++){
+    $('next-city').click();
+    const layer=$('route-stops');assert.equal(layer.ownerSVGElement,$('place-labels'));
+    assert.equal(layer.ownerSVGElement.hasAttribute('viewBox'),false,'The overlay uses CSS pixel coordinates');
+    for(const pin of layer.children){
+      assert.equal(pin.querySelector('circle').getAttribute('r'),'4.5');
+      if(!pin.hasAttribute('visibility'))assert.match(pin.getAttribute('transform'),/^translate\([-.\d e+]+\)$/);
+    }
+  }
+  assert.equal(w.document.querySelectorAll('#route-stops [role=button]').length,3);
 });

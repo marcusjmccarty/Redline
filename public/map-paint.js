@@ -34,16 +34,17 @@
   // Tiles share the atlas projection. Only intersecting land tiles have an
   // SVG image (and a decoded bitmap); the overview requests no relief.
   function relief(layer,coverage){
-    const levels=[4,16].map((cols,i)=>({cols,rows:coverage?.[i]||[],tiles:new Map(),key:''}));
+    const levels=[4,16].map((cols,i)=>({cols,rows:coverage?.[i]||[],tiles:new Map(),opacity:0,key:''}));
     return function paint(view,zoom){
       for(const level of levels){
         const {cols,rows,tiles}=level,span=1440/cols;
-        const strength=cols===4?Math.min(.74,(zoom-2.2)*.36,Math.max(.12,(13-zoom)*.2)):Math.min(.88,(zoom-10)*.3);
+        const strength=cols===4?Math.min(.86,(zoom-2.2)*.4,Math.max(.48,(16-zoom)*.12)):Math.min(.88,(zoom-10)*.3);
         const opacity=Math.max(0,Math.round(strength*40)/40);
         const x0=Math.max(0,Math.floor(view.x/span)),x1=Math.min(cols-1,Math.ceil((view.x+view.w)/span)-1);
         const y0=Math.max(0,Math.floor(view.y/span)),y1=Math.min(rows.length-1,Math.ceil((view.y+view.h)/span)-1);
         const key=opacity?[x0,x1,y0,y1,opacity].join('/'):'';
         if(key===level.key)continue;level.key=key;
+        const fade=opacity!==level.opacity;level.opacity=opacity;
         for(const [id,node] of tiles){
           const x=id%cols,y=Math.floor(id/cols);
           if(!opacity||x<x0||x>x1||y<y0||y>y1){node.remove();tiles.delete(id);}
@@ -52,9 +53,10 @@
         for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
           if(!(rows[y]&(1<<x)))continue;
           const id=y*cols+x;let tile=tiles.get(id);
+          if(tile&&!fade)continue;
           if(!tile){
             tile=document.createElementNS('http://www.w3.org/2000/svg','image');
-            for(const [name,value] of Object.entries({x:x*span,y:y*span,width:span,height:span,preserveAspectRatio:'none',href:`relief/${cols}-${x}-${y}.webp`}))tile.setAttribute(name,value);
+            for(const [name,value] of Object.entries({x:x*span,y:y*span,width:span,height:span,preserveAspectRatio:'none',href:`relief/${cols}-${x}-${y}.webp${cols===4?'?v=2':''}`}))tile.setAttribute(name,value);
             layer.append(tile);tiles.set(id,tile);
           }
           tile.style.opacity=String(opacity);

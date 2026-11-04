@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 Image.MAX_IMAGE_PIXELS = 240_000_000
 out = Path(__file__).resolve().parents[1] / "public" / "relief"
@@ -29,9 +29,29 @@ def pigments(shade):
     # avoids a lossless alpha plane for millions of relief samples.
     return Image.fromarray(np.rint(255 + (rgb - 255) * (alpha[..., None] / 255)).astype('uint8'))
 
+def landscape_wash(source):
+    """Paint broad slope shadows in pine and light-facing slopes in honey."""
+    # Downsample sunlight and shade separately so opposing faces of a ridge
+    # survive at regional scale. Filter across tile edges before slicing.
+    size = (1536, 768)
+    plate = source.resize((3072, 1536), Image.Resampling.LANCZOS)
+    plate.paste(206, (0, 1280, plate.width, plate.height))
+    def exposure(sign):
+        mask = plate.point(lambda value: min(255, max(0, (206 - value) * sign * 4)))
+        mask = mask.resize(size, Image.Resampling.LANCZOS)
+        soft = mask.filter(ImageFilter.GaussianBlur(1.6))
+        return np.asarray(Image.blend(mask, soft, .40), dtype=np.float32) / 255
+
+    shadow, light = exposure(1), exposure(-1)
+    paper = np.full((*shadow.shape, 3), 255, dtype=np.float32)
+    for amount, pigment in [(light * .52, [255, 213, 138]), (shadow * .90, [61, 91, 73])]:
+        paper += (np.array(pigment) - paper) * amount[..., None]
+    return Image.fromarray(np.rint(paper).astype('uint8'))
+
 with Image.open(sys.argv[1]) as source:
     if source.size != (21600, 10800) or source.mode != 'L':
         raise ValueError('Expected the 1 arc-minute SR_HR grayscale world plate')
+    wash = landscape_wash(source)
     levels = []
     for cols, size in [(4, 384), (16, 1024)]:
         rows = cols // 2
@@ -46,7 +66,10 @@ with Image.open(sys.argv[1]) as source:
                 cutoff = max(0, min(region.height, 9000 - box[1]))
                 if cutoff < region.height:
                     region.paste(206, (0, cutoff, region.width, region.height))
-                relief = pigments(region.resize((size, size), Image.Resampling.LANCZOS))
+                if cols == 4:
+                    relief = wash.crop((x * size, y * size, (x + 1) * size, (y + 1) * size))
+                else:
+                    relief = pigments(region.resize((size, size), Image.Resampling.LANCZOS))
                 if relief.getchannel('G').getextrema()[0] > 252:
                     continue
                 relief.save(out / f'{cols}-{x}-{y}.webp', quality=68, method=5)

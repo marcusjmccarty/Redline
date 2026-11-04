@@ -3,8 +3,8 @@
   const $=id=>document.getElementById(id),app=window.RedlineApp,SVG='http://www.w3.org/2000/svg';
   let current=null,photos=[],pending=[],busy=false,dirty=false,suppress=false,resumePhotos=false,cityIndex=null,exifReady=null,photoPanelRequest=0,photosRequested=false;
   let activeCity='',galleryItems=[],importing=false,photoMode='',dragDepth=0,selecting=false,thumbQueue=Promise.resolve();
-  const reviewPageSize=48;
-  let reviewPage=0,reviewTurn=null,contactOffset=0;
+  const reviewPageSize=50;
+  let reviewPage=0,reviewTurn=null;
   let sheetKey='',tabsKey='',sheetWarmTimer=0;
   let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0,anchor=null,drawn=null,reopen=null,albumMotion=null,viewMotion=null;
   const chosen=new Set(),thumbJobs=new Set(),lastPages=new Map(),lastScrolls=new Map();
@@ -109,13 +109,11 @@
     index.hidden=topEdge.hidden=!expanded;
     showToolbar(false);
     fullscreenButton.setAttribute('aria-label',expanded?'Exit window view':'Fill window with album');
-    fullscreenButton.title=expanded?'Exit window view (Esc)':'Fill window · Top edge for toolbar · Right edge for city tabs';
+    fullscreenButton.title=expanded?'Exit window view (F or Esc)':'Fill window (F) · Top edge for toolbar · Right edge for city tabs';
     (expanded?drawer:$('album-book')).append(nav);
     showIndex(false);
-    if(expanded)contactOffset=Math.max(0,galleryItems.findIndex(photo=>photo.stopId===activeCity));
-    if(mode()!=='review')renderGallery();
+    if(mode()==='album')renderGallery();
     if(expanded&&mode()==='album')preload(albumPage+step());
-    if(!expanded&&mode()==='sheet'&&activeCity)goToCity(activeCity,{instant:true});
     if(expanded||restoreFocus)(expanded?albumPanel:fullscreenButton).focus({preventScroll:true});
   }
   fullscreenButton.addEventListener('click',()=>windowView(!reading()));
@@ -432,10 +430,20 @@
       if($('photo-panel').open){event.preventDefault();if(albumPanel.classList.contains('expanded')){windowView(false);return;}if(selecting){setSelecting(false);$('select-photos').focus({preventScroll:true});return;}closePanel('photo-panel',{focus:true});return;}
     }
     if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input:not([type=checkbox]):not(#album-scrub),textarea,select,[contenteditable="true"]'))return;
+    if($('photo-panel').open&&!viewer&&!info&&event.key.toLowerCase()==='f'){
+      event.preventDefault();
+      if(!event.repeat&&!fullscreenButton.disabled)windowView(!reading());
+      return;
+    }
     // Keep keyboard turns from racing a cover that is opening or closing.
     if(!viewer&&(albumMotion||viewMotion)&&['ArrowRight','ArrowLeft','PageDown','PageUp','Home','End'].includes(event.key)){event.preventDefault();return;}
-    if($('photo-panel').open&&!viewer&&(mode()==='review'||reading()&&mode()==='sheet')&&['ArrowLeft','ArrowRight','PageUp','PageDown'].includes(event.key)){
-      event.preventDefault();if(!event.repeat)turnSheet(['ArrowLeft','PageUp'].includes(event.key)?-1:1);return;
+    if($('photo-panel').open&&!viewer&&mode()==='review'&&['ArrowLeft','ArrowRight','PageUp','PageDown'].includes(event.key)){
+      event.preventDefault();if(!event.repeat)turnReview(['ArrowLeft','PageUp'].includes(event.key)?-1:1);return;
+    }
+    if(reading()&&!viewer&&mode()==='sheet'&&['ArrowRight','ArrowLeft','PageUp','PageDown'].includes(event.key)){
+      event.preventDefault();
+      const scroll=$('photo-scroll'),direction=['ArrowLeft','PageUp'].includes(event.key)?-1:1;
+      scroll.scrollBy({top:direction*scroll.clientHeight*.9,behavior:reduced()?'instant':'smooth'});return;
     }
     // The album turns like a book from the keyboard.
     if($('photo-panel').open&&!viewer&&mode()==='album'){
@@ -509,7 +517,7 @@
   function setProgress(done,total){const bar=$('photo-progress');bar.hidden=!total;bar.style.setProperty('--progress',total?String(done/total):'0');bar.setAttribute('aria-valuenow',String(done));bar.setAttribute('aria-valuemax',String(total||1));}
   async function importPhotos(files){
     if(!files.length||busy||!current)return;
-    finishReviewTurn();windowView(false);
+    finishReviewTurn();
     setSelecting(false);busy=true;importing=true;photoPanelRequest++;photosRequested=false;update();let failed=0,lastError='';
     try{
       await loadExif().catch(()=>{});
@@ -677,26 +685,19 @@
     if(!reviewTurn)return;
     const turn=reviewTurn;reviewTurn=null;turn.scene?.dispose();renderPhotoMode();
   }
-  const contactCount=()=>twoPage()?10:5;
-  async function turnSheet(delta){
-    const review=mode()==='review',size=review?reviewPageSize:contactCount();
-    if(busy||albumMotion||viewMotion||!review&&(!reading()||mode()!=='sheet'))return;
-    const currentPage=()=>review?reviewPage:Math.floor(contactOffset/size);
-    const last=Math.ceil((review?pending.length:photos.length)/size)-1;
+  async function turnReview(delta){
+    const last=Math.ceil(pending.length/reviewPageSize)-1;
+    if(busy||albumMotion||mode()!=='review')return;
     if(reviewTurn){
       reviewTurn.target=Math.max(0,Math.min(last,reviewTurn.target+delta));return;
     }
-    const target=currentPage()+delta,book=$('album-book'),sheet=$('album-sheet');
+    const target=reviewPage+delta,book=$('album-book'),sheet=$('album-sheet');
     if(target<0||target>last)return;
     const turn={target,scene:null};reviewTurn=turn;
     try{
-      while(reviewTurn===turn&&currentPage()!==turn.target){
-        const direction=Math.sign(turn.target-currentPage());
-        const apply=()=>{
-          if(review){reviewPage+=direction;renderReview();}
-          else{contactOffset=(currentPage()+direction)*size;renderSheet(photoGroups());}
-          $('photo-scroll').scrollTop=0;return sheet;
-        };
+      while(reviewTurn===turn&&reviewPage!==turn.target){
+        const direction=Math.sign(turn.target-reviewPage);
+        const apply=()=>{reviewPage+=direction;renderReview();$('photo-scroll').scrollTop=0;return sheet;};
         if(!canAnimate(book)){apply();continue;}
         turn.scene=window.RedlineAlbumMotion.changeView({book,source:sheet,apply,direction:-direction,two:twoPage()});
         await turn.scene.play();
@@ -704,7 +705,7 @@
       }
     }finally{if(reviewTurn===turn)finishReviewTurn();}
   }
-  for(const [id,delta] of [['review-prev',-1],['review-next',1]])$(id).addEventListener('click',()=>turnSheet(delta));
+  for(const [id,delta] of [['review-prev',-1],['review-next',1]])$(id).addEventListener('click',()=>turnReview(delta));
   function updateBulkSelection(){
     const selected=pending.filter(p=>p.checked).length,all=$('select-all-photos');all.checked=selected>0&&selected===pending.length;all.indeterminate=selected>0&&selected<pending.length;all.disabled=busy;
     $('photo-selection-count').textContent=selected?`${selected} selected`:'Select all';$('bulk-photo-city').disabled=busy||!selected;
@@ -823,11 +824,6 @@
   function goToCity(id,{instant=false}={}){
     activeCity=id;markTab();
     if(view==='album'){const index=pages.findIndex(page=>page.type==='city'&&page.first&&page.group.id===id);if(index>=0)turnTo(index,{instant});return;}
-    if(reading()){
-      finishReviewTurn();
-      contactOffset=Math.max(0,galleryItems.findIndex(photo=>(photo.stopId||'unplaced')===id));
-      renderSheet(photoGroups());return;
-    }
     const section=[...$('photo-gallery').querySelectorAll('.gallery-city')].find(el=>el.dataset.stopId===id);
     if(!section)return;
     const scroll=$('photo-scroll'),top=scroll.scrollTop+section.getBoundingClientRect().top-scroll.getBoundingClientRect().top;
@@ -1070,52 +1066,9 @@
     suppressClick=Date.now()+400;turnTo(shownPage()+(dx<0?1:-1)*step());
   });
 
-  // Window view mounts a single spread. Keep original city order and let
-  // the viewer continue through that whole city when a print is opened.
-  function renderContactSpread(groups){
-    const root=$('photo-gallery'),size=contactCount();
-    contactOffset=Math.floor(Math.min(contactOffset,photos.length-1)/size)*size;
-    const visible=[];let start=0;
-    for(const group of groups){
-      const end=start+group.items.length;
-      for(let i=Math.max(0,contactOffset-start);i<Math.min(group.items.length,contactOffset+size-start);i++)
-        visible.push({photo:group.items[i],group,number:i+1});
-      start=end;if(start>=contactOffset+size)break;
-    }
-    const key=JSON.stringify(['spread',size,contactOffset,photos.length,visible.map(({photo,group})=>[photo.id,photo.thumbUrl,group.name])]);
-    if(key===sheetKey)return;
-    sheetKey=key;root.classList.add('contact-spread');root.replaceChildren();
-    for(let offset=0;offset<size;offset+=5){
-      const entries=visible.slice(offset,offset+5),leaf=document.createElement('section');
-      leaf.className='contact-leaf';
-      if(entries.length){
-        const heading=document.createElement('h3'),grid=document.createElement('div');
-        heading.textContent=[...new Set(entries.map(entry=>entry.group.name))].join(' · ');
-        grid.className='contact-prints';
-        for(const {photo,group,number} of entries){
-          const print=previewButton(photo,(_,origin)=>openPhoto(photo,group,origin),{saved:true});
-          print.setAttribute('aria-label',`Open photo ${number} in ${group.name}`);
-          grid.append(print);
-        }
-        leaf.append(heading,grid);
-      }
-      root.append(leaf);
-    }
-    for(const delta of [-1,1]){
-      if(contactOffset+delta*size<0||contactOffset+delta*size>=photos.length)continue;
-      const button=document.createElement('button');button.type='button';button.className='contact-turn '+(delta<0?'previous':'next');
-      button.setAttribute('aria-label',delta<0?'Previous photo spread':'Next photo spread');
-      button.textContent=delta<0?'‹':'›';button.addEventListener('click',()=>turnSheet(delta));root.append(button);
-    }
-    if(!visible.some(({group})=>group.id===activeCity))activeCity=visible[0].group.id;
-    markTab();
-  }
-
   // "All photos": a contact sheet, where photos are selected, moved, and deleted.
   function renderSheet(groups){
     const container=$('photo-gallery');
-    if(reading()&&photos.length){renderContactSpread(groups);return;}
-    container.classList.remove('contact-spread');
     const key=JSON.stringify([current?.id,busy,selecting,groups.map(group=>[group.id,group.name,group.country,group.stop,group.items.map(photo=>[photo.id,photo.thumbUrl||photo.url,photo.captionRevision,photo.postcardRevision,hasPostcard(photo)])])]);
     if(sheetKey===key)return;sheetKey=key;
     const fragment=document.createDocumentFragment();
