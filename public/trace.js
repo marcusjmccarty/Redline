@@ -59,25 +59,32 @@
       }
       return result;
     }
-    return {length,path,pathAt,pointAt,segmentsAt,points:points.map(p=>[p.x,p.y]),crossesSeam:commands.filter(c=>c[0]==='M').length>1};
+    const xs=points.map(p=>p.x),ys=points.map(p=>p.y);
+    const bounds=points.length?{left:Math.min(...xs),right:Math.max(...xs),top:Math.min(...ys),bottom:Math.max(...ys)}:{left:0,right:0,top:0,bottom:0};
+    return {length,path,pathAt,pointAt,segmentsAt,bounds,points:points.map(p=>[p.x,p.y]),crossesSeam:commands.filter(c=>c[0]==='M').length>1};
   }
 
   function pointFrame(point,space,world,zoom){
     const w=world.w/zoom,h=world.h/zoom;
     return {x:clamp(point[0]-(space.left+space.right)/2/space.width*w,0,world.w-w),y:clamp(point[1]-(space.top+space.bottom)/2/space.height*h,0,world.h-h),w,h};
   }
-  function camera(geometry,space,world,destination,zoom=null){
-    if(zoom){const follow=point=>pointFrame(point,space,world,zoom);return {follow,arrival:follow(destination)};}
-    const xs=geometry.points.map(p=>p[0]),ys=geometry.points.map(p=>p[1]);
-    const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...ys),bottom=Math.max(...ys);
-    const center=[(left+right)/2,(top+bottom)/2];
+  function fitLevel({left,right,top,bottom},space,world){
     const spanX=Math.max(1e-6,right-left),spanY=Math.max(1e-6,bottom-top);
-    // Keep the familiar long-haul framing. On a local leg, let the route
-    // occupy roughly a quarter of the map, with room around both cities.
     const localLevel=Math.min(world.w*.28/spanX,world.h*.24/spanY);
-    const level=Math.max(1,Math.min(autoZoomLimit,Math.max(2.35,localLevel),
-      (space.right-space.left)*world.w/(Math.max(1,right-left)*space.width*1.16),
-      (space.bottom-space.top)*world.h/(Math.max(1,bottom-top)*space.height*1.16)));
+    return Math.max(1,Math.min(autoZoomLimit,Math.max(2.35,localLevel),
+      (space.right-space.left)*world.w/(Math.max(1,spanX)*space.width*1.16),
+      (space.bottom-space.top)*world.h/(Math.max(1,spanY)*space.height*1.16)));
+  }
+  function camera(geometry,space,world,destination,zoom=null,before=null,after=null){
+    if(zoom){const follow=point=>pointFrame(point,space,world,zoom);return {follow,arrival:follow(destination)};}
+    const {left,right,top,bottom}=geometry.bounds,center=[(left+right)/2,(top+bottom)/2];
+    let level=fitLevel(geometry.bounds,space,world);
+    // Ease an isolated close-up between two wider legs. A run of nearby
+    // stops keeps its natural detail, regardless of playback direction.
+    if(before&&after){
+      const neighbor=Math.max(fitLevel(before.bounds,space,world),fitLevel(after.bounds,space,world));
+      if(level>neighbor*1.5)level=Math.max(level*.72,Math.sqrt(level*neighbor*1.5));
+    }
     const w=world.w/level,h=world.h/level,sx=space.width/w,sy=space.height/h;
     const axis=(min,max,first,last,scale,extent,size,focus)=>{
       const desired=focus-(first+last)/2/scale;
@@ -102,16 +109,25 @@
   }
 
   const zoomDuration=ratio=>1050*Math.abs(Math.log2(ratio));
-  function timeline({from,to,duration,widthRatio=1}){
+  function timeline({from,to,duration,widthRatio=1,easeStops=false}){
     let elapsed=0;
     const total=Math.max(Math.abs(to-from)*duration,zoomDuration(widthRatio));
+    const ramp=easeStops&&total?Math.min(.12,180/total):0;
+    const shoulder=t=>t*t/(2*ramp*(1-ramp));
     return {advance(delta){
       elapsed=clamp(elapsed+Math.max(0,delta),0,total);
       const time=total?elapsed/total:1;
       // A long leg emerging from a close view can only reveal the fraction
       // that fits. On a short leg keep some ink moving as the camera comes in.
       const fit=Math.exp(-Math.abs(Math.log(widthRatio))*(1-ease(time)));
-      const drawn=time*(widthRatio>=1?fit:.35+.65*fit);
+      // Round the start and end of the ink stroke without pausing at a city.
+      let travel=time;
+      if(ramp){
+        if(time<ramp)travel=shoulder(time);
+        else if(time>1-ramp)travel=1-shoulder(1-time);
+        else travel=(time-ramp/2)/(1-ramp);
+      }
+      const drawn=travel*(widthRatio>=1?fit:.35+.65*fit);
       return {time,position:from+(to-from)*drawn,arrived:elapsed>=total,done:elapsed>=total};
     }};
   }

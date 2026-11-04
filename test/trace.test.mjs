@@ -136,7 +136,7 @@ test('the ink stays on screen and zoom changes at a bounded rate across long and
     let view=worldFrame;
     for(let i=1;i<stops.length;i++){
       const geometry=measure(route(stops[i-1],stops[i])),start=view,plan=camera(geometry,space,worldFrame,geometry.pointAt(1));
-      const widthRatio=plan.arrival.w/start.w,run=timeline({from:0,to:1,duration:duration(geometry.length),widthRatio});
+      const widthRatio=plan.arrival.w/start.w,run=timeline({from:0,to:1,duration:duration(geometry.length),widthRatio,easeStops:true});
       let state;
       do{
         state=run.advance(16);
@@ -149,5 +149,20 @@ test('the ink stays on screen and zoom changes at a bounded rate across long and
       }while(!state.done);
       assert.equal(state.position,1);assert.deepEqual(view,plan.arrival);
     }
+  }
+});
+
+test('an isolated local leg eases the zoom peak while successive nearby legs retain their detail',()=>{
+  const wide=measure('M480,360L720,360'),local=measure('M720,360L722,360');
+  const space={width:1200,height:800,left:40,right:1160,top:40,bottom:640};
+  const frame=(before,after)=>camera(local,space,worldFrame,local.pointAt(1),null,before,after).arrival;
+  const natural=frame(null,null),isolated=frame(wide,wide);
+  assert.ok(isolated.w>natural.w&&isolated.w<=natural.w/.72+.001);
+  assert.deepEqual(frame(local,wide),natural);assert.deepEqual(frame(wide,local),natural);
+  for(const [from,to] of [[0,1],[1,0]]){
+    const run=timeline({from,to,duration:2000,easeStops:true}),start=run.advance(50).position;
+    assert.ok(Math.abs(start-from)>0&&Math.abs(start-from)<.01);
+    assert.equal(run.advance(950).position,.5);
+    assert.ok(Math.abs(to-run.advance(950).position)<.01);assert.equal(run.advance(50).position,to);
   }
 });

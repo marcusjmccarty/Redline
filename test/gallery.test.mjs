@@ -1449,33 +1449,34 @@ test('review arrows queue during a turn, work on checkboxes, and leave city pick
   assert.equal($('album-book').inert,false);
 });
 
-test('delayed WebKit fullscreen events handle both an exit button and a close before entry',async t=>{
-  const {w,$}=await setup(t),doc=w.document,display=$('album-display'),button=$('album-fullscreen');
-  let owner=null,exits=0;
-  Object.defineProperty(doc,'webkitFullscreenElement',{get:()=>owner});
-  display.webkitRequestFullscreen=()=>{};
-  doc.webkitExitFullscreen=()=>{exits++;owner=null;doc.dispatchEvent(new w.Event('webkitfullscreenchange'));};
-  const enter=()=>{owner=display;doc.dispatchEvent(new w.Event('webkitfullscreenchange'));};
-  button.click();await tick();enter();button.click();
-  assert.equal(owner,null);assert.equal(exits,1);
-  button.click();await tick();$('photo-panel').querySelector('[data-close]').click();enter();
-  assert.equal(owner,null);assert.equal(exits,2);assert.equal(button.getAttribute('aria-pressed'),'false');
+test('window reading view keeps the current spread, opens full photos and leaves browser fullscreen alone',async t=>{
+  const {w,$,press,tab,prints}=await setup(t),button=$('album-fullscreen'),display=$('album-display');
+  let nativeCalls=0;display.requestFullscreen=display.webkitRequestFullscreen=()=>{nativeCalls++;};
+  tab(paris.id).click();
+  const page=$('album-position').textContent;
+  button.click();
+  assert.ok($('photo-panel').classList.contains('expanded'));assert.equal(nativeCalls,0);
+  assert.equal($('album-position').textContent,page);assert.equal($('album-drawer').inert,true);
+  assert.equal($('gallery-filter').parentElement,$('album-drawer'));
+  prints()[0].click();assert.ok($('photo-viewer').open);
+  assert.equal(prints()[0].querySelector('img').src,$('full-photo').src);
+  $('photo-viewer').dispatchEvent(new w.Event('cancel',{cancelable:true}));
+  await wait(()=>!$('photo-viewer').open);assert.ok($('photo-panel').classList.contains('expanded'));
+  press('ArrowRight');assert.notEqual($('album-position').textContent,page);
+  press('ArrowLeft');assert.equal($('album-position').textContent,page);
+  press('Escape');assert.equal(button.getAttribute('aria-pressed'),'false');assert.equal(w.document.activeElement,button);
+  assert.equal($('gallery-filter').parentElement,$('album-book'));assert.equal($('photo-panel').open,true);
 });
 
-test('fullscreen follows native exit, falls back when unavailable, and closing resets the book',async t=>{
-  const {w,$,press}=await setup(t),doc=w.document,button=$('album-fullscreen');
-  let owner=null;
-  Object.defineProperty(doc,'fullscreenElement',{get:()=>owner});
-  const display=$('album-display');
-  assert.ok(display.contains(button)&&display.contains($('photo-viewer')));
-  display.requestFullscreen=async()=>{owner=display;};
-  doc.exitFullscreen=async()=>{owner=null;doc.dispatchEvent(new w.Event('fullscreenchange'));};
-  button.click();await tick();assert.equal(owner,display);assert.equal(button.getAttribute('aria-pressed'),'true');
-  await doc.exitFullscreen();assert.equal(button.getAttribute('aria-pressed'),'false');
-  display.requestFullscreen=async()=>{throw Error('Unavailable');};
-  button.click();await tick();assert.ok($('photo-panel').classList.contains('expanded'));
-  press('Escape');assert.equal($('photo-panel').open,true);assert.equal(button.getAttribute('aria-pressed'),'false');
-  button.click();await tick();$('photo-panel').querySelector('[data-close]').click();assert.equal($('photo-panel').open,false);assert.equal(button.getAttribute('aria-pressed'),'false');
+test('the window edge reveals city tabs, dismisses on leave, and provides a touch exit',async t=>{
+  const {w,$,tab}=await setup(t),edge=$('album-edge'),drawer=$('album-drawer'),button=$('album-fullscreen');
+  button.click();edge.dispatchEvent(new w.Event('pointerenter'));assert.equal(drawer.inert,false);
+  $('album-index').dispatchEvent(new w.Event('pointerleave'));assert.equal(drawer.inert,true);
+  edge.click();assert.equal(edge.getAttribute('aria-expanded'),'true');tab(madrid.id).click();
+  assert.match($('album-position').textContent,/Madrid/);assert.equal(drawer.inert,true);
+  edge.click();$('album-restore').click();assert.equal(button.getAttribute('aria-pressed'),'false');
+  button.click();$('photo-panel').querySelector('[data-close]').click();
+  assert.equal($('photo-panel').open,false);assert.equal($('gallery-filter').parentElement,$('album-book'));
 });
 
 test('a first-open photo stays visible when the browser has not finished decoding its bitmap',async t=>{

@@ -119,7 +119,7 @@
           <div class="album-title"><h2 id="photos-heading">Photos</h2><p class="album-subtitle"><span id="photo-trip-name"></span><span id="gallery-count"></span></p></div>
           <div id="album-modes" class="album-modes" role="group" aria-label="Show photos as"><button id="album-view" type="button" aria-pressed="true">Album</button><button id="sheet-view" type="button" aria-pressed="false">All photos</button></div>
           <button id="choose-photos" class="small-button primary-button" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span>Add photos</span></button>
-          <button id="album-fullscreen" class="close-panel" type="button" aria-label="Full screen" title="Full screen" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="expand-icon" d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/><path class="restore-icon" d="M8 3v5H3m14 0h-5V3m0 14v-5h5M3 12h5v5"/></svg></button>
+          <button id="album-fullscreen" class="close-panel" type="button" aria-label="Fill window with album" title="Fill window · Esc to exit · Right edge for city tabs" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="expand-icon" d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/><path class="restore-icon" d="M8 3v5H3m14 0h-5V3m0 14v-5h5M3 12h5v5"/></svg></button>
           <button class="close-panel" data-close="photo-panel" aria-label="Close photos" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
           <input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif" multiple hidden>
         </div>
@@ -144,6 +144,12 @@
             </div>
             <div id="photo-drop-hint" aria-hidden="true" hidden><span>Drop photos to add them</span></div>
             <nav id="gallery-filter" class="album-tabs" aria-label="Go to a city"></nav>
+          </div>
+        </div>
+        <div id="album-index" hidden>
+          <button id="album-edge" type="button" aria-label="Show album controls and city tabs" aria-controls="album-drawer" aria-expanded="false"></button>
+          <div id="album-drawer" inert>
+            <button id="album-restore" type="button">Exit window view <span aria-hidden="true">↙</span></button>
           </div>
         </div>
         <div id="album-foot" class="album-foot">

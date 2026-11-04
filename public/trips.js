@@ -82,44 +82,45 @@
     (back?.isConnected&&back!==document.body&&!back.closest('[hidden],[inert]')?back:$(triggers[id])).focus({preventScroll:true});
   }
   const albumPanel=$('photo-panel'),fullscreenButton=$('album-fullscreen');
-  const albumDisplay=$('album-display');
-  const nativeFull=()=>document.fullscreenElement||document.webkitFullscreenElement;
-  let albumOwnsFullscreen=false;
-  function expandAlbum(expanded){
+  const index=$('album-index'),drawer=$('album-drawer'),edge=$('album-edge');
+  const reading=()=>albumPanel.classList.contains('expanded');
+  function showIndex(open){
+    drawer.inert=!open;
+    edge.setAttribute('aria-expanded',String(open));
+    if(open)markTab();
+  }
+  function windowView(expanded,restoreFocus=true){
+    if(expanded===reading())return;
+    const nav=$('gallery-filter');
     albumPanel.classList.toggle('expanded',expanded);
     fullscreenButton.setAttribute('aria-pressed',String(expanded));
-    const label=expanded?'Exit full screen':'Full screen';
-    fullscreenButton.setAttribute('aria-label',label);fullscreenButton.title=label;
-  }
-  function leaveFullscreen(){
-    expandAlbum(false);
-    if(nativeFull()===albumDisplay){
-      const exit=document.exitFullscreen||document.webkitExitFullscreen;
-      Promise.resolve(exit?.call(document)).catch(()=>{});
+    index.hidden=!expanded;
+    (expanded?drawer:$('album-book')).append(nav);
+    showIndex(false);
+    if(mode()==='album'){
+      renderGallery();
+      if(expanded)preload(albumPage+step());
     }
-    albumOwnsFullscreen=false;
+    if(expanded||restoreFocus)(expanded?albumPanel:fullscreenButton).focus({preventScroll:true});
   }
-  function syncFullscreen(){
-    if(nativeFull()===albumDisplay){
-      albumOwnsFullscreen=true;
-      if(!albumPanel.open||!albumPanel.classList.contains('expanded'))leaveFullscreen();
-    }else if(albumOwnsFullscreen){
-      albumOwnsFullscreen=false;expandAlbum(false);
-    }
-  }
-  fullscreenButton.addEventListener('click',async()=>{
-    if(albumPanel.classList.contains('expanded')){leaveFullscreen();return;}
-    expandAlbum(true);
-    // Promote the book and its photo viewer together, above the map's modal backdrop.
-    const enter=albumDisplay.requestFullscreen||albumDisplay.webkitRequestFullscreen;
-    if(enter&&!nativeFull()){
-      try{await enter.call(albumDisplay);syncFullscreen();}
-      catch{/* The expanded layout fills the viewport when native fullscreen is unavailable. */}
-    }
+  fullscreenButton.addEventListener('click',()=>windowView(true));
+  $('album-restore').addEventListener('click',()=>windowView(false));
+  edge.addEventListener('pointerenter',event=>{if(event.pointerType!=='touch')showIndex(true);});
+  edge.addEventListener('click',()=>{
+    showIndex(true);
+    (drawer.querySelector('[aria-current="true"]')||$('album-restore')).focus({preventScroll:true});
   });
-  for(const name of ['fullscreenchange','webkitfullscreenchange'])document.addEventListener(name,syncFullscreen);
+  index.addEventListener('pointerleave',event=>{
+    if(event.pointerType!=='touch'&&!drawer.contains(document.activeElement))showIndex(false);
+  });
+  index.addEventListener('focusout',event=>{if(!index.contains(event.relatedTarget))showIndex(false);});
+  albumPanel.addEventListener('pointerdown',event=>{
+    if(reading()&&!index.contains(event.target))showIndex(false);
+  });
+  $('gallery-filter').addEventListener('click',event=>{
+    if(reading()&&event.target.closest('.album-tab')){showIndex(false);albumPanel.focus({preventScroll:true});}
+  });
   function finishAlbumClose(focus){
-    leaveFullscreen();
     clearTimeout(sheetWarmTimer);
     window.RedlineAlbumMotion.clearPreloads();
     $('photos-button').setAttribute('aria-expanded','false');
@@ -141,7 +142,7 @@
       $(triggers[id]).setAttribute('aria-expanded','false');restorePanelFocus(id,focus);return;
     }
     if(albumMotion?.phase==='closing')return;
-    finishReviewTurn();settleView();
+    finishReviewTurn();settleView();windowView(false,false);
     // Bookmark before folding the cover, including an interrupted opening or page turn.
     const place=albumMotion?.place||(drawn?.trip===current?.id?placeAt(shownPage(),drawn.two):null);
     if(current&&place)lastPages.set(current.id,place);
@@ -179,7 +180,7 @@
   {
     const panel=$('photo-panel');
     panel.addEventListener('close',()=>{if(!panel.open&&$('photos-button').getAttribute('aria-expanded')==='true')closePanel('photo-panel');});
-    panel.addEventListener('cancel',event=>{event.preventDefault();if(panel.classList.contains('expanded')){leaveFullscreen();return;}if(selecting){setSelecting(false);$('select-photos').focus({preventScroll:true});return;}closePanel('photo-panel',{focus:true});});
+    panel.addEventListener('cancel',event=>{event.preventDefault();if(panel.classList.contains('expanded')){windowView(false);return;}if(selecting){setSelecting(false);$('select-photos').focus({preventScroll:true});return;}closePanel('photo-panel',{focus:true});});
     let pressed=null;panel.addEventListener('pointerdown',event=>{pressed=event.target;});
     panel.addEventListener('click',event=>{
       // Only a press and release on the backdrop closes; a drag that ends there does not.
@@ -412,7 +413,7 @@
     const viewer=$('photo-viewer').open,info=$('info-dialog').open;
     if(event.key==='Escape'&&!event.defaultPrevented&&!viewer&&!info){
       if(isOpen('trip-panel')){event.preventDefault();closePanel('trip-panel',{focus:true});return;}
-      if($('photo-panel').open){event.preventDefault();if(albumPanel.classList.contains('expanded')){leaveFullscreen();return;}if(selecting){setSelecting(false);$('select-photos').focus({preventScroll:true});return;}closePanel('photo-panel',{focus:true});return;}
+      if($('photo-panel').open){event.preventDefault();if(albumPanel.classList.contains('expanded')){windowView(false);return;}if(selecting){setSelecting(false);$('select-photos').focus({preventScroll:true});return;}closePanel('photo-panel',{focus:true});return;}
     }
     if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input:not([type=checkbox]):not(#album-scrub),textarea,select,[contenteditable="true"]'))return;
     // Keep keyboard turns from racing a cover that is opening or closing.
@@ -492,7 +493,7 @@
   function setProgress(done,total){const bar=$('photo-progress');bar.hidden=!total;bar.style.setProperty('--progress',total?String(done/total):'0');bar.setAttribute('aria-valuenow',String(done));bar.setAttribute('aria-valuemax',String(total||1));}
   async function importPhotos(files){
     if(!files.length||busy||!current)return;
-    finishReviewTurn();
+    finishReviewTurn();windowView(false);
     setSelecting(false);busy=true;importing=true;photoPanelRequest++;photosRequested=false;update();let failed=0,lastError='';
     try{
       await loadExif().catch(()=>{});
@@ -533,7 +534,7 @@
     const current_=mode(),reviewing=current_==='review',moving=!!albumMotion||!!viewMotion||!!reviewTurn;
     $('photo-panel').dataset.motion=albumMotion?.phase||'';
     $('album-book').inert=moving;$('album-modes').inert=!!albumMotion;
-    $('choose-photos').disabled=busy||moving;
+    $('choose-photos').disabled=busy||moving;fullscreenButton.disabled=busy||moving||selecting;
     if(current_!==photoMode){$('photo-scroll').scrollTop=0;photoMode=current_;}
     $('album-book').dataset.mode=current_;
     $('album-book').style.setProperty('--page-depth',`${current_==='album'?Math.max(0,Math.min(6,(lastPage()-step()-shownPage())*1.5)):5}px`);
@@ -601,9 +602,9 @@
   }
   const clampRatio=value=>Math.min(2.4,Math.max(.45,value));
   function setRatio(el,item){el.style.setProperty('--ratio',(item.width&&item.height?clampRatio(item.width/item.height):4/3).toFixed(3));}
-  function previewButton(item,open,{saved=false}={}){
+  function previewButton(item,open,{saved=false,original=false}={}){
     const button=document.createElement('button'),image=document.createElement('img');button.type='button';button.className='photo-image';
-    image.src=item.thumbUrl||item.url;image.alt='';image.loading='lazy';image.decoding='async';image.draggable=false;
+    image.src=original?item.url:item.thumbUrl||item.url;image.alt='';image.loading='lazy';image.decoding='async';image.draggable=false;
     image.addEventListener('load',()=>{
       button.classList.add('loaded');
       if(!item.width&&image.naturalWidth){item.width=image.naturalWidth;item.height=image.naturalHeight;const holder=button.closest('[data-photo-id]');if(holder)setRatio(holder,item);}
@@ -786,7 +787,7 @@
     const tab=nav.querySelector('[aria-current="true"]');if(!tab)return;
     // Scroll only the tab rail. scrollIntoView can move the book's hidden
     // overflow ancestors and expose the stems through its 3D pages.
-    if(twoPage()){
+    if(twoPage()||reading()){
       if(tab.offsetTop<nav.scrollTop)nav.scrollTop=tab.offsetTop;
       else if(tab.offsetTop+tab.offsetHeight>nav.scrollTop+nav.clientHeight)nav.scrollTop=tab.offsetTop+tab.offsetHeight-nav.clientHeight;
     }else{
@@ -861,7 +862,7 @@
     figure.className='print';figure.dataset.photoId=photo.id;setRatio(figure,photo);
     figure.style.setProperty('--tilt',`${((hash(photo.id)%9)-4)*.38}deg`);
     frame.className='print-frame';corners.className='print-corners';corners.setAttribute('aria-hidden','true');
-    const button=previewButton(photo,(event,origin)=>{if(Date.now()<suppressClick)return;openPhoto(photo,group,origin);},{saved:true});button.classList.add('print-photo');
+    const button=previewButton(photo,(event,origin)=>{if(Date.now()<suppressClick)return;openPhoto(photo,group,origin);},{saved:true,original:reading()});button.classList.add('print-photo');
     button.setAttribute('aria-label',`Open photo ${position+1} of ${group.items.length} in ${group.name}`);
     frame.append(button,corners);figure.append(frame);
     const note=photoCaption(photo);
@@ -980,10 +981,11 @@
     // Keep the chosen tab when its city shares these pages; otherwise follow the first city on them.
     if(cities.length&&!cities.some(city=>city.id===activeCity))activeCity=cities[0].id;markTab();warmPreviews();
   }
-  function preload(index){for(const i of visiblePages(index))for(const photo of pages[i]?.items||[]){const image=new Image();image.decoding='async';image.src=photo.thumbUrl||photo.url;}}
+  function preload(index){for(const i of visiblePages(index))for(const photo of pages[i]?.items||[]){const image=new Image();image.decoding='async';image.src=reading()?photo.url:photo.thumbUrl||photo.url;}}
   // Focus on a page that turned away (a contents entry, say) moves to the current tab, so the keyboard keeps its place.
   function keepAlbumFocus(had){
     const active=document.activeElement;if(!had||active&&active!==document.body)return;
+    if(reading()){albumPanel.focus({preventScroll:true});return;}
     const tab=[...$('gallery-filter').children].find(el=>el.getAttribute('aria-current')==='true');
     (tab&&!$('gallery-filter').inert?tab:$('album-next').disabled?$('album-previous'):$('album-next')).focus({preventScroll:true});
   }

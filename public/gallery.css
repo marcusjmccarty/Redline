@@ -61,14 +61,6 @@
 .album #album-fullscreen svg { width: 19px; height: 19px; }
 #album-fullscreen .restore-icon, #album-fullscreen[aria-pressed=true] .expand-icon { display: none; }
 #album-fullscreen[aria-pressed=true] .restore-icon { display: inline; }
-.album.expanded { height: 100dvh; }
-.album.expanded #album-display { background: #29221c; }
-.album.expanded .album-foot.away { display: none; }
-@media (min-width: 900px), (min-width: 600px) and (orientation: landscape) {
-  .album.expanded .album-stage { justify-content: flex-start; padding: 4px 12px; }
-  .album.expanded .album-book { width: calc(100% - var(--tab-width)); height: 100%; aspect-ratio: auto; }
-  .album.expanded .album-book:has(> .album-tabs.away) { width: 100%; }
-}
 .album .close-panel:hover { background: #ffffff1f; color: #fff; }
 .album .small-button { min-height: 34px; padding: 7px 13px; font-size: 12px; }
 .album-stage { container-type: size; position: relative; display: flex; align-items: center; justify-content: center; gap: 0; min-height: 0; height: 100%; padding: 4px 24px; }
@@ -514,6 +506,32 @@
   .album-where { flex-direction: row; gap: 12px; min-width: 0; }
   #album-scrub { width: 180px; }
 }
+/* Window reading view uses the entire spread. Only the far edge opens the index. */
+.album.expanded { inset: 0; width: 100%; height: 100dvh; }
+.album.expanded #album-display { position: relative; grid-template-rows: minmax(0, 1fr); overflow: hidden; background: #29221c; }
+.album.expanded :is(.album-top, .album-foot, #photo-message, .gallery-toolbar, .gallery-actions, .gallery-map-button, .photo-empty button, .photo-empty-hint, .photo-bulk, .review-pager, .photo-import-actions, .photo-tile-tools, .photo-pick, .remove-photo, .postcard-badge) { display: none; }
+.album.expanded .album-stage { padding: 0; gap: 0; }
+.album.expanded .album-book { --pad: 3px; flex: none; width: 100%; max-width: none; height: 100%; aspect-ratio: auto; }
+.album.expanded .album-page[data-type=city] { padding: clamp(12px, 3vh, 34px) clamp(12px, 2vw, 40px) clamp(22px, 4vh, 46px); }
+.album.expanded .prints { gap: 3% 4%; }
+.album.expanded .page-corner { opacity: 0; }
+.album.expanded .review-photo .photo-image.loaded img { opacity: 1; filter: none; }
+#album-index { position: absolute; z-index: 5; inset: 0 0 0 auto; width: min(235px, 78vw); pointer-events: none; }
+#album-edge { position: absolute; z-index: 1; inset: 0 0 0 auto; width: 6px; padding: 0; border: 0; background: transparent; pointer-events: auto; }
+#album-edge:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
+#album-drawer { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: max(12px, env(safe-area-inset-top)) 0 max(12px, env(safe-area-inset-bottom)) 8px; transform: translateX(100%); visibility: hidden; transition: transform .22s var(--ease-out), visibility 0s .22s; }
+#album-edge[aria-expanded=true] + #album-drawer { transform: none; visibility: visible; transition-delay: 0s; }
+#album-index:has(#album-edge[aria-expanded=true]) { pointer-events: auto; }
+#album-edge[aria-expanded=true] { pointer-events: none; }
+#album-drawer > * { pointer-events: auto; }
+#album-restore { align-self: flex-end; padding: 9px 14px; border: 0; border-radius: 5px 0 0 5px; background: #382f27; color: var(--paper); font: 13px Georgia, serif; }
+#album-restore span { margin-left: 8px; }
+#album-drawer .album-tabs { position: relative; inset: auto; flex: 0 1 auto; min-height: 0; max-height: 80%; flex-direction: column; clip-path: none; padding: 2px 0 2px 6px; transform: none; overflow: hidden auto; overscroll-behavior: contain; }
+#album-drawer .album-tabs.away, #album-drawer .album-tabs:empty { display: none; }
+#album-drawer .album-tab { flex: none; width: 100%; max-width: none; padding: 10px 14px; border-radius: 6px 0 0 6px; }
+@media (pointer: coarse) { #album-edge { width: 22px; } }
+@media (prefers-reduced-motion: reduce) { #album-drawer { transition: none; } }
+
 @media (prefers-reduced-motion: reduce) {
   .album, .album-book, .album-book::before, .album-pages, .album-tabs, #info-dialog, .review-photo, .album-sheet, .gallery-actions, .photo-import-actions, .print-frame, .photo-image img, .album-tab, .album-foot, #photo-viewer { transition: none !important; animation: none !important; }
 }
