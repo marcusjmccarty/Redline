@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync,readdirSync} from 'node:fs';
+import vm from 'node:vm';
 import {JSDOM} from 'jsdom';
 import {IDBFactory} from 'fake-indexeddb';
 
@@ -13,14 +14,29 @@ const wait=async condition=>{
   assert.ok(condition(),'The interaction should finish');
 };
 const tick=()=>new Promise(resolve=>setTimeout(resolve,5));
+// The camera as the painted map last received it, and the names lettered with it.
+const camera=w=>({...w.RedlineApp.atlas.view});
+const lettered=w=>w.RedlineApp.atlas.labels.map(label=>label.text);
+// Runs the page's animation frames by hand on a clock the test owns, so no pacing depends on this machine.
+function mapClock(w){
+  const frames=w.testFrames;let now=w.performance.now();
+  Object.defineProperty(w.performance,'now',{configurable:true,value:()=>now});
+  const frame=(ms=16)=>{now+=ms;for(const [key,callback] of [...frames]){frames.delete(key);callback(now);}};
+  const settle=(limit=5000)=>{const began=now;while(frames.size&&now-began<limit)frame();assert.equal(frames.size,0,'The camera comes to rest');return now-began;};
+  return {frame,settle,run:count=>{for(let i=0;i<count;i++)frame();},get now(){return now;}};
+}
 
-async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,paris],seedSizes=[],realMap=false,textLength=null}={}){
+// With a profile, the page opens on an existing library instead of a new one: its database, its localStorage and its tab's sessionStorage, and no album opened.
+async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,paris],seedSizes=[],realMap=false,textLength=null,profile=null}={}){
   const dom=new JSDOM(source('map.html'),{url:'https://redline.test/Redline/',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window,$=id=>w.document.getElementById(id),objects=new Set();let stops=route;
-  Object.assign(w,{Blob,File,FormData,TextEncoder,TextDecoder,indexedDB:new IDBFactory()});
+  Object.assign(w,{Blob,File,FormData,TextEncoder,TextDecoder,indexedDB:profile?.idb||new IDBFactory()});
+  for(const [store,kept] of [[w.localStorage,profile?.local],[w.sessionStorage,profile?.session]])for(const [key,value] of Object.entries(kept||{}))store.setItem(key,value);
   w.URL.createObjectURL=blob=>{const url=URL.createObjectURL(blob);objects.add(url);return url;};
   w.URL.revokeObjectURL=url=>{objects.delete(url);URL.revokeObjectURL(url);};
-  t.after(()=>{dom.window.close();for(const url of objects)URL.revokeObjectURL(url);});
+  // Work the page has under way when a test ends, such as refreshing the logbook after an export, would otherwise meet a closed window with nobody to hear the error.
+  let inFlight=0;
+  t.after(async()=>{for(let i=0;i<200&&inFlight;i++)await tick();dom.window.close();for(const url of objects)URL.revokeObjectURL(url);});
   w.confirm=()=>true;
   w.fetch=async()=>{throw Error('The gallery must not send personal data to a server.');};
   const mapCalls={focused:null};
@@ -40,29 +56,33 @@ async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,p
     if(textLength!==null)w.SVGElement.prototype.getComputedTextLength=()=>textLength;
     w.localStorage.setItem('redline-route-v1',JSON.stringify(route));
     w.localStorage.setItem('redline-cities-collapsed','true');
-    w.matchMedia=()=>({matches:false});w.ResizeObserver=class{observe(){}};
-    let frame=0;w.requestAnimationFrame=()=>++frame;w.cancelAnimationFrame=()=>{};
+    w.matchMedia=()=>({matches:false});w.ResizeObserver=class{constructor(callback){(w.testResizes??=[]).push(callback);}observe(){}};
+    // Frames wait here until a test runs them; one requested during load is not silently lost.
+    w.testFrames=new Map();let frame=0;w.requestAnimationFrame=callback=>{w.testFrames.set(++frame,callback);return frame;};w.cancelAnimationFrame=id=>w.testFrames.delete(id);
     w.Element.prototype.getBoundingClientRect=function(){
       const [left,top,width,height]=this.id==='route-dock'?[370,760,700,116]:this.matches('.zoom-controls')?[1380,790,36,76]:this.closest?.('#trip-panel')?[24,24,380,600]:[0,0,1440,900];
       return {left,top,width,height,right:left+width,bottom:top+height};
     };
-    w.SVGElement.prototype.getScreenCTM=function(){const [x,y,width,height]=$('map').getAttribute('viewBox').split(' ').map(Number);return {a:1440/width,b:0,c:0,d:900/height,e:-x*1440/width,f:-y*900/height};};
     w.Element.prototype.setPointerCapture=function(){};w.Element.prototype.hasPointerCapture=()=>false;
-    for(const name of ['vendor/geo','map-layout','atlas-geography','trace','labels','map-paint','app'])w.eval(source(`public/${name}.js`));
+    for(const name of ['vendor/geo','map-layout','atlas-geography','trace','labels','atlas-names','atlas-view','app'])w.eval(source(`public/${name}.js`));
     stops=w.RedlineApp.getStops();
   }
   for(const name of ['jpeg','archive','storage'])w.eval(source(`public/${name}.js`));
-  const storage=w.RedlineStorage,api=storage.api;
-  const {trip}=await api('/trips',{method:'POST',body:JSON.stringify({title:'A summer away',stops})});
-  if(seed)for(const [i,stop] of seedStops.entries()){
+  const storage=w.RedlineStorage,realApi=storage.api;
+  storage.api=(...args)=>{inFlight++;return realApi(...args).finally(()=>{inFlight--;});};
+  const api=storage.api;
+  const {trip}=profile?{trip:null}:await api('/trips',{method:'POST',body:JSON.stringify({title:'A summer away',stops})});
+  if(seed&&!profile)for(const [i,stop] of seedStops.entries()){
     const form=new FormData();form.append('photo',new Blob([jpeg],{type:'image/jpeg'}));form.append('stopId',stop.id);
     if(seedSizes[i]){form.append('width',String(seedSizes[i][0]));form.append('height',String(seedSizes[i][1]));}
     await api(`/trips/${trip.id}/photos`,{method:'POST',body:form});
   }
-  w.localStorage.setItem('redline-saved-trip',JSON.stringify({id:trip.id,title:trip.title,revision:trip.revision,hash:JSON.stringify(stops)}));
+  if(!profile)w.localStorage.setItem('redline-saved-trip',JSON.stringify({id:trip.id,title:trip.title,revision:trip.revision,hash:JSON.stringify(stops)}));
   w.eval(source('public/postcards.js'));w.eval(source('public/album-motion.js'));w.eval(source('public/trips.js'));
-  await wait(()=>$('trip-title').textContent===trip.title&&(!seed||$('photo-count').textContent===String(seedStops.length)));
-  $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);
+  if(!profile){
+    await wait(()=>$('trip-title').textContent===trip.title&&(!seed||$('photo-count').textContent===String(seedStops.length)));
+    $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);
+  }
   const change=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new w.Event('change',{bubbles:true}));};
   const choose=names=>{
     const files=names.map(name=>new File([jpeg],name,{type:/\.txt$/.test(name)?'text/plain':'image/jpeg'}));
@@ -86,7 +106,8 @@ test('the album opens from its cover, turns like a book, and its contents and ta
   assert.equal($('photo-panel').querySelector('.album-name').textContent,'A summer away');
   assert.equal($('photo-panel').querySelector('.title-route').textContent,'Paris → Madrid');
   assert.equal($('album-position').textContent,'Title page');
-  assert.deepEqual([...$('gallery-filter').children].map(el=>el.textContent),['03Paris2','04Madrid1']);
+  assert.deepEqual([...$('gallery-filter').children].map(el=>[el.querySelector('.chip-stop').textContent,el.querySelector('.tab-name').textContent,el.title,el.getAttribute('aria-label')]),[['3','Paris','Paris · page 3 · 2 photos','Paris · page 3 · 2 photos'],['4','Madrid','Madrid · page 4 · 1 photo','Madrid · page 4 · 1 photo']],'A tab shows its page and city, and names its photo count');
+  assert.deepEqual([...$('gallery-filter').children].map(el=>[el.style.getPropertyValue('--tab-column'),el.style.getPropertyValue('--tab-row')]),[['0','0'],['0','1']],'Tabs are placed by their own column and row');
   $('album-next').click();
   assert.equal(pages(),'left:contents right:city');
   assert.deepEqual([...$('album-pages').querySelectorAll('.contents-list button')].map(el=>el.textContent),['01Paris3','02Madrid4']);
@@ -146,17 +167,28 @@ test('a spread names both its cities, and turns keep tab focus and finish when p
 });
 
 test('the divider tabs are coloured book cloth with readable labels',()=>{
-  const css=source('public/gallery.css'),rule=css.match(/\.album-tab \{[^}]*\}/)[0];
-  assert.match(rule,/var\(--tab\b/,'Each tab takes its colour from its --tab index');
-  const colours=rule.match(/linear-gradient\(([^;]*)\)/)[1].match(/#[0-9a-f]{6}/gi);assert.equal(colours.length,6);
-  const luminance=hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(c=>c<=.03928?c/12.92:((c+.055)/1.055)**2.4).reduce((sum,c,i)=>sum+c*[.2126,.7152,.0722][i],0);
-  const foreground=rule.match(/color:\s*(#[0-9a-f]{6})/)[1];
-  const brightness=Number(css.match(/\.album-tab\[aria-current=true\][^{]*\{[^}]*brightness\(([\d.]+)\)/)[1]);
+  const css=source('public/gallery.css'),rule=css.match(/^\.album-tab \{[^}]*\}/m)[0],rail=css.match(/^\.album-tabs \{[^}]*\}/m)[0];
+  assert.match(rule,/background:[^;]*var\(--cloth\)/,'Each tab is backed by its own --cloth');
+  const colours=[...css.matchAll(/^\.album-tab(?::nth-child\(6n\+\d\))? \{ --cloth: (#[0-9a-f]{6})/gim)].map(match=>match[1]);
+  assert.equal(colours.length,6);assert.equal(new Set(colours).size,6,'Six cloths in rotation');
+  assert.match(rule,/position: absolute/);assert.match(rule,/top: calc\(var\(--tab-row\b/);assert.match(rule,/width: calc\([^;]*var\(--tab-column\b/,'Each tab is placed absolutely by its row and column');
+  assert.doesNotMatch(rail,/display: grid/,'The rail itself no longer lays tabs out');
+  const channels=hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16));
+  const luminance=rgb=>rgb.map(c=>c/255).map(c=>c<=.03928?c/12.92:((c+.055)/1.055)**2.4).reduce((sum,c,i)=>sum+c*[.2126,.7152,.0722][i],0);
+  const contrast=(a,b)=>{const [light,dark]=[luminance(a),luminance(b)].sort((x,y)=>y-x);return (light+.05)/(dark+.05);};
+  const foreground=channels(rule.match(/color:\s*(#[0-9a-f]{6})/)[1]);
+  const [,brightness,saturation]=css.match(/\.album-tab\[aria-current=true\][^{]*\{[^}]*brightness\(([\d.]+)\) saturate\(([\d.]+)\)/).map(Number);
+  // A CSS filter acts on the whole tab, so the highlighted label brightens along with its cloth.
+  const clamp=value=>Math.max(0,Math.min(255,value));
+  const filtered=rgb=>{
+    const [r,g,b]=rgb.map(c=>clamp(c*brightness)),s=saturation,grey=[.2126*(1-s),.7152*(1-s),.0722*(1-s)],mix=grey[0]*r+grey[1]*g+grey[2]*b;
+    return [mix+s*r,mix+s*g,mix+s*b].map(clamp);
+  };
   for(const colour of colours){
-    const active='#'+[1,3,5].map(i=>Math.min(255,Math.round(parseInt(colour.slice(i,i+2),16)*brightness)).toString(16).padStart(2,'0')).join('');
-    assert.ok((luminance(foreground)+.05)/(luminance(active)+.05)>=4.5,`${colour} keeps its label readable even when highlighted`);
+    assert.ok(contrast(foreground,channels(colour))>=4.5,`${colour} keeps its label readable`);
+    assert.ok(contrast(filtered(foreground),filtered(channels(colour)))>=4.5,`${colour} keeps its label readable even when highlighted`);
   }
-  assert.doesNotMatch(css,/--tab-color|\.at-(start|end)|^\.eyebrow /m,'No dead colour fallback, duplicate classes, or second .eyebrow');
+  assert.doesNotMatch(css,/--tab-color|\.at-(start|end)|^\.eyebrow |chip-count/m,'No dead colour fallback, duplicate classes, second .eyebrow, or old photo-count chip');
 });
 
 test('the album keeps its place when it changes between one page and two',async t=>{
@@ -218,7 +250,7 @@ test('navigation saves postcard edits before moving; failed saves keep the photo
   assert.equal($('photo-viewer').classList.contains('flipped'),false);
   press('ArrowLeft');await wait(()=>$('photo-position').textContent==='1 / 2');
   assert.equal($('postcard-message').value,'A memory worth keeping.');
-  const records=await w.RedlineArchive.unpack(await storage.exportArchive(trip.id));
+  const records=await w.RedlineArchive.unpack((await storage.exportParts(trip.id))[0]);
   assert.equal(records[0].photos.filter(p=>p.photo.postcard.message==='A memory worth keeping.').length,1);
   await w.RedlinePostcards.close();$('album-view').click();tab(paris.id).click();
   assert.equal($('album-pages').querySelector('figcaption'),null,'Postcard messages never become album captions');
@@ -275,21 +307,50 @@ test('a stalled metadata reader cannot block photo review and can be retried',as
   assert.equal($('photo-review').querySelector('select').value,paris.id);
 });
 
-test('a stalled city lookup falls back once per import batch and retries on the next batch',async t=>{
+test('a slow city download never holds a batch past 3 s, says GPS was skipped, and still serves a later batch',async t=>{
   const {w,$,choose}=await setup(t,{seed:false});
   const location={latitude:51.5,longitude:-.12};w.exifr.gps=async()=>location;
-  let requests=0,expire,signal;
-  w.fetch=async(url,options)=>{assert.equal(url,'photo-cities.json');requests++;signal=options?.signal;return {ok:true,json:()=>new Promise(()=>{})};};
+  let requests=0,expire,signal,arrive;
+  w.fetch=async(url,options)=>{assert.equal(url,'photo-cities.json');requests++;signal=options?.signal;return {ok:true,json:()=>new Promise(resolve=>{arrive=resolve;})};};
   const originalTimeout=w.setTimeout.bind(w);
   w.setTimeout=(callback,delay,...args)=>delay===3000?(expire=callback,0):originalTimeout(callback,delay,...args);
   choose(['one.jpg','two.jpg']);await wait(()=>requests===1);
   assert.equal(typeof expire,'function','The city download, including its body, has a bounded wait');expire();
   await wait(()=>$('photo-review').children.length===2&&!$('choose-photos').disabled);
-  assert.equal(requests,1,'An unavailable index does not delay every photo in a large batch');assert.equal(signal.aborted,true);
+  assert.equal(requests,1,'An unavailable index does not delay every photo in a large batch');assert.equal(signal.aborted,false,'The download carries on, so a slow link is not restarted from zero');
   assert.equal($('photo-ready-count').textContent,'2 need a city');
+  assert.match($('photo-message').textContent,/GPS was not used/,'The photos needing a city by hand are explained');assert.equal($('photo-message').classList.contains('error'),true);
+  expire=null;choose(['more.jpg']);await wait(()=>expire);expire();await wait(()=>$('photo-review').children.length===3&&!$('choose-photos').disabled);
+  assert.equal(requests,1,'A batch during the download joins it rather than restarting from zero');
+  arrive([['London',51.5,-.12,'United Kingdom']]);await tick();
+  choose(['three.jpg']);await wait(()=>$('photo-review').children.length===4&&!$('choose-photos').disabled);
+  assert.equal(requests,1,'The batch uses the download that finished in the background');assert.equal($('photo-review').lastElementChild.querySelector('select').value,'match');
+  assert.equal($('photo-message').textContent,'');
+});
+
+test('a truly hung city download is abandoned in the background, and the next batch retries',async t=>{
+  const {w,$,choose}=await setup(t,{seed:false});
+  const location={latitude:51.5,longitude:-.12};w.exifr.gps=async()=>location;
+  let requests=0,giveUp,signal,expire;
+  w.fetch=async(url,options)=>{requests++;signal=options?.signal;return {ok:true,json:()=>new Promise(()=>{})};};
+  const originalTimeout=w.setTimeout.bind(w);
+  w.setTimeout=(callback,delay,...args)=>delay===3000?(expire=callback,0):delay===120000?(giveUp=callback,0):originalTimeout(callback,delay,...args);
+  choose(['one.jpg']);await wait(()=>requests===1);expire();
+  await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+  assert.equal(signal.aborted,false);assert.equal(typeof giveUp,'function');giveUp();assert.equal(signal.aborted,true);
   w.fetch=async()=>{requests++;return {ok:true,json:async()=>[['London',51.5,-.12,'United Kingdom']]};};
-  choose(['three.jpg']);await wait(()=>$('photo-review').children.length===3&&!$('choose-photos').disabled);
+  choose(['two.jpg']);await wait(()=>$('photo-review').children.length===2&&!$('choose-photos').disabled);
   assert.equal(requests,2);assert.equal($('photo-review').lastElementChild.querySelector('select').value,'match');
+});
+
+test('a city list that cannot be fetched is requested once a batch, not once a photo',async t=>{
+  const {w,$,choose}=await setup(t,{seed:false});
+  w.exifr.gps=async()=>({latitude:51.5,longitude:-.12});let requests=0;
+  w.fetch=async()=>{requests++;throw Error('offline');};
+  choose(['one.jpg','two.jpg','three.jpg']);await wait(()=>$('photo-review').children.length===3&&!$('choose-photos').disabled);
+  assert.equal(requests,1);assert.match($('photo-message').textContent,/GPS was not used/);
+  choose(['four.jpg']);await wait(()=>$('photo-review').children.length===4&&!$('choose-photos').disabled);
+  assert.equal(requests,2);
 });
 
 test('a partial photo save preserves remaining imports and retry never duplicates completed saves',async t=>{
@@ -301,7 +362,7 @@ test('a partial photo save preserves remaining imports and retry never duplicate
   assert.equal($('photo-review').children.length,2);assert.equal((await api(`/trips/${trip.id}`)).photos.length,1);
   storage.api=api;$('upload-photos').click();await wait(()=>!$('album-pages').hidden);
   assert.equal((await api(`/trips/${trip.id}`)).photos.length,3);assert.equal($('photo-count').textContent,'3');
-  const restored=await w.RedlineArchive.unpack(await storage.exportArchive(trip.id));assert.equal(restored[0].photos.length,3);
+  const restored=await w.RedlineArchive.unpack((await storage.exportParts(trip.id))[0]);assert.equal(restored[0].photos.length,3);
 });
 
 test('a single large import reviews in pages and saves every page into an existing trip',async t=>{
@@ -453,7 +514,7 @@ test('the logbook lists, renames, and deletes voyages, and folds away when you w
   assert.equal(!$('trip-panel').hidden,true);assert.equal($('photo-panel').open,false,'Only one sheet at a time');
   assert.equal($('trips-button').getAttribute('aria-expanded'),'true');
   await wait(()=>$('trip-list').querySelectorAll('.trip-card').length===2);
-  assert.equal($('trips-summary').textContent,'2 trips kept in this browser');assert.equal($('trip-state').textContent,'All changes saved');
+  assert.equal($('trip-state').textContent,'All changes saved');
   const card=()=>[...$('trip-list').querySelectorAll('.trip-card')].find(el=>el.classList.contains('active'));
   assert.match(card().querySelector('.trip-meta').textContent,/^2 stops · 3 photos · /);
   assert.ok(card().querySelector('.trip-cover').src,'A saved trip shows its first photo');
@@ -505,7 +566,7 @@ test('renaming the open trip keeps the stale-tab check, and focus stays in the l
   $('trip-list').querySelector('.trip-rename-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
   await wait(()=>/another tab/.test($('trip-message').textContent));
   assert.equal((await api(`/trips/${trip.id}`)).trip.title,'A summer away');
-  assert.equal(JSON.parse(w.localStorage.getItem('redline-saved-trip')).revision,1,'The stale revision is kept, so the next save also refuses to overwrite');
+  assert.equal(JSON.parse(w.sessionStorage.getItem('redline-tab-state-v1')).current.revision,1,'The stale revision is kept, so the next save also refuses to overwrite');
   await wait(()=>w.document.activeElement?.classList.contains('trip-open'));
   $('trip-list').querySelector('.trip-rename').click();
   $('trip-list').querySelector('.trip-rename-form input').dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
@@ -741,11 +802,11 @@ test('dismissal while storage is loading never reveals late pages or reopens the
   const {w,$,press,storage,api}=await setup(t);press('Escape');
   const motion=controlledMotion(w);let release;
   storage.api=async(path,options)=>{await new Promise(resolve=>release=resolve);return api(path,options);};
-  $('photos-button').click();await wait(()=>!!release);assert.ok($('album-book').querySelector('.album-loading-cover'));
+  $('photos-button').click();await wait(()=>!!release);assert.equal($('album-book').dataset.preparing,'true');
   press('Escape');await wait(()=>!$('photo-panel').open);
   assert.equal($('photo-panel').open,false);release();await tick();
   assert.equal($('photo-panel').open,false);assert.equal($('album-book').querySelector('.album-cover-scene'),null);
-  assert.equal($('album-book').querySelector('.album-loading-cover'),null);
+  assert.equal($('album-book').dataset.preparing,undefined);
 });
 
 test('single-page opening and All Photos use the same cover lifecycle and defer redraws',async t=>{
@@ -785,7 +846,7 @@ test('the left log edits the actual map route with drag, keyboard reorder, delet
   const {w,$,api,trip,press}=await setup(t,{realMap:true,seed:false,route:[paris,madrid,rome]});
   press('Escape');$('trips-button').click();
   assert.equal($('trip-panel').parentElement,$('route-dock').parentElement,'The paper is outside the dock');
-  assert.equal($('trip-panel').contains($('stop-list')),true);assert.equal($('route-stops-panel').hidden,false,'An old collapsed preference cannot hide the log');
+  assert.equal($('trip-panel').contains($('stop-list')),true);assert.equal($('route-stops-panel').hidden,false,'An old collapsed preference cannot hide the log');assert.equal(w.localStorage.getItem('redline-cities-collapsed'),null,'And is forgotten');
   const order=()=>Array.from(w.RedlineApp.getStops(),stop=>stop.name);
   let grip=$('stop-list').children[0].querySelector('.stop-grip');grip.focus();press('ArrowDown',grip,{altKey:true});
   assert.deepEqual(order(),['Madrid','Paris','Rome']);assert.equal($('trip-panel').hidden,false);
@@ -946,7 +1007,7 @@ test('cover motion waits for decoded snapshots and can close before its first mo
   w.HTMLImageElement.prototype.decode=function(){return this.closest('.album-snapshot')?new Promise(resolve=>releases.push(resolve)):Promise.resolve();};
   $('photos-button').click();await wait(()=>releases.length>0);
   assert.equal(motion.running.size,0,'No moving frame precedes the decoded spread');
-  assert.ok($('album-book').querySelector('.album-loading-cover'),'The original closed cover stays visible during preparation');
+  assert.equal($('album-book').dataset.preparing,'true','The book stays out of sight during preparation');
   const scene=$('album-book').querySelector('.album-cover-scene');assert.equal(scene.style.visibility,'hidden');
   // Release every pending decode, including a second snapshot of the spread.
   w.HTMLImageElement.prototype.decode=originalDecode;
@@ -1126,14 +1187,328 @@ test('contact-sheet turns freeze sticky headings and visible prints at their exa
 
 test('back up all saves the current route first and refuses to omit pending imports',async t=>{
   const {w,$,storage,trip,choose,press}=await setup(t,{seed:false});press('Escape');$('trips-button').click();
-  let backup=null,downloads=0;const exportArchive=storage.exportArchive;
-  storage.exportArchive=async id=>{backup=await exportArchive(id);return backup;};
+  let backup=null,downloads=0;const exportParts=storage.exportParts;
+  storage.exportParts=async id=>{const parts=await exportParts(id);backup=parts[0];return parts;};
   w.HTMLAnchorElement.prototype.click=()=>downloads++;
   w.RedlineApp.setStops([madrid,paris]);w.dispatchEvent(new w.Event('redline:routechange'));
   $('backup-trips').click();await wait(()=>$('backup-list').querySelectorAll('button').length===1);
   const records=await w.RedlineArchive.unpack(backup);assert.deepEqual(Array.from(records[0].trip.stops,stop=>stop.id),[madrid.id,paris.id]);assert.equal(downloads,1);
   $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);choose(['pending.jpg']);await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
-  press('Escape');$('trip-list').replaceChildren();$('trips-button').click();await wait(()=>$('trip-list').querySelector('.trip-card'));$('backup-trips').click();await wait(()=>$('trip-message').textContent==='Save the pending photos before exporting.');assert.equal(downloads,1);
+  press('Escape');$('trip-list').replaceChildren();$('trips-button').click();await wait(()=>$('trip-list').querySelector('.trip-card'));$('backup-trips').click();await wait(()=>$('trip-message').textContent==='Save or cancel the pending photos before exporting.');assert.equal(downloads,1);
+});
+
+const tokyo={id:'city-tokyo-001',name:'Tokyo',country:'Japan',latitude:35.68,longitude:139.69};
+const osaka={id:'city-osaka-001',name:'Osaka',country:'Japan',latitude:34.69,longitude:135.5};
+const rome={id:'city-rome-0001',name:'Rome',country:'Italy',latitude:41.9,longitude:12.5};
+const keptIn=store=>Object.fromEntries(Array.from({length:store.length},(_,i)=>[store.key(i),store.getItem(store.key(i))]));
+// Reloads a tab: the shared database and localStorage (last written by `writer`), its own sessionStorage, and the route draft app.js reads back.
+const reload=(t,tab,{writer=tab,route}={})=>setup(t,{route:route||JSON.parse(keptIn(writer.localStorage)['redline-tab-state-v1']).draft,seed:false,profile:{idb:tab.indexedDB,local:keptIn(writer.localStorage),session:keptIn(tab.sessionStorage)}});
+const routeIs=(w,route)=>assert.deepEqual(JSON.parse(JSON.stringify(w.RedlineApp.getStops().map(stop=>stop.id))),route.map(stop=>stop.id));
+const editRoute=(w,route)=>{w.RedlineApp.setStops(route);w.dispatchEvent(new w.Event('redline:routechange'));};
+const savedRoute=async(api,id)=>Array.from((await api(`/trips/${id}`)).trip.stops,stop=>stop.id);
+const downloadsOf=w=>{const names=[];w.HTMLAnchorElement.prototype.click=function(){names.push(this.download);};return names;};
+const openLogbook=async($,w)=>{if($('photo-panel').open){w.document.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await wait(()=>!$('photo-panel').open);}if($('trip-panel').hidden)$('trips-button').click();};
+const outOfStorage=()=>Object.assign(Error('This browser is out of storage. Export a backup before clearing anything.'),{status:507});
+// Lets a logbook list or a restore still reading the library finish before the test closes its page.
+const settled=()=>new Promise(resolve=>setTimeout(resolve,40));
+
+test('two tabs on different trips keep their own routes through a reload, and a backup never crosses them',async t=>{
+  const a=await setup(t,{seed:false}),japan=(await a.api('/trips',{method:'POST',body:JSON.stringify({title:'Japan',stops:[tokyo,osaka]})})).trip;
+  const b=await reload(t,a.w);
+  await wait(()=>b.$('trip-title').textContent==='A summer away');
+  await openLogbook(b.$,b.w);await wait(()=>[...b.$('trip-list').querySelectorAll('.trip-card')].some(row=>row.dataset.tripId===japan.id));
+  [...b.$('trip-list').querySelectorAll('.trip-card')].find(row=>row.dataset.tripId===japan.id).querySelector('.trip-open').click();
+  await wait(()=>b.$('trip-title').textContent==='Japan');
+  editRoute(a.w,[paris]);assert.equal(JSON.parse(keptIn(a.w.localStorage)['redline-tab-state-v1']).current.id,a.trip.id);
+  // Tab A wrote last, and tab B reloads with tab A's draft in the shared key.
+  const again=await reload(t,b.w,{writer:a.w,route:[paris]});
+  await wait(()=>again.$('trip-title').textContent==='Japan');routeIs(again.w,[tokyo,osaka]);
+  await wait(()=>again.$('trip-state').textContent==='All changes saved');
+  const names=downloadsOf(again.w);again.$('backup-trips').click();await wait(()=>names.length===1);await wait(()=>!again.$('backup-trips').disabled);
+  assert.deepEqual(await savedRoute(a.api,japan.id),[tokyo.id,osaka.id],'The other tab’s edit never reaches this trip');
+  assert.deepEqual(await savedRoute(a.api,a.trip.id),[paris.id,madrid.id],'and it stays unsaved in its own tab');
+  const fresh=await reload(t,a.w,{route:[paris]});await wait(()=>fresh.$('trip-title').textContent==='A summer away');routeIs(fresh.w,[paris]);
+  assert.equal(fresh.$('trip-state').textContent,'Unsaved changes','Reloading keeps the unsaved edit with its own trip');
+  const blocked=await setup(t,{seed:false,route:[paris],profile:{idb:a.w.indexedDB,local:{'redline-tab-state-v1':'{not json'},session:{'redline-tab-state-v1':JSON.stringify({current:null,draft:[{name:'Bad',latitude:999,longitude:0}]})}}});
+  await wait(()=>blocked.$('trip-state').textContent!=='');routeIs(blocked.w,[paris]);await settled();
+});
+
+test('a reload cannot defeat the revision check, and choosing the row reloads the newer save',async t=>{
+  const {w,$,api,trip}=await setup(t,{seed:false});
+  await openLogbook($,w);await wait(()=>$('trip-list').querySelector('.trip-card'));
+  // Another tab saves a newer route, and writes the newer revision into the shared storage.
+  const other=await reload(t,w);await wait(()=>other.$('trip-title').textContent===trip.title);
+  editRoute(other.w,[paris,madrid,rome]);other.$('save-trip').click();await wait(()=>other.$('trip-state').textContent==='All changes saved');
+  assert.equal(JSON.parse(keptIn(other.w.localStorage)['redline-tab-state-v1']).current.revision,2);
+  editRoute(w,[paris]);$('save-trip').click();
+  await wait(()=>/another tab/.test($('trip-message').textContent));assert.match($('trip-message').textContent,/Choose it in the logbook/);
+  assert.deepEqual(await savedRoute(api,trip.id),[paris.id,madrid.id,rome.id]);
+  const after=await reload(t,w,{writer:other.w,route:[paris]});await wait(()=>after.$('trip-title').textContent===trip.title);routeIs(after.w,[paris]);
+  await openLogbook(after.$,after.w);await wait(()=>after.$('trip-list').querySelector('.trip-card'));
+  after.$('save-trip').click();await wait(()=>/another tab/.test(after.$('trip-message').textContent));
+  assert.deepEqual(await savedRoute(after.api,trip.id),[paris.id,madrid.id,rome.id],'A reload keeps this tab’s old revision, so the save is still refused');
+  let asked=0;after.w.confirm=()=>{asked++;return false;};
+  await wait(()=>after.$('trip-list').querySelector('.trip-open:not(:disabled)'));after.$('trip-list').querySelector('.trip-open').click();await tick();
+  assert.equal(asked,1,'Discarding edits is asked first');routeIs(after.w,[paris]);
+  after.w.confirm=()=>true;after.$('trip-list').querySelector('.trip-open').click();
+  await wait(()=>after.$('trip-state').textContent==='All changes saved');routeIs(after.w,[paris,madrid,rome]);
+  editRoute(after.w,[paris,rome]);after.$('save-trip').click();await wait(()=>after.$('trip-state').textContent==='All changes saved');
+  assert.deepEqual(await savedRoute(after.api,trip.id),[paris.id,rome.id],'After loading the latest, saving works again');
+  await openLogbook(after.$,after.w);await wait(()=>after.$('trip-list').querySelector('.trip-open:not(:disabled)'));
+  after.$('trip-list').querySelector('.trip-open').click();assert.equal(after.$('trip-panel').hidden,true,'The open trip’s row folds the logbook again');await settled();
+});
+
+test('a route never saved stays protected after a reload; the untouched starter route does not nag',async t=>{
+  const first=await setup(t,{seed:false,profile:{},route:[tokyo,osaka,rome,paris]});
+  await wait(()=>first.$('trip-state').textContent==='4 stops · not saved yet');
+  const unload=new first.w.Event('beforeunload',{cancelable:true});first.w.dispatchEvent(unload);assert.equal(unload.defaultPrevented,true,'Leaving warns');
+  await first.api('/trips',{method:'POST',body:JSON.stringify({title:'Saved',stops:[madrid]})});
+  let asked=0;first.w.confirm=()=>{asked++;return false;};
+  await openLogbook(first.$,first.w);await wait(()=>first.$('trip-list').querySelector('.trip-open:not(:disabled)'));
+  first.$('trip-list').querySelector('.trip-open').click();await tick();assert.equal(asked,1);routeIs(first.w,[tokyo,osaka,rome,paris]);
+  first.$('new-trip').click();assert.equal(asked,2,'+ New trip asks too');routeIs(first.w,[tokyo,osaka,rome,paris]);
+  // Back up all covers saved trips only, and says so about the route on screen.
+  let file;const exportParts=first.storage.exportParts;first.storage.exportParts=async id=>{const parts=await exportParts(id);file=parts[0];return parts;};
+  const names=downloadsOf(first.w);first.$('backup-trips').click();await wait(()=>names.length===1);await wait(()=>/Your unsaved route is not in this backup\. Name and save it first to include it\./.test(first.$('trip-message').textContent));
+  assert.deepEqual(Array.from(await first.w.RedlineArchive.unpack(file),record=>record.trip.title),['Saved']);routeIs(first.w,[tokyo,osaka,rome,paris]);
+  const empty=await setup(t,{seed:false,profile:{},route:[]});await tick();
+  const clean=new empty.w.Event('beforeunload',{cancelable:true});empty.w.dispatchEvent(clean);assert.equal(clean.defaultPrevented,false,'An empty draft is clean');
+  const starter=await setup(t,{seed:false,profile:{},route:null,realMap:true});await tick();
+  assert.equal(starter.w.RedlineApp.isStarterRoute(),true);
+  const calm=new starter.w.Event('beforeunload',{cancelable:true});starter.w.dispatchEvent(calm);assert.equal(calm.defaultPrevented,false,'The first-run starter route is clean');
+  const real=await setup(t,{seed:false,profile:{},route:[tokyo,osaka],realMap:true});await tick();
+  assert.equal(real.w.RedlineApp.isStarterRoute(),false);
+  const warned=new real.w.Event('beforeunload',{cancelable:true});real.w.dispatchEvent(warned);assert.equal(warned.defaultPrevented,true,'A real route in the real app is protected');await settled();
+});
+
+test('a backup that would commit removing stops asks first, and Cancel backs up the saved route untouched',async t=>{
+  const {w,$,api,trip,storage}=await setup(t,{seed:false,route:[paris,madrid,rome]});
+  await openLogbook($,w);const names=downloadsOf(w);let backup,asked='';
+  const exportParts=storage.exportParts;storage.exportParts=async id=>{const parts=await exportParts(id);backup=parts[0];return parts;};
+  w.confirm=text=>{asked=text;return false;};
+  editRoute(w,[]);$('backup-trips').click();await wait(()=>names.length===1);await wait(()=>!$('backup-trips').disabled);
+  assert.match(asked,/removing 3 stops from “A summer away”/);
+  assert.deepEqual(await savedRoute(api,trip.id),[paris.id,madrid.id,rome.id],'The saved route survives');
+  assert.deepEqual(Array.from((await w.RedlineArchive.unpack(backup))[0].trip.stops,stop=>stop.id),[paris.id,madrid.id,rome.id],'and so does the file');
+  assert.match($('trip-message').textContent,/Your unsaved route changes are not in it/);assert.equal($('trip-message').classList.contains('error'),true);
+  assert.equal($('trip-state').textContent,'Unsaved changes');
+  w.confirm=text=>{asked=text;return true;};editRoute(w,[paris,madrid]);asked='';$('export-trip').click();await wait(()=>names.length===2);await wait(()=>!$('export-trip').disabled);
+  assert.match(asked,/removing 1 stop from/);assert.deepEqual(await savedRoute(api,trip.id),[paris.id,madrid.id],'OK saves as before');
+  assert.equal($('trip-state').textContent,'All changes saved');assert.match($('trip-message').textContent,/^Backup sent to your browser’s downloads\. Check that the file arrived/);assert.equal($('trip-message').classList.contains('error'),false);
+  asked='';editRoute(w,[madrid,paris]);$('backup-trips').click();await wait(()=>names.length===3);await wait(()=>!$('backup-trips').disabled);assert.equal(asked,'','Reordering removes nothing, so it does not ask');
+  w.confirm=()=>true;
+  // Finishing a backup goes on to refresh the logbook, which must end before the page is torn down.
+  await api('/trips');await tick();
+});
+
+test('out of storage, both exports still download and say what is missing',async t=>{
+  const {w,$,api,trip,storage}=await setup(t,{seed:false});
+  await openLogbook($,w);const names=downloadsOf(w),realApi=storage.api;
+  storage.api=async(path,options)=>{if(options?.method==='PUT')throw outOfStorage();return realApi(path,options);};
+  editRoute(w,[paris,madrid,rome]);
+  for(const [id,count] of [['backup-trips',1],['export-trip',2]]){
+    $(id).click();await wait(()=>names.length===count);await wait(()=>!$(id).disabled);
+    assert.match($('trip-message').textContent,/Your latest route edits could not be saved and are not in it/);
+  }
+  const record=storage.recordBackup;storage.recordBackup=async()=>{throw outOfStorage();};
+  $('backup-trips').click();await wait(()=>names.length===3);await wait(()=>!$('backup-trips').disabled);
+  assert.match($('trip-message').textContent,/date could not be recorded.*could not be saved and are not in it/,'A failed receipt keeps the warning');
+  storage.recordBackup=record;storage.api=realApi;
+  // A newer save elsewhere does not block a backup either.
+  await api(`/trips/${trip.id}`,{method:'PUT',body:JSON.stringify({title:trip.title,stops:[paris],revision:1})});
+  $('backup-trips').click();await wait(()=>names.length===4);await wait(()=>!$('backup-trips').disabled);
+  assert.match($('trip-message').textContent,/could not be saved and are not in it/);assert.deepEqual(await savedRoute(api,trip.id),[paris.id]);
+});
+
+test('pending photos refuse an export before anything changes, unless they could not be saved for lack of room',async t=>{
+  const {w,$,api,trip,choose,storage,press}=await setup(t,{seed:false});
+  choose(['pending.jpg']);await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+  press('Escape');await wait(()=>!$('photo-panel').open);
+  const names=downloadsOf(w);$('trips-button').click();editRoute(w,[paris]);
+  await wait(()=>$('trip-list').querySelector('.trip-card'));
+  $('backup-trips').click();await wait(()=>/^Save or cancel the pending photos/.test($('trip-message').textContent));
+  assert.equal(names.length,0);assert.deepEqual(await savedRoute(api,trip.id),[paris.id,madrid.id],'A refused backup commits nothing');
+  editRoute(w,[paris,madrid]);
+  const realApi=storage.api;storage.api=async(path,options)=>{if(/\/photos$/.test(path)&&options?.method==='POST')throw outOfStorage();return realApi(path,options);};
+  $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion&&$('photo-review').children.length===1);
+  $('photo-review').querySelector('select').value=paris.id;$('photo-review').querySelector('select').dispatchEvent(new w.Event('change',{bubbles:true}));
+  $('upload-photos').click();await wait(()=>/out of storage/.test($('photo-message').textContent));
+  press('Escape');await wait(()=>!$('photo-panel').open);$('trips-button').click();await wait(()=>!$('backup-trips').disabled);
+  $('backup-trips').click();await wait(()=>names.length===1);await wait(()=>!$('backup-trips').disabled);
+  assert.match($('trip-message').textContent,/The pending photos are not in it/);
+  storage.api=realApi;$('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion&&!$('upload-photos').disabled);
+  $('upload-photos').click();await wait(()=>/1 photo saved/.test($('photo-message').textContent));
+  choose(['another.jpg']);await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+  press('Escape');await wait(()=>!$('photo-panel').open);$('trips-button').click();await wait(()=>!$('backup-trips').disabled);
+  $('backup-trips').click();await wait(()=>/^Save or cancel the pending photos/.test($('trip-message').textContent));assert.equal(names.length,1,'A later save clears the out-of-room state');await settled();
+});
+
+test('a trip deleted elsewhere detaches with an explanation, keeps the route and pending photos, and can be saved again',async t=>{
+  const {w,$,api,trip,choose,press}=await setup(t,{seed:false});
+  choose(['pending.jpg']);await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+  press('Escape');await wait(()=>!$('photo-panel').open);$('trips-button').click();await wait(()=>$('trip-list').querySelector('.trip-card'));
+  await api('/trips',{method:'POST',body:JSON.stringify({title:'Kept',stops:[madrid]})});
+  await api(`/trips/${trip.id}`,{method:'DELETE'});editRoute(w,[paris,madrid,rome]);
+  $('save-trip').click();await wait(()=>/no longer in this browser/.test($('trip-message').textContent));
+  assert.equal($('trip-title').textContent,'');routeIs(w,[paris,madrid,rome]);assert.equal($('trip-state').textContent,'3 stops · not saved yet');
+  const names=downloadsOf(w);$('backup-trips').click();await wait(()=>names.length===1);await wait(()=>!$('backup-trips').disabled);
+  assert.match($('trip-message').textContent,/The pending photos are not in it\. Your unsaved route is not in this backup/,'The next backup says what it leaves out');
+  $('trip-name').value='Saved again';$('trip-name-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  await wait(()=>$('trip-title').textContent==='Saved again');
+  const saved=(await api('/trips')).trips.find(item=>item.title==='Saved again');assert.deepEqual(await savedRoute(api,saved.id),[paris.id,madrid.id,rome.id]);
+  $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion&&$('photo-review').children.length===1);
+  $('photo-review').querySelector('select').value=paris.id;$('photo-review').querySelector('select').dispatchEvent(new w.Event('change',{bubbles:true}));
+  $('upload-photos').click();await wait(()=>/1 photo saved/.test($('photo-message').textContent));assert.equal((await api(`/trips/${saved.id}`)).photos.length,1,'The pending photos go into the new trip');
+});
+
+test('a reload with its trip gone opens the logbook to say so, and the route stays protected',async t=>{
+  const {w,api,trip}=await setup(t,{seed:false}),state=keptIn(w.sessionStorage);
+  await api(`/trips/${trip.id}`,{method:'DELETE'});
+  const after=await setup(t,{seed:false,route:[paris,madrid],profile:{idb:w.indexedDB,session:state}});
+  await wait(()=>/no longer in this browser/.test(after.$('trip-message').textContent));
+  assert.equal(after.$('trip-panel').hidden,false);assert.equal(after.$('trip-title').textContent,'');routeIs(after.w,[paris,madrid]);
+  const unload=new after.w.Event('beforeunload',{cancelable:true});after.w.dispatchEvent(unload);assert.equal(unload.defaultPrevented,true);await settled();
+});
+
+test('a photo save or move on a deleted trip explains itself rather than repeating Trip not found',async t=>{
+  const {w,$,api,trip,choose}=await setup(t,{seed:false});
+  choose(['one.jpg']);await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+  $('photo-review').querySelector('select').value=paris.id;$('photo-review').querySelector('select').dispatchEvent(new w.Event('change',{bubbles:true}));
+  await api(`/trips/${trip.id}`,{method:'DELETE'});
+  $('upload-photos').click();await wait(()=>/no longer in this browser/.test($('photo-message').textContent));
+  assert.equal($('photo-review').children.length,1,'The unsaved photo stays in review');
+  // With no trip left, Save leads to naming one rather than failing on it.
+  await wait(()=>!$('upload-photos').disabled);$('upload-photos').click();
+  await wait(()=>$('trip-message').textContent==='Name and save this trip to add photos.');await settled();
+});
+
+test('adding more photos after the trip was deleted elsewhere leads to naming one, and keeps those already in review',async t=>{
+  const {w,$,api,trip,choose}=await setup(t,{seed:false});
+  choose(['one.jpg']);await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+  $('photo-review').querySelector('select').value=paris.id;$('photo-review').querySelector('select').dispatchEvent(new w.Event('change',{bubbles:true}));
+  await api(`/trips/${trip.id}`,{method:'DELETE'});
+  $('upload-photos').click();await wait(()=>/no longer in this browser/.test($('photo-message').textContent)&&!$('choose-photos').disabled);
+  choose(['two.jpg']);await wait(()=>$('trip-message').textContent==='Name and save this trip to add photos.');
+  assert.equal($('photo-panel').open,false);$('trip-name').value='Named at last';$('trip-name-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  await wait(()=>$('trip-title').textContent==='Named at last'&&$('photo-panel').open&&!$('photo-panel').dataset.motion);
+  assert.equal($('photo-review').children.length,1,'The album returns with the photo still waiting');await settled();
+});
+
+test('a postcard draft kept in this tab follows the album’s rebuilt photos, so saved text stays visible and revisions stay right',async t=>{
+  const {w,$,api,trip,storage,prints,tab,press}=await setup(t);
+  const realApi=storage.api;tab(paris.id).click();prints()[0].click();$('flip-postcard').click();
+  const field=$('postcard-message');
+  field.value='old text';field.dispatchEvent(new w.Event('input'));$('save-postcard').click();await wait(()=>$('postcard-save-status').textContent==='Postcard saved.');
+  storage.api=async(path,options)=>{if(path.endsWith('/postcard'))throw outOfStorage();return realApi(path,options);};
+  field.value='NEW TEXT';field.dispatchEvent(new w.Event('input'));
+  w.confirm=()=>true;await w.RedlinePostcards.close();assert.equal($('photo-viewer').open,false,'The draft is kept in this tab');
+  press('Escape');await wait(()=>!$('photo-panel').open);
+  $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);
+  prints()[0].click();assert.equal(field.value,'NEW TEXT','The draft comes back');$('flip-postcard').click();
+  storage.api=realApi;$('save-postcard').click();await wait(()=>$('postcard-save-status').textContent==='Postcard saved.');
+  const stored=photos=>photos.find(photo=>photo.postcard?.message==='NEW TEXT');
+  const saved=stored((await api(`/trips/${trip.id}`)).photos);assert.ok(saved);assert.equal(saved.postcardRevision,3);
+  await w.RedlinePostcards.close();prints()[0].click();assert.equal(field.value,'NEW TEXT','The saved text is what reopens');
+  field.value='NEWER';field.dispatchEvent(new w.Event('input'));$('flip-postcard').click();$('save-postcard').click();
+  await wait(()=>$('postcard-save-status').textContent==='Postcard saved.');assert.equal($('postcard-error').textContent,'','No false conflict');
+  assert.equal((await api(`/trips/${trip.id}`)).photos.find(photo=>photo.id===saved.id).postcardRevision,4);
+});
+
+test('a backup reports what is known, and the list marks a trip changed since its backup',async t=>{
+  const {w,$,api,trip}=await setup(t,{seed:false});await openLogbook($,w);downloadsOf(w);
+  $('backup-trips').click();await wait(()=>$('backup-list').querySelector('button'));
+  assert.match($('trip-message').textContent,/^Backup sent to your browser’s downloads\. Check that the file arrived, and keep it somewhere private\.$/);
+  assert.match($('backup-list').textContent,/Exported /);assert.doesNotMatch($('backup-list').textContent,/changed since/);
+  await new Promise(resolve=>setTimeout(resolve,3));
+  const form=new FormData();form.append('photo',new Blob([jpeg],{type:'image/jpeg'}));form.append('stopId',paris.id);await api(`/trips/${trip.id}/photos`,{method:'POST',body:form});
+  $('trips-button').click();$('trips-button').click();await wait(()=>/changed since/.test($('backup-list').textContent));
+  $('backup-trips').click();await wait(()=>!/changed since/.test($('backup-list').textContent)&&!$('backup-trips').disabled);
+});
+
+test('a failure after the logbook folds reopens it to say so, for exports and imports alike',async t=>{
+  const {w,$,storage}=await setup(t,{seed:false});await openLogbook($,w);
+  const down=el=>el.dispatchEvent(new w.Event('pointerdown',{bubbles:true}));
+  let fail;const exportParts=storage.exportParts;storage.exportParts=()=>new Promise((resolve,reject)=>{fail=reject;});
+  $('backup-trips').click();await wait(()=>fail);down(w.document.body);assert.equal($('trip-panel').hidden,true);
+  fail(Error('The export went wrong.'));await wait(()=>$('trip-message').textContent==='The export went wrong.');
+  assert.equal($('trip-panel').hidden,false);assert.equal($('trip-message').classList.contains('error'),true);storage.exportParts=exportParts;
+  await wait(()=>!$('backup-trips').disabled);
+  const importArchive=storage.importArchive;fail=null;storage.importArchive=()=>new Promise((resolve,reject)=>{fail=reject;});
+  Object.defineProperty($('trip-backup-file'),'files',{configurable:true,value:[new File(['broken'],'broken.redline')]});
+  $('trip-backup-file').dispatchEvent(new w.Event('change',{bubbles:true}));await wait(()=>fail);down(w.document.body);assert.equal($('trip-panel').hidden,true);
+  fail(Error('This is not a complete Redline backup.'));await wait(()=>$('trip-message').textContent==='This is not a complete Redline backup.');
+  assert.equal($('trip-panel').hidden,false);storage.importArchive=importArchive;
+});
+
+test('saving an import that would pass 100 stops changes nothing and says why',async t=>{
+  const route=Array.from({length:98},(_,i)=>({id:`city-route-${String(i).padStart(4,'0')}`,name:`Stop ${i}`,country:'',latitude:i-49,longitude:0}));
+  const {w,$,api,trip,choose}=await setup(t,{seed:false,route});
+  const places=[['North',60,10,'A'],['East',61,20,'B'],['South',62,30,'C']];
+  w.fetch=async()=>({ok:true,json:async()=>places});
+  w.exifr.gps=async file=>{const place=places[Number(file.name[0])];return {latitude:place[1],longitude:place[2]};};
+  let added=0;w.RedlineApp.addCity=place=>{added++;const stop={...place,id:`city-added-${String(added).padStart(4,'0')}`};editRoute(w,[...w.RedlineApp.getStops(),stop]);return stop;};
+  choose(['0.jpg','1.jpg','2.jpg','0b.jpg']);await wait(()=>$('photo-review').children.length===4&&!$('choose-photos').disabled);
+  $('upload-photos').click();await wait(()=>/would add 3 stops, and a trip holds 100/.test($('photo-message').textContent));
+  assert.equal(added,0);assert.equal(w.RedlineApp.getStops().length,98,'The route is untouched');assert.equal((await api(`/trips/${trip.id}`)).photos.length,0);
+  assert.equal($('upload-photos').disabled,false,'Choosing existing stops for some of them is still possible');
+  $('photo-review').querySelectorAll('select')[0].value=route[0].id;$('photo-review').querySelectorAll('select')[0].dispatchEvent(new w.Event('change',{bubbles:true}));
+  $('photo-review').querySelectorAll('select')[3].value=route[0].id;$('photo-review').querySelectorAll('select')[3].dispatchEvent(new w.Event('change',{bubbles:true}));
+  $('upload-photos').click();await wait(()=>/4 photos saved/.test($('photo-message').textContent));
+  assert.equal(added,2);assert.equal((await api(`/trips/${trip.id}`)).photos.length,4);assert.equal((await api(`/trips/${trip.id}`)).trip.stops.length,100);
+});
+
+test('a stop removed during a paged import releases its photos on unseen pages',async t=>{
+  const {w,$,api,trip,choose,change,press}=await setup(t,{seed:false});
+  choose(Array.from({length:72},(_,i)=>`p${i}.jpg`));await wait(()=>$('review-range').textContent==='1–70 of 72'&&!$('choose-photos').disabled);
+  change('bulk-photo-city',madrid.id);assert.equal($('upload-photos').textContent,'Save 72 photos');
+  [...$('photo-review').querySelectorAll('select')].slice(0,3).forEach(select=>{select.value=paris.id;select.dispatchEvent(new w.Event('change',{bubbles:true}));});
+  press('Escape');await wait(()=>!$('photo-panel').open);editRoute(w,[paris]);
+  $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);
+  assert.equal($('upload-photos').textContent,'Save 3 photos','Photos on page 2 no longer count as ready');assert.equal($('photo-ready-count').textContent,'69 need a city');
+  $('upload-photos').click();await wait(()=>/Choose a city for the remaining photos/.test($('photo-message').textContent));
+  assert.equal((await api(`/trips/${trip.id}`)).photos.length,3);assert.equal($('photo-message').classList.contains('error'),false);
+});
+
+test('photos that cannot be read are named, and backup files keep readable names',async t=>{
+  const {w,$,choose}=await setup(t,{seed:false});
+  w.createImageBitmap=async file=>{if(/^bad/.test(file.name))throw Error('Cannot decode');return {width:1600,height:1000,close(){}};};
+  w.Image=class{set src(_){this.onerror?.();}};
+  choose(['ok1.jpg','bad-IMG_0042.jpg','ok2.jpg']);await wait(()=>$('photo-review').children.length===2&&!$('choose-photos').disabled);
+  assert.match($('photo-message').textContent,/^1 photo could not be read and was not added: bad-IMG_0042\.jpg\. /);
+  choose(Array.from({length:12},(_,i)=>`bad-${i}.jpg`));await wait(()=>/12 photos/.test($('photo-message').textContent)&&!$('choose-photos').disabled);
+  assert.match($('photo-message').textContent,/^12 photos could not be read and were not added: bad-0\.jpg, .*bad-9\.jpg and 2 more\. /);
+  $('cancel-photo-import').click();
+  await openLogbook($,w);const names=downloadsOf(w);
+  for(const [title,file] of [['東京の旅','東京の旅'],['Kraków 2026','Kraków-2026'],['Йошкар-Ола','Йошкар-Ола'],['★★★','Redline-trip'],['Plain_name-1','Plain_name-1']]){
+    const count=names.length;await wait(()=>!$('export-trip').disabled);$('trip-name').value=title;$('trip-name-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+    await wait(()=>$('trip-title').textContent===title&&!$('export-trip').disabled);await wait(()=>$('trip-list').querySelector('.trip-name')?.textContent===title);
+    $('export-trip').click();await wait(()=>names.length===count+1);assert.equal(names.at(-1),`${file}.redline`);
+    await wait(()=>!$('export-trip').disabled);
+  }
+});
+
+test('a backup too big for one file goes out a part per click, and only the last part counts it as done',async t=>{
+  const {w,$,api,trip,storage}=await setup(t);await openLogbook($,w);
+  const names=downloadsOf(w),{size}=await (await fetch((await api(`/trips/${trip.id}`)).photos[0].url)).blob();
+  const split=w.RedlineArchive.split;w.RedlineArchive.split=records=>split(records,{bytes:size*1.2});
+  let blobs=[];const exportParts=storage.exportParts;storage.exportParts=async id=>blobs=await exportParts(id);
+  editRoute(w,[paris]);$('backup-trips').click();await wait(()=>names.length===1);await wait(()=>$('trip-message').querySelector('button'));
+  assert.equal(blobs.length,3);assert.deepEqual([...names],['Redline-backup-part-1-of-3.redline']);
+  assert.match($('trip-message').textContent,/needs 3 files.*not complete until you have them all/);
+  assert.equal($('trip-message').querySelector('button').textContent,'Download part 2 of 3');
+  await wait(()=>!$('backup-trips').disabled);assert.equal((await api(`/trips/${trip.id}`)).trip.backedUpAt,undefined,'One part is not a backup');
+  // Folding the logbook keeps the offer, because a forgotten part would be a lost part.
+  $('trips-button').click();assert.equal($('trip-panel').hidden,true);$('trips-button').click();
+  await wait(()=>$('trip-message').querySelector('button'));
+  $('trip-message').querySelector('button').click();assert.equal(names.at(-1),'Redline-backup-part-2-of-3.redline');assert.equal(names.length,2,'Each click sends one file');
+  assert.equal($('trip-message').querySelector('button').textContent,'Download part 3 of 3');assert.equal(w.document.activeElement,$('trip-message').querySelector('button'));
+  assert.equal((await api(`/trips/${trip.id}`)).trip.backedUpAt,undefined);
+  $('trip-message').querySelector('button').click();assert.equal(names.at(-1),'Redline-backup-part-3-of-3.redline');
+  await wait(()=>/Check that all 3 files arrived, and keep them somewhere private/.test($('trip-message').textContent));
+  assert.ok((await api(`/trips/${trip.id}`)).trip.backedUpAt,'The last part records the backup');assert.equal($('trip-message').querySelector('button'),null);
+  const target=await setup(t,{seed:false});let restored=0;for(const blob of blobs)restored+=(await target.storage.importArchive(blob)).photoCount;
+  assert.equal(restored,3,'Every photo comes back');
+  assert.ok((await target.api('/trips')).trips.some(saved=>saved.title==='A summer away (part 2)'));
 });
 
 test('browsing photos does not render large share exports until the postcard back is needed',async t=>{
@@ -1241,19 +1616,19 @@ test('thumbnail warming limits concurrent decodes so background work cannot floo
   await ready;assert.equal(peak,3);cache.clearPreloads();
 });
 
-test('the atlas paints connected landmasses once and keeps country borders out of its colour fills',async t=>{
+test('the map is one painted canvas, and only the land thumbnails need stay in the page',async t=>{
   const {w,$}=await setup(t,{realMap:true});
   const land=[...$('land').children];assert.equal(land.length,w.ATLAS_LAND.length);
   assert.ok(land.every((path,i)=>path.getAttribute('d')===w.ATLAS_LAND[i]));
-  assert.equal($('country-borders').children.length,w.ATLAS_BORDERS.length);
   assert.ok(land.every(path=>!path.style.fill),'Plain vector fills never invoke an image-backed pattern for each landmass');
-  assert.equal($('map').querySelectorAll('image').length,2,'Two small shared plates carry colour and world relief without runtime filters');
-  assert.equal($('atlas-tones').getAttribute('href'),'atlas-tones.png');
-  const colour=readFileSync(new URL('../public/atlas-tones.png',import.meta.url));
-  assert.ok(colour.length<256*1024,'The complete map shading stays below 256 KB');
-  assert.ok(colour.readUInt32BE(16)*colour.readUInt32BE(20)*4<=2*1024*1024,'Decoded shading uses at most 2 MB, independent of zoom');
-  assert.equal($('map').querySelectorAll('pattern image, filter, mask').length,0,'Zoom cannot allocate world-sized image pattern tiles or nested SVG documents');
-  assert.equal($('atlas-land-clip'),null);assert.equal($('land-washes'),null,'Camera frames have no full-world gradient clipping passes');
+  const source=$('land').closest('svg');
+  assert.ok(source.classList.contains('atlas-source'));assert.equal($('land').parentElement.tagName.toLowerCase(),'defs','Thumbnails reference the land without it ever rendering');
+  assert.equal($('map').tagName,'CANVAS');assert.equal($('map').childElementCount,0);
+  assert.equal(w.ATLAS_BORDERS,undefined);assert.equal(w.REGION_PATHS,undefined,'Borders and regions ship only to the worker');
+  for(const id of ['country-borders','regions','atlas-tones','atlas-overview','atlas-relief','map-labels','background-labels','map-artwork','atlas-land-clip','land-washes'])assert.equal($(id),null,`#${id} is gone`);
+  assert.equal(w.document.querySelectorAll('.atlas-source :is(image, pattern, filter, mask), #place-labels :is(image, pattern, filter, mask)').length,0,'What remains of the map in the page allocates no images or filters');
+  assert.equal($('place-labels').hasAttribute('viewBox'),false,'The route overlay stays in CSS pixels');
+  assert.equal(w.RedlineApp.atlas.supported,false,'Under jsdom the view is inert, and the map still works');
 });
 
 test('photo-view turns pause background thumbnail work and resume it after settling or dismissal',async t=>{
@@ -1328,7 +1703,7 @@ test('view turns keep the live destination painted throughout and retire the old
     w.requestAnimationFrame=callback=>{frames.push(callback);return frames.length;};
     [...motion.running].forEach(animation=>animation.finish());await tick();
     assert.equal($(target).style.visibility,'','The live destination is ready beneath the last frame');
-    assert.equal(layer.dataset.handoff,'true');assert.equal(layer.isConnected,true);
+    assert.equal(layer.isConnected,true);
     assert.equal(layer.querySelector(':scope > .album-view-surface > .album-snapshot'),null,'The outgoing stationary half is retired while the final turning face still covers its side');
     frames.shift()(w.performance.now());await tick();
     assert.equal(layer.isConnected,true,'The completed leaf covers the live page for a full paint opportunity');
@@ -1338,7 +1713,7 @@ test('view turns keep the live destination painted throughout and retire the old
   $('sheet-view').click();await wait(()=>motion.running.size===4);
   const layer=$('album-book').querySelector('.album-view-layer'),frames=[];
   w.requestAnimationFrame=callback=>{frames.push(callback);return frames.length;};
-  [...motion.running].forEach(animation=>animation.finish());await tick();assert.equal(layer.dataset.handoff,'true');
+  [...motion.running].forEach(animation=>animation.finish());await tick();assert.equal(layer.querySelector(':scope > .album-view-surface > .album-snapshot'),null);
   w.requestAnimationFrame=nativeFrame;press('Escape');frames.forEach(callback=>callback(w.performance.now()));
   await wait(()=>motion.running.size===3);await motion.finish();
   assert.equal($('photo-panel').open,false);assert.equal(layer.isConnected,false);
@@ -1366,47 +1741,53 @@ test('legacy thumbnail generation waits for a page turn to finish',async t=>{
 });
 
 test('map frames read layout before painting, skip unchanged scenes, and defer hidden map work until the album closes',async t=>{
-  const {w,$,press}=await setup(t,{realMap:true}),frames=new Map();let next=10000,time=w.performance.now();
-  w.requestAnimationFrame=callback=>{const id=++next;frames.set(id,callback);return id;};w.cancelAnimationFrame=id=>frames.delete(id);
-  const frame=()=>{time+=16;for(const id of [...frames.keys()]){const callback=frames.get(id);frames.delete(id);callback?.(time);}};
+  const {w,$,press}=await setup(t,{realMap:true}),{frame}=mapClock(w);
   press('Escape');await tick();frame();await tick();
-  const map=$('map'),mutations=[],observer=new w.MutationObserver(records=>mutations.push(...records));observer.observe(map,{attributes:true,subtree:true});
-  map.getScreenCTM=()=>{throw Error('Camera input must not force SVG layout');};
-  w.RedlineApp.refreshLayout();frame();await tick();assert.equal(mutations.length,0,'An unchanged scene does not rewrite SVG geometry, labels, or dots');
-  const read=w.Element.prototype.getBoundingClientRect,write=w.Element.prototype.setAttribute;let activity=[];
+  const map=$('map'),overlay=$('place-labels'),atlas=w.RedlineApp.atlas,mutations=[],observer=new w.MutationObserver(records=>mutations.push(...records));
+  for(const node of [map,overlay])observer.observe(node,{attributes:true,childList:true,subtree:true});
+  const update=atlas.update,release=atlas.release;let activity=[],updates=0,releases=0;
+  atlas.update=(...args)=>{updates++;activity.push('write');return update(...args);};
+  atlas.release=()=>{releases++;return release();};
+  const read=w.Element.prototype.getBoundingClientRect,write=w.Element.prototype.setAttribute;
   w.Element.prototype.getBoundingClientRect=function(){activity.push('read');return read.call(this);};
-  w.Element.prototype.setAttribute=function(...args){if(this===map||map.contains(this))activity.push('write');return write.apply(this,args);};
+  w.Element.prototype.setAttribute=function(...args){if(this===map||overlay.contains(this))activity.push('write');return write.apply(this,args);};
+  w.RedlineApp.refreshLayout();frame();await tick();assert.ok(activity.includes('read'),'The frame really ran');
+  assert.equal(mutations.length,0,'An unchanged scene does not rewrite the overlay, labels, or dots');
+  assert.equal(updates,0,'Nor does it repaint the atlas');
   $('zoom-in').click();
   for(let i=0;i<90;i++){
     activity=[];frame();const firstWrite=activity.indexOf('write');
-    if(firstWrite>=0)assert.ok(!activity.slice(firstWrite).includes('read'),'A zoom frame never forces layout after changing SVG attributes');
+    if(firstWrite>=0)assert.ok(!activity.slice(firstWrite).includes('read'),'A zoom frame never forces layout after changing the overlay or the atlas');
   }
-  await tick();assert.ok(mutations.some(record=>record.target===map&&record.attributeName==='viewBox'));
-  const old=map.getAttribute('viewBox').split(' ').map(Number),anchor=[old[0]+old[2]*.2,old[1]+old[3]*.3];
+  await tick();assert.ok(updates>5,'Camera motion reaches the painted map');
+  assert.ok(mutations.every(({target,type,attributeName})=>type==='attributes'&&(target!==map||attributeName==='class')),'Camera motion goes through atlas.update: the canvas keeps its attributes and no overlay nodes are rebuilt');
+  assert.equal(map.childElementCount,0);
+  const old=camera(w),anchor=[old.x+old.w*.2,old.y+old.h*.3];
   map.dispatchEvent(new w.WheelEvent('wheel',{clientX:288,clientY:270,deltaY:-100,bubbles:true,cancelable:true}));
   for(let i=0;i<90;i++)frame();await tick();
-  const zoomed=map.getAttribute('viewBox').split(' ').map(Number);
-  assert.ok(Math.abs((anchor[0]-zoomed[0])/zoomed[2]-.2)<1e-6&&Math.abs((anchor[1]-zoomed[1])/zoomed[3]-.3)<1e-6,'Wheel zoom preserves the point beneath the cursor');
-  assert.ok(mutations.every(record=>record.target!==$('atlas-tones')),'Camera motion never rebuilds or resizes the colour image');
-  const before=map.getAttribute('viewBox');mutations.length=0;
-  $('photo-panel').showModal();await tick();$('zoom-in').click();
+  const zoomed=camera(w);
+  assert.ok(zoomed.w<old.w,'The wheel zooms');
+  assert.ok(Math.abs((anchor[0]-zoomed.x)/zoomed.w-.2)<1e-6&&Math.abs((anchor[1]-zoomed.y)/zoomed.h-.3)<1e-6,'Wheel zoom preserves the point beneath the cursor');
+  const before=camera(w);mutations.length=0;updates=0;
+  $('photo-panel').showModal();await tick();assert.equal(releases,1,'The album takes back the memory of the close-up tiles');
+  $('zoom-in').click();
   for(let i=0;i<90;i++)frame();await tick();
   assert.equal(mutations.length,0,'The open album has the rendering budget; camera state can advance without painting the dimmed map');
-  assert.equal(map.getAttribute('viewBox'),before);
+  assert.equal(updates,0,'The atlas is not asked to paint behind the album');
+  assert.deepEqual(camera(w),before);
   $('photo-panel').close();await tick();frame();await tick();
-  assert.notEqual(map.getAttribute('viewBox'),before,'Closing immediately paints the current camera position');
+  assert.ok(updates>0);assert.notDeepEqual(camera(w),before,'Closing immediately paints the current camera position');
+  assert.equal(releases,1);
   observer.disconnect();
 });
 
 test('crowded route names retain safe widths and clear one another through camera zooms',async t=>{
   const cities=[['Puerto Ayora',-.74,-90.31],['Quito',-.18,-78.47],['Vienna',48.21,16.37],['Bratislava',48.15,17.11],['Budapest',47.5,19.04],['Prague',50.08,14.44],['Berlin',52.52,13.4],['Munich',48.14,11.58],['Salzburg',47.8,13.04]];
   const route=cities.map(([name,latitude,longitude],i)=>({id:`cluster-${i}`,name,latitude,longitude,country:'Test'}));
-  const {w,$,press}=await setup(t,{realMap:true,route,seed:false,textLength:2}),frames=new Map();let next=10000,time=0;
-  w.requestAnimationFrame=callback=>{frames.set(++next,callback);return next;};w.cancelAnimationFrame=id=>frames.delete(id);
-  const frame=()=>{time+=16;for(const [id,callback] of [...frames]){frames.delete(id);callback(time);}};
-  press('Escape');await tick();$('zoom-in').click();for(let i=0;i<120;i++)frame();$('zoom-out').click();for(let i=0;i<120;i++)frame();
+  const {w,$,press}=await setup(t,{realMap:true,route,seed:false,textLength:2}),clock=mapClock(w);
+  press('Escape');await tick();clock.frame();$('zoom-in').click();clock.settle();$('zoom-out').click();clock.settle();
   for(let zoom=0;zoom<5;zoom++){
-    const [vx,vy,vw,vh]=$('map').getAttribute('viewBox').split(' ').map(Number),boxes=[];
+    const {x:vx,y:vy,w:vw,h:vh}=camera(w),boxes=[];
     for(const group of $('route-stops').children){
       const text=group.querySelector('text');assert.ok(text._width>=text.textContent.length*8.3,'A short browser measurement never poisons the cached width');
       if(text.classList.contains('label-hidden'))continue;
@@ -1416,20 +1797,25 @@ test('crowded route names retain safe widths and clear one another through camer
       boxes.push(box);
     }
     assert.ok(boxes.length>0);
-    $('map').dispatchEvent(new w.WheelEvent('wheel',{clientX:785,clientY:245,deltaY:-200,bubbles:true,cancelable:true}));for(let i=0;i<120;i++)frame();
+    // Zoom on the cluster itself: at today's wheel gain anywhere else carries it out of the window.
+    $('map').dispatchEvent(new w.WheelEvent('wheel',{clientX:785,clientY:205,deltaY:-200,bubbles:true,cancelable:true}));clock.settle();
   }
 });
 
 test('geographic headings yield to route city labels instead of drawing through them',async t=>{
-  const route=[{id:'atlas-conflict',name:'A very long city label',country:'Test',longitude:16,latitude:51.5}];
-  const {w,$,press}=await setup(t,{realMap:true,route,seed:false});
-  const frames=new Map();let next=10000,time=0;
-  w.requestAnimationFrame=callback=>{frames.set(++next,callback);return next;};w.cancelAnimationFrame=id=>frames.delete(id);
-  press('Escape');await tick();
-  for(const id of ['zoom-in','zoom-out']){$(id).click();for(let i=0;i<120;i++){time+=16;for(const [frame,callback] of [...frames]){frames.delete(frame);callback(time);}}}
-  const europe=[...$('map-labels').children].find(label=>label.textContent==='EUROPE');
-  assert.equal(europe.style.visibility,'hidden','The atlas heading shares the city collision layout');
-  assert.equal($('route-stops').querySelector('text').classList.contains('label-hidden'),false,'The trip keeps priority over decorative names');
+  const names=async(...places)=>{
+    const route=places.map(([longitude,latitude],i)=>({id:`atlas-conflict-${i}`,name:'A very long city label',country:'Test',longitude,latitude}));
+    const {w,$,press}=await setup(t,{realMap:true,route,seed:false}),clock=mapClock(w);
+    press('Escape');await tick();clock.frame();
+    for(const id of ['zoom-in','zoom-out']){$(id).click();clock.settle();}
+    assert.equal($('route-stops').querySelector('text').classList.contains('label-hidden'),false,'The trip keeps priority over decorative names');
+    assert.deepEqual(camera(w),{x:0,y:0,w:1440,h:720});
+    return lettered(w);
+  };
+  assert.equal((await names([16,51.5])).includes('Europe'),false,'The atlas heading shares the city collision layout, and simply goes unlettered');
+  assert.equal((await names([-150,-50])).includes('Europe'),true,'With the route elsewhere the heading is lettered');
+  const crossing=await names([0,7.5],[40,7.5]);
+  assert.equal(crossing.includes('Africa'),false,'A heading never sits under the red line either');assert.equal(crossing.includes('Europe'),true);
 });
 
 test('turning pages keep their measured padding when removed from the live grid',async t=>{
@@ -1493,8 +1879,10 @@ test('the fullscreen front cover keeps its index usable until the book opens',as
   press('Home');press('f');
   assert.ok(panel.classList.contains('cover-view'));
   assert.equal($('gallery-filter').inert,false);assert.equal($('album-drawer').inert,false);
-  assert.equal(tab(paris.id).querySelector('.chip-stop').title,'Page 3');
-  assert.equal(tab(paris.id).querySelector('.chip-count').title,'2 photos');
+  const chip=tab(paris.id).querySelector('.chip-stop');
+  assert.equal(chip.textContent,'3');assert.equal(chip.hasAttribute('title'),false);assert.equal(chip.getAttribute('aria-hidden'),'true','The tab itself speaks for its page number');
+  assert.equal(tab(paris.id).querySelector('.chip-count'),null);
+  assert.equal(tab(paris.id).title,'Paris · page 3 · 2 photos');assert.equal(tab(paris.id).getAttribute('aria-label'),tab(paris.id).title);
   $('album-edge').dispatchEvent(new w.Event('pointerenter'));
   assert.equal(panel.classList.contains('index-open'),false,'The cover index needs no sliding reveal');
   tab(paris.id).click();
@@ -1630,20 +2018,1176 @@ test('Backspace returns to the overview faster while preserving its exact final 
   const route=[paris,{...paris,id:'near-paris',name:'Saint-Denis',latitude:48.9362,longitude:2.3574},madrid];
   const {w,$,press}=await setup(t,{realMap:true,route,seed:false});
   press('Escape');await tick();
-  const frames=new Map();let id=10000,now=1000;
-  Object.defineProperty(w.performance,'now',{value:()=>now});
-  w.requestAnimationFrame=callback=>{frames.set(++id,callback);return id;};w.cancelAnimationFrame=key=>frames.delete(key);
-  const world=$('map').getAttribute('viewBox');
+  const clock=mapClock(w),world={x:0,y:0,w:1440,h:720};
+  assert.deepEqual(camera(w),world);
   const returning=key=>{
     $('next-city').click();$('next-city').click();$('next-city').click();
-    assert.notEqual($('map').getAttribute('viewBox'),world);
-    const start=now;press(key);
-    assert.notEqual($('map').getAttribute('viewBox'),world,'The shortcut still glides instead of jumping');
-    while($('map').getAttribute('viewBox')!==world&&now-start<12000){
-      now+=16;for(const [key,callback] of [...frames]){frames.delete(key);callback(now);}
-    }
-    assert.equal($('map').getAttribute('viewBox'),world);return now-start;
+    assert.notDeepEqual(camera(w),world);
+    const start=clock.now;press(key);
+    assert.notDeepEqual(camera(w),world,'The shortcut still glides instead of jumping');
+    const far=camera(w).w;clock.frame();assert.ok(camera(w).w>far*1.02,`The camera answers on the very first frame (${camera(w).w/far})`);
+    while(JSON.stringify(camera(w))!==JSON.stringify(world)&&clock.now-start<12000)clock.frame();
+    assert.deepEqual(camera(w),world);return clock.now-start;
   };
   const normal=returning('Home'),quick=returning('Backspace');
   assert.ok(quick>normal*.7&&quick<normal*.78,`${quick}ms versus ${normal}ms`);
+  assert.ok(normal<1800,`Even from a close-up, the whole world is ${normal}ms away`);
+  // An ordinary camera hop takes 300 to 820ms, however far it goes.
+  for(const hop of [paris.id,'near-paris',madrid.id,paris.id]){w.RedlineApp.focusStop(hop);const took=clock.settle();assert.ok(took>=300&&took<=836,`A hop took ${took}ms`);}
+});
+
+test('wheel zoom holds the point under the cursor still and reaches a large zoom quickly',async t=>{
+  const {w,$,press}=await setup(t,{realMap:true,seed:false}),clock=mapClock(w),map=$('map');
+  press('Escape');await tick();clock.frame();assert.equal(camera(w).w,1440);
+  const wheel=(deltaY,extra={})=>map.dispatchEvent(new w.WheelEvent('wheel',{clientX:288,clientY:270,deltaY,bubbles:true,cancelable:true,...extra}));
+  const began=clock.now;let reached=null;
+  for(let i=0;i<40;i++){
+    if(i<6)assert.equal(wheel(-160),false,'The wheel zooms the map, never the page');
+    clock.frame();
+    const {x,y,w:width,h:height}=camera(w);
+    assert.ok(Math.abs(x+width*.2-288)<1e-6&&Math.abs(y+height*.3-216)<1e-6,`The point under the cursor stays put (frame ${i})`);
+    if(reached===null&&1440/width>=20)reached=clock.now-began;
+  }
+  assert.ok(reached!==null&&reached<400,`Six firm notches reach 20× in ${reached}ms`);
+  // Gains, with the camera already well inside its limits so nothing clamps.
+  const near=(actual,expected,message)=>assert.ok(Math.abs(actual/expected-1)<1e-9,`${message}: ${actual} versus ${expected}`);
+  const step=(...args)=>{const before=camera(w).w;wheel(...args);clock.settle();return camera(w).w/before;};
+  near(step(100),Math.exp(.34),'A wheel tick');near(step(-100),Math.exp(-.34),'And back');
+  near(step(-100,{ctrlKey:true}),Math.exp(-1.2),'A trackpad pinch arrives as a much smaller control-wheel');near(step(100,{ctrlKey:true}),Math.exp(1.2),'And back');
+  near(step(-3,{deltaMode:1}),Math.exp(-99*.0034),'A line is 33 pixels');near(step(3,{deltaMode:1}),Math.exp(99*.0034),'And back');
+  near(step(-900),Math.exp(-160*.0034),'One event is capped');near(step(900),Math.exp(160*.0034),'And back');
+  const before=camera(w).w;assert.equal(step(0),1,'A sideways scroll does not zoom');assert.equal(camera(w).w,before);
+  // The +/- buttons take a confident step and settle fast on the idle spring.
+  const press1=id=>{const width=camera(w).w;$(id).click();const took=clock.settle();return [camera(w).w/width,took];};
+  const [inward,inTime]=press1('zoom-in'),[outward,outTime]=press1('zoom-out');
+  near(inward,.6,'Zoom in');near(outward,1/.6,'Zoom out');
+  assert.ok(inTime<=300&&outTime<=300,`The buttons settle in ${inTime} and ${outTime}ms`);
+});
+
+test('two touch pointers pinching apart zoom in around their midpoint',async t=>{
+  const {w,$,press}=await setup(t,{realMap:true,seed:false}),clock=mapClock(w),map=$('map');
+  press('Escape');await tick();clock.frame();
+  const touch=(type,id,x,y)=>{
+    const event=new w.MouseEvent(type,{button:0,clientX:x,clientY:y,bubbles:true,cancelable:true});
+    Object.defineProperties(event,{pointerId:{value:id},pointerType:{value:'touch'}});map.dispatchEvent(event);
+  };
+  const near=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-6,`${actual} versus ${expected}`);
+  touch('pointerdown',1,600,450);touch('pointerdown',2,700,450);
+  assert.equal(camera(w).w,1440,'Two fingers landing do not move the map');
+  touch('pointermove',2,800,450);clock.settle();
+  let view=camera(w);near(view.w,720);near(view.h,360);
+  near(view.x+view.w*700/1440,700);near(view.y+view.h*.5,360);
+  const spread=view.x+view.w*600/1440;touch('pointermove',1,400,450);clock.settle();
+  view=camera(w);near(view.w,360);near(view.x+view.w*600/1440,spread);
+  touch('pointermove',1,600,450);touch('pointermove',2,700,450);clock.settle();
+  view=camera(w);near(view.w,1440);
+  // A lifted finger ends the pinch instead of turning the other one into a zoom.
+  touch('pointerup',1,600,450);touch('pointermove',2,900,450);clock.settle();assert.equal(camera(w).w,view.w);
+  touch('pointerup',2,900,450);
+  // From a close-up, one finger drags until the second lands.
+  touch('pointerdown',1,600,450);touch('pointerdown',2,700,450);touch('pointermove',2,900,450);clock.settle();
+  near(camera(w).w,480);touch('pointerup',1,600,450);touch('pointerup',2,900,450);
+  touch('pointerdown',1,600,450);assert.ok(map.classList.contains('dragging'),'One finger drags a close-up');
+  touch('pointerdown',2,700,450);assert.equal(map.classList.contains('dragging'),false,'A second finger takes over from the drag');
+  touch('pointermove',2,800,450);clock.settle();near(camera(w).w,240);
+});
+
+test('a mouse double-click zooms in unless the controls are hidden, where it brings them back',async t=>{
+  const {w,$,press}=await setup(t,{realMap:true,seed:false}),clock=mapClock(w),map=$('map');
+  press('Escape');await tick();clock.frame();
+  const double=(extra={})=>{map.dispatchEvent(new w.MouseEvent('dblclick',{clientX:360,clientY:450,bubbles:true,...extra}));clock.settle();return camera(w);};
+  const zoomed=double();assert.equal(zoomed.w,720);assert.ok(Math.abs(zoomed.x+zoomed.w*.25-360)<1e-6&&Math.abs(zoomed.y+zoomed.h*.5-360)<1e-6,'At the pointer');
+  assert.equal(double({shiftKey:true}).w,1440,'Shift zooms back out');
+  press('h');assert.ok(w.document.body.classList.contains('map-only'));assert.equal(w.document.querySelector('.zoom-controls').inert,true);
+  const hidden=camera(w);assert.deepEqual(double(),hidden,'With the controls hidden it does not zoom');
+  assert.equal(w.document.body.classList.contains('map-only'),false,'It brings them back');assert.equal(w.document.querySelector('.zoom-controls').inert,false);
+  assert.equal(double().w,720,'And then zooms as usual');
+});
+
+test('every great name lettered at world view is inside the sheet, and an empty chart has its headings',async t=>{
+  const {w,press}=await setup(t,{realMap:true,route:[],seed:false}),clock=mapClock(w);
+  press('Escape');await tick();clock.frame();
+  assert.equal(w.RedlineApp.getStops().length,0);assert.deepEqual(camera(w),{x:0,y:0,w:1440,h:720});
+  const atlas=w.RedlineApp.atlas,great=atlas.labels.filter(label=>label.kind==='continent'||label.kind==='ocean'),names=great.map(label=>label.text);
+  for(const name of ['Europe','Atlantic Ocean'])assert.ok(names.includes(name),`${name} is lettered: ${names}`);
+  assert.equal(names.includes('EUROPE'),false,'Names are stored in natural case; capitals are the lettering\'s business');
+  assert.equal(new Set(names).size,names.length);assert.ok(names.length>=8,`Most of the great names fit: ${names}`);
+  for(const label of great){
+    // Measured as the lettering is drawn, turned to its angle, within the chart's graduated border (6px inset, 4.5px bar).
+    const {w:width,h:height}=atlas.measure(label.kind,label.text,label.angle,label.curve),turn=label.angle*Math.PI/180,cos=Math.abs(Math.cos(turn)),sin=Math.abs(Math.sin(turn));
+    const halfW=(width*cos+height*sin)/2,halfH=(width*sin+height*cos)/2;
+    assert.ok(label.x-halfW>=10.5&&label.x+halfW<=1429.5&&label.y-halfH>=10.5&&label.y+halfH<=889.5,`${label.text} stays on the sheet at ${label.x},${label.y}`);
+  }
+});
+
+test('a seven-stop trip sails start to finish in under twelve seconds, and holding Return hurries it',async t=>{
+  const cities=[['New York',-74.006,40.7128],['London',-.1257,51.5085],['Cairo',31.2497,30.0626],['Delhi',77.2315,28.6519],['Tokyo',139.6917,35.6895],['Sydney',151.2073,-33.8679],['Rio de Janeiro',-43.1729,-22.9068]];
+  const route=cities.map(([name,longitude,latitude],i)=>({id:`world-stop-${i}`,name,country:'Test',longitude,latitude}));
+  const {w,$,press}=await setup(t,{realMap:true,route,seed:false}),clock=mapClock(w);
+  press('Escape');await tick();clock.frame();
+  const sail=start=>{
+    const began=clock.now;start();assert.equal($('play-label').textContent,'Pause');
+    while($('play-label').textContent==='Pause'&&clock.now-began<60000)clock.frame();
+    assert.deepEqual(camera(w),{x:0,y:0,w:1440,h:720},'Every trip ends on the whole world');return clock.now-began;
+  };
+  const normal=sail(()=>$('play').click());assert.ok(normal<12000,`The trip took ${normal}ms`);
+  const hurried=sail(()=>press('Enter'));w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:'Enter',bubbles:true}));
+  assert.ok(hurried<normal/1.9&&hurried>normal/2.6,`Held, ${hurried}ms against ${normal}ms: 2.5× after a moment's grace`);
+  assert.ok(Math.abs(sail(()=>$('play').click())-normal)<50,'Letting go returns to normal speed');
+  // However far an ordinary hop goes, it is over in 820ms.
+  w.RedlineApp.focusStop('world-stop-0');clock.settle();
+  for(let i=0;i<4;i++)$('map').dispatchEvent(new w.WheelEvent('wheel',{clientX:720,clientY:450,deltaY:-160,bubbles:true,cancelable:true}));clock.settle();
+  w.RedlineApp.focusStop('world-stop-5');const across=clock.settle();assert.ok(Math.abs(across-820)<=16,`New York to Sydney took ${across}ms`);
+});
+
+test('a trace zoomed in by hand slows to less than half pace at most, and waits at most 620ms at each port',async t=>{
+  const cities=[['London',-.1257,51.5085],['Cairo',31.2497,30.0626],['Delhi',77.2315,28.6519],['Tokyo',139.6917,35.6895]];
+  const route=cities.map(([name,longitude,latitude],i)=>({id:`manual-stop-${i}`,name,country:'Test',longitude,latitude}));
+  const {w,$,press}=await setup(t,{realMap:true,route,seed:false}),clock=mapClock(w),map=$('map');
+  press('Escape');await tick();clock.frame();
+  const until=step=>{const began=clock.now;while(map.dataset.tripStep!==String(step)&&clock.now-began<20000)clock.frame();assert.equal(map.dataset.tripStep,String(step));return clock.now-began;};
+  const legTime=(a,b)=>w.RedlineTrace.duration(w.RedlineTrace.measure(w.RedlineLayout.route(w.RedlineGeo.geoInterpolate(a,b))).length);
+  $('play').click();clock.run(3);
+  for(let i=0;i<12;i++)map.dispatchEvent(new w.WheelEvent('wheel',{clientX:720,clientY:450,deltaY:-160,bubbles:true,cancelable:true}));
+  assert.equal($('play-label').textContent,'Pause','Zooming does not interrupt the voyage');
+  until(2);
+  for(const leg of [1,2]){
+    const nominal=legTime(cities[leg].slice(1),cities[leg+1].slice(1)),took=until(leg+2);
+    assert.ok(took>=nominal/.45&&took<=620+nominal/.45+32,`Leg ${leg}: ${took}ms for a ${nominal}ms leg at the .45 pace floor, after a settle of at most 620ms`);
+    const stop=w.RedlineLayout.project(cities[leg+1].slice(1)),view=camera(w);
+    assert.ok(view.w<7,`The chosen close-up is kept (${view.w})`);
+    assert.ok(Math.abs(stop[0]-view.x-view.w/2)<view.w&&Math.abs(stop[1]-view.y-view.h/2)<view.h,'At full zoom the camera still keeps within a window of the ink');
+  }
+});
+
+test('a port far from a sudden close-up gets 620ms of settling at most, counted faster while Return is held',async t=>{
+  // Crossing the date line frames the whole sheet, leaving the port at its far edge.
+  const cities=[['Suva',178.44,-18.14],['Apia',-171.77,-13.83],['Tokyo',139.6917,35.6895]];
+  const route=cities.map(([name,longitude,latitude],i)=>({id:`settle-stop-${i}`,name,country:'Test',longitude,latitude}));
+  const {w,$,press}=await setup(t,{realMap:true,route,seed:false}),clock=mapClock(w),map=$('map');
+  press('Escape');await tick();clock.frame();
+  const arrived=()=>map.dataset.tripStep==='2',drawing=()=>$('route-lines').children[1].style.visibility!=='hidden'&&Boolean($('route-lines').children[1].getAttribute('d'));
+  const home=()=>{$('play').click();w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:'Enter',bubbles:true}));press('Home');clock.settle();assert.deepEqual(camera(w),{x:0,y:0,w:1440,h:720});};
+  const settling=start=>{
+    // The first voyage times the leg, so the second can zoom in hard on its last frame before landing.
+    let began=clock.now;start();while(!arrived()&&clock.now-began<20000)clock.frame();const leg=clock.now-began;assert.ok(arrived());home();
+    began=clock.now;start();while(clock.now-began<leg-32)clock.frame();assert.equal(arrived(),false);
+    for(let i=0;i<12;i++)map.dispatchEvent(new w.WheelEvent('wheel',{clientX:720,clientY:450,deltaY:-160,bubbles:true,cancelable:true}));
+    while(!arrived()&&clock.now-began<20000)clock.frame();assert.ok(arrived());
+    const landed=clock.now;while(!drawing()&&clock.now-landed<5000)clock.frame();
+    assert.ok(camera(w).w<7,'The chosen close-up carries on');const took=clock.now-landed;home();return took;
+  };
+  const normal=settling(()=>$('play').click());assert.ok(normal>=320&&normal<=656,`The camera waited ${normal}ms before the next leg`);
+  const held=settling(()=>press('Enter'));assert.ok(held>=256&&held<=288,`Held, the 620ms cap is reached in ${held}ms, cutting the camera's chase short`);
+});
+
+// The map's own trips: names and places in the order the sheet wants them.
+const LONDON=['London',-.1257,51.5085],PARIS=['Paris',2.3488,48.8534],ROME=['Rome',12.5113,41.8919],ATHENS=['Athens',23.7278,37.9838],CAIRO=['Cairo',31.2497,30.0626],TOKYO=['Tokyo',139.6917,35.6895],SYDNEY=['Sydney',151.2073,-33.8679],HONOLULU=['Honolulu',-157.8583,21.3069];
+const voyage=places=>places.map(([name,longitude,latitude],i)=>({id:`voyage-stop-${i}`,name,country:'Test',longitude,latitude}));
+async function chart(t,places){
+  const opened=await setup(t,{realMap:true,route:voyage(places),seed:false}),{w,$,press}=opened,clock=mapClock(w),map=$('map');
+  press('Escape');await tick();clock.frame();
+  const wheel=(deltaY=-160,x=720,y=450)=>map.dispatchEvent(new w.WheelEvent('wheel',{clientX:x,clientY:y,deltaY,bubbles:true,cancelable:true}));
+  const pointer=(type,x,y,{id=1,kind='mouse',target=map}={})=>{const event=new w.MouseEvent(type,{button:0,clientX:x,clientY:y,bubbles:true,cancelable:true});Object.defineProperties(event,{pointerId:{value:id},pointerType:{value:kind}});target.dispatchEvent(event);};
+  const until=(step,limit=20000)=>{const began=clock.now;while(map.dataset.tripStep!==String(step)&&clock.now-began<limit)clock.frame();assert.equal(map.dataset.tripStep,String(step));};
+  return {...opened,clock,map,wheel,pointer,until,sailing:()=>$('play-label').textContent==='Pause',stop:i=>$('route-stops').children[i]};
+}
+
+test('Escape acts on the innermost dialog: the photo first, then the album',async t=>{
+  const {$,press,prints,tab}=await setup(t,{realMap:true});
+  tab(paris.id).click();prints()[0].click();assert.equal($('photo-viewer').open,true);
+  press('Escape');await wait(()=>!$('photo-viewer').open);
+  assert.equal($('photo-panel').open,true,'The album behind the photo stays open');
+  $('album-fullscreen').click();assert.ok($('photo-panel').classList.contains('expanded'));
+  prints()[0].click();assert.equal($('photo-viewer').open,true);
+  press('Escape');await wait(()=>!$('photo-viewer').open);
+  assert.ok($('photo-panel').classList.contains('expanded'),'And keeps its window view');
+  press('Escape');assert.equal($('photo-panel').classList.contains('expanded'),false);assert.equal($('photo-panel').open,true);
+  press('Escape');await wait(()=>!$('photo-panel').open);
+});
+
+test('holding Space after clicking Trace route hurries the voyage rather than pausing it, and a focused button still toggles',async t=>{
+  const {$,w,press,clock,map,sailing,stop}=await chart(t,[LONDON,PARIS,ROME,ATHENS]);
+  // Chrome and Firefox focus a clicked button.
+  $('play').focus();$('play').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));assert.ok(sailing());
+  assert.equal(w.document.activeElement,map,'A pointer click leaves the keys with the map');
+  press(' ',map);press(' ',map,{repeat:true});clock.frame();assert.ok(sailing(),'Space does not stop the voyage');
+  w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:' ',bubbles:true}));
+  $('play').focus();$('play').dispatchEvent(new w.KeyboardEvent('keydown',{key:' ',bubbles:true,cancelable:true}));assert.equal(sailing(),false,'From the keyboard the button pauses');
+  w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:' ',bubbles:true}));press('Home');clock.settle();
+  // Return on a focused port looks at it, then sets sail; the next key must not fly back to it.
+  stop(0).focus();press('Enter',stop(0));clock.settle();press('Enter',stop(0));assert.ok(sailing());
+  press(' ',stop(0));assert.ok(sailing(),'A key on the port it sailed from hurries, too');
+});
+
+test('a zoom chosen at rest carries into the next leg and the next trace, and the whole world hands back to the automatic camera',async t=>{
+  const {w,$,press,clock,wheel,until,sailing,map}=await chart(t,[LONDON,PARIS,ROME,ATHENS]);
+  const width=()=>camera(w).w,zoomIn=()=>{for(let i=0;i<4;i++)wheel();clock.settle();return width();};
+  const near=(actual,expected,message)=>assert.ok(Math.abs(actual/expected-1)<.002,`${message}: ${actual} versus ${expected}`);
+  // Paused during travel.
+  $('play').click();clock.run(10);wheel();clock.run(5);$('play').click();assert.equal(sailing(),false);
+  let chosen=zoomIn();$('play').click();clock.run(40);near(width(),chosen,'Resumed after a pause');
+  press('Home');clock.settle();assert.equal(width(),1440);
+  // At a stop, sailing on with an arrow.
+  press('ArrowRight');press('ArrowRight');press('ArrowRight');assert.equal(map.dataset.tripStep,'2');clock.settle();
+  chosen=zoomIn();press('ArrowRight');until(3);clock.settle();near(width(),chosen,'After a leg from a stop');
+  press('Home');clock.settle();
+  // On the whole-trip view, then Trace route.
+  chosen=zoomIn();$('play').click();clock.run(40);near(width(),chosen,'In the next trace');
+  $('play').click();press('Home');clock.settle();
+  // Choosing a zoom and then a port keeps both.
+  chosen=zoomIn();w.RedlineApp.focusStop('voyage-stop-1');clock.settle();near(width(),chosen,'Flying to a port');
+  $('play').click();clock.run(40);near(width(),chosen,'And sailing from it');
+  $('play').click();press('Home');clock.settle();
+  // Backing all the way out leaves the choice to the automatic camera, which comes in for a regional trip.
+  zoomIn();for(let i=0;i<8;i++)wheel(160);clock.settle();assert.equal(width(),1440);
+  $('play').click();until(2);assert.ok(width()<1440/2,`The automatic camera came in (${width()})`);
+});
+
+test('switching trips while zoomed in shows the new route from the whole world',async t=>{
+  const {w,clock,wheel}=await chart(t,[LONDON,PARIS]);
+  for(let i=0;i<6;i++)wheel(-160,720,200);clock.settle();assert.ok(camera(w).w<300);
+  w.RedlineApp.setStops(voyage([TOKYO,SYDNEY]));clock.settle();
+  assert.deepEqual(camera(w),{x:0,y:0,w:1440,h:720});
+  for(let i=0;i<6;i++)wheel(-160,720,200);clock.settle();const close=camera(w);
+  w.RedlineApp.setStops(voyage([TOKYO,SYDNEY]),{preserveHistory:true});clock.settle();assert.deepEqual(camera(w),close,'A save rewriting the same trip keeps the view');
+});
+
+test('removing a middle stop leaves two stops in one place: the trace neither dives at it nor dawdles',async t=>{
+  const {$,w,clock}=await chart(t,[LONDON,PARIS,LONDON,ROME]);
+  $('stop-list').children[1].querySelector('.remove-stop').click();clock.frame();
+  const began=clock.now;let closest=1440;$('play').click();
+  while($('map').dataset.tripStep!=='2'&&clock.now-began<20000){clock.frame();closest=Math.min(closest,camera(w).w);}
+  assert.ok(clock.now-began<1500,`The leg to nowhere took ${clock.now-began}ms`);
+  assert.ok(1440/closest<14,`The camera came in only to frame the next leg (${1440/closest}×)`);
+});
+
+test('a hand-zoomed trace cuts across the date line instead of sweeping the sheet',async t=>{
+  const {w,$,clock,wheel}=await chart(t,[HONOLULU,TOKYO,SYDNEY]);
+  // Close in over Honolulu first, so that the only long way to go is over the date line.
+  for(let i=0;i<4;i++)wheel(-160,88,343);clock.settle();
+  $('play').click();
+  let last=camera(w),big=0,frames=0;
+  while($('map').dataset.tripStep!=='2'&&frames<3000){
+    clock.frame();frames++;const now=camera(w);
+    if(Math.abs(now.x-last.x)*1440/now.w>200)big++;last=now;
+  }
+  assert.equal($('map').dataset.tripStep,'2');
+  assert.ok(big<=1,`${big} frames swept more than 200px`);
+});
+
+test('a plain press on the map leaves the voyage sailing; only a real drag takes the camera',async t=>{
+  const {w,$,clock,pointer,wheel,sailing}=await chart(t,[LONDON,PARIS,ROME,ATHENS]);
+  $('play').click();clock.run(60);assert.ok(camera(w).w<1440&&sailing());
+  pointer('pointerdown',500,500);clock.frame();pointer('pointermove',502,501);clock.frame();
+  assert.ok(sailing(),'A press with a tremor is not a drag');pointer('pointerup',502,501);clock.frame();assert.ok(sailing());
+  pointer('pointerdown',500,500);clock.run(3);pointer('pointermove',530,500);
+  assert.equal(sailing(),false,'A drag takes over');
+  const held=camera(w);pointer('pointermove',560,500);clock.frame();
+  assert.ok(Math.abs((held.x-camera(w).x)*1440/held.w-30)<.01,'And pans from where the camera had got to');pointer('pointerup',560,500);
+  // A wheel in the middle of a drag leaves the drag behind rather than throwing the map.
+  pointer('pointerdown',500,500);pointer('pointermove',540,500);clock.frame();wheel(-160,500,500);clock.settle();
+  const zoomed=camera(w);pointer('pointermove',541,500);clock.frame();assert.deepEqual(camera(w),zoomed,'The next move does not jump');pointer('pointerup',541,500);
+  assert.equal($('map').classList.contains('dragging'),false);
+});
+
+test('the glide back to the world finishes rather than strands, whatever interrupts it',async t=>{
+  const {w,$,clock,pointer,press,until,sailing,map}=await chart(t,[LONDON,PARIS,ROME]);
+  const glide=()=>{$('play').click();until(3);clock.frame();assert.ok(sailing()&&camera(w).w<1440,'Gliding home');};
+  const world={x:0,y:0,w:1440,h:720};
+  glide();$('play').click();assert.equal(sailing(),false);assert.deepEqual(camera(w),world);assert.equal(map.dataset.tripStep,'0');
+  glide();press('Escape');assert.equal(sailing(),false);assert.deepEqual(camera(w),world,'Escape finishes it too');assert.equal(map.dataset.tripStep,'0');
+  glide();press(' ',map);w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:' ',bubbles:true}));assert.ok(sailing());assert.equal(map.dataset.tripStep,'1','Space sets out again from the first port');
+  press('Home');clock.settle();
+  glide();pointer('pointerdown',500,500);pointer('pointermove',540,500);assert.equal(sailing(),false);
+  assert.equal(map.dataset.tripStep,'0','A drag takes the whole trip with it, not a stranded port');assert.equal($('route-lines').children[1].style.visibility,'');pointer('pointerup',540,500);
+});
+
+test('stepping back keeps the port you are sailing to on the map, while a forward leg still reveals it',async t=>{
+  const {$,clock,press}=await chart(t,[LONDON,PARIS,ROME,ATHENS]);
+  const shown=()=>[...$('route-stops').children].map(node=>node.style.opacity);
+  press('ArrowRight');press('ArrowRight');assert.equal($('map').dataset.tripStep,'1');clock.frame();
+  assert.deepEqual(shown().slice(0,2),['1','0'],'Forward, the next port waits for the ink');
+  press('ArrowRight');assert.equal($('map').dataset.tripStep,'2');press('ArrowRight');press('ArrowRight');assert.equal($('map').dataset.tripStep,'3');
+  press('ArrowLeft');clock.run(3);assert.deepEqual(shown(),['1','1','1','0'],'Backward, the one you are leaving goes last');
+});
+
+test('the first arrow from the overview re-lays the names, and every arrival shows its port',async t=>{
+  const {w,$,clock,press,until}=await chart(t,[LONDON,PARIS,ROME]);
+  clock.settle();assert.equal(w.testFrames.size,0);
+  press('ArrowRight');assert.equal($('map').dataset.tripStep,'1');assert.equal(w.testFrames.size,1,'Labels are laid out for the route as it now stands');clock.frame();
+  press('ArrowRight');until(2);assert.equal(w.testFrames.size,1,'Arrival makes the new port the priority on the next frame');
+});
+
+test('touching a port closes the search suggestions, and a port has a finger-sized target',async t=>{
+  const {w,$,pointer,stop}=await chart(t,[LONDON,PARIS]);
+  $('destination').value='Par';$('destination').dispatchEvent(new w.Event('input',{bubbles:true}));assert.equal($('suggestion-panel').hidden,false);
+  pointer('pointerdown',500,500,{target:stop(1)});assert.equal($('suggestion-panel').hidden,true);
+  const [dot,target]=stop(1).querySelectorAll('circle');assert.equal(dot.getAttribute('r'),'4.5');assert.equal(target.getAttribute('r'),'12');assert.equal(target.getAttribute('fill'),'transparent');assert.equal(target.hasAttribute('pointer-events'),false);
+});
+
+test('holding H toggles the controls once',async t=>{
+  const {w,press}=await chart(t,[LONDON,PARIS]);
+  press('h');for(let i=0;i<9;i++)press('h',w.document,{repeat:true});
+  assert.equal(w.document.body.classList.contains('map-only'),true);
+});
+
+test('with reduced motion Trace route lands on the last port with the route drawn',async t=>{
+  const {w,$,clock,sailing}=await chart(t,[LONDON,PARIS,ROME]);
+  w.matchMedia=()=>({matches:true});$('play').click();clock.frame();
+  assert.equal($('map').dataset.tripStep,'3');assert.equal(sailing(),false);assert.notDeepEqual(camera(w),{x:0,y:0,w:1440,h:720});
+  assert.ok([...$('route-lines').children].every(path=>path.getAttribute('d')),'Every leg is drawn');
+});
+
+test('dragging the window edge during a trace does not hold the ink back',async t=>{
+  const {w,$,clock,sailing}=await chart(t,[LONDON,PARIS,ROME]);
+  $('play').click();
+  let frames=0;while($('map').dataset.tripStep==='0'||$('map').dataset.tripStep==='1'){for(const resized of w.testResizes)resized();clock.frame();assert.ok(++frames<300,'The voyage still reaches its next port');}
+  await new Promise(resolve=>setTimeout(resolve,170));assert.ok(sailing(),'The camera recomposes once the window has settled');clock.frame();assert.ok(sailing());
+});
+
+test('legs wholly off screen are not rewritten as the camera moves',async t=>{
+  const {w,$,clock,wheel}=await chart(t,[LONDON,PARIS,TOKYO,SYDNEY]);
+  const far=$('route-lines').children[2],near=$('route-lines').children[0];
+  assert.ok(far.getAttribute('d')&&near.getAttribute('d'),'At world view every leg is drawn');
+  for(let i=0;i<6;i++)wheel(-160,720,200);clock.settle();
+  assert.equal(far.getAttribute('d'),'');assert.equal(far.style.visibility,'hidden');assert.ok(near.getAttribute('d'));assert.equal(near.style.visibility,'');
+  let writes=0;const write=far.setAttribute;far.setAttribute=function(...args){writes++;return write.apply(this,args);};
+  wheel(-160,720,200);clock.settle();assert.ok(writes===0,'Moving on costs it nothing');
+  for(let i=0;i<8;i++)wheel(160);clock.settle();assert.equal(camera(w).w,1440);assert.ok(far.getAttribute('d'),'Back in view it is drawn again');assert.equal(far.style.visibility,'');
+});
+
+test('tabbing to a port out of view brings it into view at the same zoom',async t=>{
+  const {w,clock,wheel,stop}=await chart(t,[LONDON,PARIS,TOKYO]);
+  for(let i=0;i<6;i++)wheel(-160,720,200);clock.settle();const {w:width}=camera(w),[x,y]=stop(2)._point;
+  assert.ok(x>camera(w).x+width);
+  stop(2).focus();clock.settle();const view=camera(w);
+  assert.ok(Math.abs(view.w-width)<1e-6,'The zoom stays');assert.ok(x>=view.x&&x<=view.x+view.w&&y>=view.y&&y<=view.y+view.h,'And the port is in the window');
+});
+
+test('the zoom settles without a final snap, and promptly',async t=>{
+  const {w,$,clock}=await chart(t,[LONDON,PARIS]);
+  for(const id of ['zoom-in','zoom-in','zoom-in','zoom-out']){
+    $(id).click();let last=camera(w).w,step=0,frames=0;
+    while(w.testFrames.size){clock.frame();const now=camera(w).w;if(now!==last){step=Math.abs(now-last)*1440/now;last=now;frames++;}}
+    assert.ok(step<1.2,`The last frame moves the edge of the window ${step}px`);assert.ok(frames<=20,`${frames} frames`);
+  }
+});
+
+test('a port as a hub keeps its name when its spokes cover every slot',async t=>{
+  // A hub at the map's centre with a leg out and back to places all around it.
+  const out=[['A',-60,50],['B',-20,75],['C',60,70],['D',90,10],['E',60,-40],['F',-20,-60],['G',-90,-30],['H',-110,30]],hub=['London',-.1257,51.5085];
+  const {$,clock}=await chart(t,out.flatMap(place=>[hub,place]).concat([hub]));
+  clock.frame();const owner=[...$('route-stops').children].filter(node=>node.querySelector('text').textContent==='LONDON'&&!node.querySelector('text').classList.contains('label-hidden'));
+  assert.equal(owner.length,1,'Named once, even with every side crossed by the red line');
+});
+
+test('with the logbook open a removed stop keeps the keys in the list, and Space on the page folds it first',async t=>{
+  const {w,$,press,sailing}=await chart(t,[LONDON,PARIS,ROME]);
+  $('trips-button').click();assert.equal($('trip-panel').hidden,false);await wait(()=>$('trip-list').querySelector('.trip-card'));
+  const row=i=>$('stop-list').children[i],focused=()=>w.document.activeElement;
+  row(1).querySelector('.remove-stop').focus();row(1).querySelector('.remove-stop').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:0}));
+  assert.equal(focused(),row(1).querySelector('.remove-stop'),'Focus lands on the same row\'s ×');assert.equal(row(1).querySelector('.stop-grip').textContent.slice(2),'Rome');
+  press(' ',focused());assert.equal(sailing(),false,'Space on that × does not set sail behind the logbook');
+  row(0).querySelector('.stop-grip').focus();press('z',focused(),{ctrlKey:true});assert.equal($('stop-list').children.length,3);
+  assert.equal(focused(),row(0).querySelector('.stop-grip'),'Undo from a row stays on that row');
+  // A pointer leaves the panel with the keys, not the next ×.
+  row(2).querySelector('.remove-stop').focus();row(2).querySelector('.remove-stop').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));assert.equal(focused(),$('trip-panel'));
+  for(const index of [1,0]){row(index).querySelector('.remove-stop').focus();row(index).querySelector('.remove-stop').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:0}));}
+  assert.equal($('stop-list').children.length,0);assert.equal(focused(),$('trip-panel'),'An emptied list hands focus to the logbook');
+  focused().blur();press('z',w.document.body,{ctrlKey:true});press('z',w.document.body,{ctrlKey:true});press('z',w.document.body,{ctrlKey:true});assert.equal($('stop-list').children.length,3);
+  press(' ',w.document.body);assert.equal($('trip-panel').hidden,true,'Space on the page folds the logbook');assert.ok(sailing(),'And then sets sail');
+});
+
+test('a touch swipe on a stop\'s name leaves the route alone; its number picks it up',async t=>{
+  const {w,$,pointer}=await chart(t,[LONDON,PARIS,ROME]);
+  $('trips-button').click();await wait(()=>$('trip-list').querySelector('.trip-card'));const row=i=>$('stop-list').children[i],names=()=>w.RedlineApp.getStops().map(stop=>stop.name);
+  w.document.elementFromPoint=()=>row(2);
+  const swipe=(target,grip)=>{pointer('pointerdown',100,100,{kind:'touch',target});pointer('pointermove',100,140,{kind:'touch',target:grip});pointer('pointerup',100,140,{kind:'touch',target:grip});};
+  let grip=row(0).querySelector('.stop-grip');swipe(grip.lastElementChild,grip);assert.deepEqual(names(),['London','Paris','Rome'],'A swipe scrolls the list');
+  grip=row(0).querySelector('.stop-grip');swipe(grip.querySelector('.stop-number'),grip);assert.deepEqual(names(),['Paris','Rome','London'],'The numeral is the handle');
+  const css=source('public/style.css');
+  assert.match(css.match(/^\.stop-grip \{[^}]*\}/m)[0],/touch-action: pan-y/);assert.match(css.match(/^\.stop-number \{[^}]*\}/m)[0],/touch-action: none/);
+});
+
+test('the album\'s pin flies to its city only once the book has shut, with the keys on the map',async t=>{
+  const {w,$,tab,mapCalls}=await setup(t);tab(paris.id).click();
+  const motion=controlledMotion(w);$('album-pages').querySelector('.gallery-map-button').click();
+  await wait(()=>motion.running.size>0);assert.equal(mapCalls.focused,null,'Nothing is painted behind the book yet, so no flight has begun');
+  for(let i=0;i<4&&$('photo-panel').open;i++)await motion.finish();await wait(()=>!$('photo-panel').open);
+  assert.equal(mapCalls.focused,paris.id);assert.equal(w.document.activeElement,$('map'));
+});
+
+test('the map and its stops come after the planner in the tab order, and the focused port stands out',async t=>{
+  const {$,w}=await chart(t,[LONDON,PARIS]);
+  const after=(node,other)=>Boolean(other.compareDocumentPosition(node)&w.Node.DOCUMENT_POSITION_FOLLOWING);
+  for(const id of ['zoom-in','reset-view','trips-button','destination','play','clear'])assert.ok(after($('route-stops'),$(id)),`${id} comes before the stops`);
+  assert.equal(w.document.querySelector('.zoom-controls').getAttribute('role'),'group');
+  assert.match(source('public/style.css').match(/^\.zoom-controls \{[^}]*\}/m)[0],/z-index/,'The controls paint above the map that now follows them');
+  assert.match(source('public/style.css'),/focus-visible \.stop-dot \{ stroke: #2f2418; stroke-width: 3;/,'A dark ring, 3:1 or better against land, sea and the dot');
+  assert.equal($('toggle-stops'),null,'And the old fold button is gone');
+});
+
+test('a held key hurries the glide home too',async t=>{
+  const {w,$,clock,press,until,sailing,map}=await chart(t,[LONDON,PARIS,ROME]);
+  const glide=start=>{start();until(3);const began=clock.now;while(sailing()&&clock.now-began<6000)clock.frame();assert.equal(sailing(),false);return clock.now-began;};
+  const normal=glide(()=>$('play').click()),held=glide(()=>press('Enter',map));
+  w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:'Enter',bubbles:true}));
+  assert.ok(held<normal/2,`Held, ${held}ms against ${normal}ms`);
+});
+
+test('iOS pinch events are not counted twice',async t=>{
+  const {w,clock,pointer,map}=await chart(t,[LONDON,PARIS]);
+  const gesture=(type,scale)=>{const event=new w.Event(type,{bubbles:true,cancelable:true});Object.assign(event,{scale,clientX:720,clientY:450});map.dispatchEvent(event);};
+  gesture('gesturestart',1);gesture('gesturechange',2);clock.settle();assert.ok(Math.abs(camera(w).w-720)<1e-6,'Safari\'s trackpad pinch zooms');
+  pointer('pointerdown',600,450,{kind:'touch',id:1});pointer('pointerdown',800,450,{kind:'touch',id:2});
+  gesture('gesturestart',1);gesture('gesturechange',2);clock.settle();assert.ok(Math.abs(camera(w).w-720)<1e-6,'With touch pointers down the pointers have the pinch');
+});
+
+test('names keep their places as a trace moves the camera, rather than flickering',async t=>{
+  const {w,$,clock,sailing}=await chart(t,[LONDON,PARIS,ROME,ATHENS,CAIRO,['Madrid',-3.7026,40.4165]]);
+  $('play').click();let frames=0;const shows=new Map();let shown=new Set();
+  while(sailing()&&frames<3000){clock.frame();frames++;const now=new Set(lettered(w));for(const name of now)if(!shown.has(name))shows.set(name,(shows.get(name)||0)+1);shown=now;}
+  const again=[...shows.values()].filter(count=>count>=4).length;
+  assert.ok(frames>100,'It really sailed');assert.ok(again<=20,`${again} of ${shows.size} names came and went four times or more`);
+});
+
+test('the chart title is a piece of its own: it follows the trip, stays on the sheet and gives way to the route',async t=>{
+  const piece=w=>w.RedlineApp.atlas.labels.find(label=>label.kind==='cartouche');
+  const {w,$,press}=await setup(t,{realMap:true,route:[],seed:false}),clock=mapClock(w),atlas=w.RedlineApp.atlas;
+  press('Escape');await tick();clock.frame();
+  const label=piece(w);assert.equal(label.text,'A summer away');assert.equal(label.kicker,'A chart of');
+  const size=atlas.measure('cartouche',label.text,label.kicker),box={x:label.x-size.w/2,y:label.y-size.h/2,w:size.w,h:size.h};
+  assert.ok(box.x>=14&&box.x+box.w<=1426&&box.y>=14&&box.y+box.h<=886,'It stays on the sheet');
+  for(const other of atlas.labels){
+    if(other===label)continue;
+    const near=atlas.measure(other.kind,other.text,other.angle,other.curve);
+    assert.equal(w.RedlineLabels.overlaps(box,{x:other.x-near.w/2,y:other.y-near.h/2,w:near.w,h:near.h}),false,`${other.text} keeps clear of it`);
+  }
+  $('trip-title').textContent='Another voyage';await tick();clock.frame();assert.equal(piece(w).text,'Another voyage','It follows the trip\'s name');
+  $('trip-title').textContent='';await tick();clock.frame();assert.equal(piece(w).text,'The Known World');
+  $('zoom-in').click();clock.settle();assert.equal(piece(w),undefined,'Closer in, it leaves with the great names');
+  $('zoom-out').click();clock.settle();assert.ok(piece(w));
+  // A meridian through the piece, with both stops and their names well clear of it.
+  const route=[[-128,-30],[-128,-70]].map(([longitude,latitude],i)=>({id:`cartouche-stop-${i}`,name:`Stop ${i}`,country:'Test',longitude,latitude}));
+  const crossed=await setup(t,{realMap:true,route,seed:false}),other=mapClock(crossed.w);
+  crossed.press('Escape');await tick();other.frame();
+  assert.equal(piece(crossed.w),undefined,'It gives way to the red line');assert.ok(lettered(crossed.w).includes('Europe'));
+});
+
+const pointerOn=(w,target,type,extra={})=>{const event=new w.Event(type,{bubbles:true,cancelable:true});Object.assign(event,{pointerType:'mouse',pointerId:1,clientX:0,clientY:0,...extra});target.dispatchEvent(event);};
+const clickOn=(w,target,extra={})=>{pointerOn(w,target,'pointerdown',extra);target.dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1,...extra}));};
+const dropFiles=(w,target,names=['dropped.jpg'])=>{const event=new w.Event('drop',{bubbles:true,cancelable:true});event.dataTransfer={types:['Files'],files:names.map(name=>new File([jpeg],name,{type:'image/jpeg'}))};target.dispatchEvent(event);};
+const manyCities=count=>Array.from({length:count},(_,i)=>({id:`album-city-${i}`,name:`City ${i}`,country:'Test',latitude:i+1,longitude:i+1}));
+const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+
+test('photos dropped while the cover opens wait for it and then go to review, at any moment of the opening',async t=>{
+  const {w,$,press,storage,api}=await setup(t);press('Escape');
+  const motion=controlledMotion(w),panel=$('photo-panel'),book=$('album-book');
+  const reviewed=async()=>{
+    await wait(()=>$('photo-review').children.length===1&&!$('upload-photos').hidden&&!$('choose-photos').disabled);
+    assert.equal(panel.dataset.motion,'');assert.equal(book.inert,false);assert.equal(book.dataset.preparing,undefined);
+    assert.equal(book.querySelector('.album-cover-scene'),null,'No cover is left behind');assert.equal($('album-modes').inert,false);
+    assert.equal(book.dataset.mode,'review');assert.equal($('photo-review').hidden,false);
+    $('cancel-photo-import').click();press('Escape');await wait(()=>motion.running.size===3);await motion.finish();await wait(()=>!panel.open);
+  };
+  // Mid-cover: the opening carries on untouched, and nothing is read until it ends.
+  $('photos-button').click();await wait(()=>motion.running.size===3);
+  dropFiles(w,panel);await tick();
+  assert.equal(panel.dataset.motion,'opening');assert.equal(motion.running.size,3);assert.equal($('photo-review').children.length,0);
+  await motion.finish();await reviewed();
+  // Before the trip has even loaded, which would otherwise leave the book invisible.
+  let release;storage.api=async(path,options)=>{if(!release)await new Promise(resolve=>release=resolve);return api(path,options);};
+  $('photos-button').click();await wait(()=>!!release);
+  dropFiles(w,panel);release();await wait(()=>motion.running.size===3);await motion.finish();await reviewed();
+  storage.api=api;
+  // A trip that fails to load still shows the album, and the photos still arrive.
+  let refuse;storage.api=()=>{storage.api=api;return new Promise((resolve,reject)=>refuse=()=>reject(Error('Storage is unavailable.')));};
+  $('photos-button').click();await wait(()=>!!refuse);dropFiles(w,panel);refuse();await reviewed();
+  // Closed again before it opened: the photos go on to review rather than vanish.
+  $('photos-button').click();await wait(()=>motion.running.size===3);
+  dropFiles(w,panel);press('Escape');assert.equal(panel.dataset.motion,'closing');
+  await motion.finish();await wait(()=>motion.running.size===3);await motion.finish();await reviewed();
+  // A drop on a book already shutting does the same.
+  $('photos-button').click();await wait(()=>motion.running.size===3);await motion.finish();press('Escape');await wait(()=>motion.running.size===3);
+  dropFiles(w,panel);await motion.finish();await wait(()=>motion.running.size===3);await motion.finish();await reviewed();
+});
+
+test('the album reopens while an import is still running, and shows its review; a running save stays shut',async t=>{
+  const {w,$,press,choose}=await setup(t);
+  let open;const gate=new Promise(resolve=>open=resolve),decode=w.createImageBitmap;w.createImageBitmap=async file=>{await gate;return decode(file);};
+  choose(['one.jpg','two.jpg']);await tick();press('Escape');assert.equal($('photo-panel').open,false);
+  $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);
+  assert.equal($('album-book').dataset.mode,'review');assert.equal($('photo-progress').hidden,false,'The progress is there to see');
+  open();await wait(()=>$('photo-review').children.length===2&&!$('upload-photos').hidden);assert.equal($('photo-progress').hidden,true);
+  // Saving goes on pushing to the photos, so reopening must not replace them underneath it.
+  $('bulk-photo-city').value=paris.id;$('bulk-photo-city').dispatchEvent(new w.Event('change',{bubbles:true}));
+  $('upload-photos').click();press('Escape');assert.equal($('photo-panel').open,false);
+  $('photos-button').click();await tick();assert.equal($('photo-panel').open,false);
+  await wait(()=>!$('choose-photos').disabled);
+});
+
+test('a finished turn keeps the very pages it turned, in both layouts, and bookmarks where it landed',async t=>{
+  const {w,$,press,pages}=await setup(t,{route:[paris,madrid],seedStops:[paris,paris,paris,paris,paris,paris,paris,paris,madrid]}),root=$('album-pages'),motion=controlledMotion(w);
+  press('ArrowRight');
+  let back=root.querySelector('.leaf-back'),right=root.children[1],image=right.querySelector('img');
+  assert.ok(back.classList.contains('left'));await motion.finish();
+  assert.deepEqual([...root.children],[back,right],'The leaf’s far side and the page beneath it become the spread');
+  assert.equal(right.querySelector('img'),image,'A print already painted is not replaced as the leaf disappears');
+  assert.equal(pages(),'left:contents right:city');assert.equal(root.querySelector('.album-leaf,.page-shade'),null);assert.equal(back.classList.contains('leaf-face'),false);assert.equal(back.classList.contains('leaf-back'),false);
+  press('ArrowRight');await motion.finish();const after=$('album-position').textContent;
+  press('ArrowLeft');back=root.querySelector('.leaf-back');const left=root.children[0];assert.ok(back.classList.contains('right'));await motion.finish();
+  assert.deepEqual([...root.children],[left,back]);
+  press('ArrowRight');await motion.finish();assert.equal($('album-position').textContent,after);
+  // A cover turn carries its pages on boards; they come off again.
+  press('Home');await motion.finish();assert.equal(pages(),'left:void right:cover');assert.equal(root.querySelector('.album-bound-page,.cover-turn'),null);
+  press('ArrowRight');await motion.finish();assert.equal(pages(),'left:inside right:title');assert.equal(root.querySelector('.album-bound-page,.cover-turn'),null);
+  // One page at a time, after a reflow that remembered its place: the turn moves the bookmark on from it.
+  w.innerWidth=480;w.innerHeight=800;w.dispatchEvent(new w.Event('resize'));await pause(30);assert.equal(root.classList.contains('single'),true);
+  press('ArrowRight');let below=root.children[0];await motion.finish();assert.deepEqual([...root.children],[below],'Forward, the page beneath stays');
+  press('ArrowRight');await motion.finish();press('ArrowLeft');const above=root.querySelector('.single-leaf');await motion.finish();
+  assert.deepEqual([...root.children],[above],'Back, the page that came down stays');assert.equal(above.classList.contains('single-leaf'),false);
+  press('ArrowRight');await motion.finish();const place=$('album-position').textContent;
+  press('Escape');await wait(()=>motion.running.size===3);await motion.finish();await wait(()=>!$('photo-panel').open);
+  $('photos-button').click();await wait(()=>motion.running.size===3);await motion.finish();assert.equal($('album-position').textContent,place);
+});
+
+test('pressing A builds the spread once, and the place holds across a layout changed while shut',async t=>{
+  const {w,$,press,tab}=await setup(t,{route:[paris,madrid],seedStops:[...Array.from({length:30},()=>paris),madrid]}),root=$('album-pages'),native=root.replaceChildren;
+  const scrub=$('album-scrub');scrub.value='8';scrub.dispatchEvent(new w.Event('input'));const spread=$('album-position').textContent,first=spread.match(/(\d+)–/)[1];
+  press('Escape');let builds=0;root.replaceChildren=function(...nodes){if(nodes.length)builds++;return native.apply(this,nodes);};
+  const reopen=async()=>{builds=0;$('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);};
+  await reopen();assert.equal(builds,1,'Not the six it used to take');assert.equal($('album-position').textContent,spread);
+  press('Escape');w.innerWidth=480;w.innerHeight=800;await reopen();assert.equal(builds,1);
+  assert.match($('album-position').textContent,new RegExp(`page ${first}$`),'One page at a time, the same place');
+  press('Escape');w.innerWidth=1440;w.innerHeight=900;await reopen();assert.equal($('album-position').textContent,spread,'And back to the same spread');
+});
+
+test('keyboard and screen-reader focus stays in the album when the cover makes the first control inert',async t=>{
+  const {w,$,press}=await setup(t);press('Escape');
+  const native=w.HTMLDialogElement.prototype.showModal;w.HTMLDialogElement.prototype.showModal=function(){native.call(this);$('album-view').focus();};
+  $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('photo-panel').dataset.motion);
+  assert.equal(w.document.activeElement,$('photo-panel'));
+});
+
+test('in window view a mouse can turn every page, covers and blanks included; outside it the covers stay bare',async t=>{
+  const {w,$,press,pages}=await setup(t,{route:[paris,madrid,rome],seedStops:[paris,madrid,rome]});
+  const corner=()=>$('album-pages').querySelector('.page-corner');
+  press('Home');assert.equal(corner(),null);press('f');
+  assert.ok(corner(),'The front cover');corner().click();assert.equal(pages(),'left:inside right:title');
+  press('End');assert.equal(pages(),'left:back right:void');corner().click();assert.equal(pages(),'left:blank right:inside','The back cover’s corner turns backwards');
+  $('album-pages').querySelector('.page-blank .page-corner').click();assert.match(pages(),/^left:city right:city$/,'And so does a left-hand blank');
+  press('f');press('End');assert.equal(corner(),null,'The arrows do this outside window view');
+  w.innerWidth=480;w.innerHeight=800;press('f');assert.ok(corner(),'One page at a time too');const before=$('album-position').textContent;corner().click();assert.notEqual($('album-position').textContent,before);assert.notEqual(pages(),'single:back');
+});
+
+test('a click outside closes the book from anywhere that looks outside it; in window view it only folds the tabs',async t=>{
+  const {w,$,press,tab}=await setup(t),panel=$('photo-panel'),book=$('album-book'),rail=$('gallery-filter');
+  const reopen=async()=>{$('photos-button').click();await wait(()=>panel.open&&!panel.dataset.motion);};
+  for(const selector of ['.album-foot','.album-top','.album-title']){clickOn(w,panel.querySelector(selector));assert.equal(panel.open,false,selector);await reopen();}
+  tab(paris.id).click();clickOn(w,book);assert.equal(panel.open,true,'An open book is not outside itself');clickOn(w,$('album-pages'));assert.equal(panel.open,true);
+  press('End');clickOn(w,book);assert.equal(panel.open,false,'Beside a shut book');await reopen();
+  press('Home');clickOn(w,$('album-pages'));assert.equal(panel.open,false,'The empty half of a shut book');await reopen();
+  // The rail's own box counts, but a near miss on a tab does not.
+  tab(paris.id).click();Object.assign(tab(paris.id),{getBoundingClientRect:()=>({left:100,right:130,top:50,bottom:150})});
+  clickOn(w,rail,{clientX:132,clientY:152});assert.equal(panel.open,true);
+  clickOn(w,rail,{clientX:170,clientY:100});assert.equal(panel.open,false);await reopen();
+  // Window view fills the screen: there is no outside.
+  tab(paris.id).click();press('f');$('album-edge').dispatchEvent(new w.Event('pointerenter'));assert.ok(panel.classList.contains('index-open'));
+  clickOn(w,panel.querySelector('.album-stage'),{clientX:9999});assert.equal(panel.open,true);assert.ok(panel.classList.contains('expanded'),'Still in window view');assert.equal(panel.classList.contains('index-open'),false,'The tabs fold away');
+  clickOn(w,panel.querySelector('.album-stage'));assert.equal(panel.open,true,'With the tabs away too');
+  // The cover over the map does have an outside, though its toolbar is no part of it.
+  press('Home');clickOn(w,$('album-toolbar'));assert.equal(panel.open,true);clickOn(w,panel.querySelector('.album-stage'));assert.equal(panel.open,false);
+});
+
+test('window view: a re-entered rail keeps its scroll, and a skim through the top edge does not strand the toolbar',async t=>{
+  const {w,$,press,tab}=await setup(t),rail=$('gallery-filter'),panel=$('photo-panel'),edge=$('album-top-edge');tab(paris.id).click();press('f');
+  $('album-edge').dispatchEvent(new w.Event('pointerenter'));rail.scrollTop=500;rail.dispatchEvent(new w.Event('pointerenter'));assert.equal(rail.scrollTop,500,'Drifting off and back');
+  clickOn(w,panel.querySelector('.album-stage'),{clientX:9999});$('album-edge').dispatchEvent(new w.Event('pointerenter'));assert.equal(rail.scrollTop,0,'Uncovering it again finds the current tab');
+  edge.dispatchEvent(new w.Event('pointerenter'));assert.equal(edge.getAttribute('aria-expanded'),'true');
+  pointerOn(w,$('album-pages'),'pointermove',{clientY:10});assert.equal(edge.getAttribute('aria-expanded'),'true','On its way to the toolbar');
+  pointerOn(w,$('album-pages'),'pointermove',{clientY:400});assert.equal(edge.getAttribute('aria-expanded'),'false');assert.equal($('album-toolbar').inert,true);
+  edge.dispatchEvent(new w.Event('pointerenter'));pointerOn(w,$('album-toolbar'),'pointermove',{clientY:400});assert.equal(edge.getAttribute('aria-expanded'),'true','Over the toolbar itself');
+});
+
+test('window view changes size only through motion it owns, and a cover or view change never pins a moving book',async t=>{
+  const {w,$,press}=await setup(t),panel=$('photo-panel'),book=$('album-book'),motion=controlledMotion(w);
+  const onBook=()=>[...motion.running].find(item=>item.element===book);
+  const layout=()=>panel.classList.contains('expanded')?panel.classList.contains('cover-view')?{left:228,top:32,width:984,height:656}:{left:4,top:4,width:1200,height:800}:{left:160,top:90,width:880,height:560};
+  // A transform still running on the book shows in its measured rect.
+  book.getBoundingClientRect=()=>onBook()?{left:80,top:40,width:1000,height:660}:layout();
+  const reopen=async()=>{$('photos-button').click();await wait(()=>motion.running.size===3);await motion.finish();};
+  press('f');await motion.finish();
+  // Escape twice, the natural way out: the close must not measure the shrink.
+  press('Escape');assert.ok(onBook());press('Escape');assert.equal(panel.dataset.motion,'closing');
+  assert.equal(onBook(),undefined,'The shrink has stopped');assert.equal(book.style.width,'880px','The cover pinned the real book');
+  await wait(()=>motion.running.size===3);await motion.finish();await wait(()=>!panel.open);assert.equal(book.style.width,'');
+  // Closing straight from window view folds down through its size rather than snapping first.
+  await reopen();press('f');await motion.finish();press('a');
+  const fold=onBook();assert.ok(fold);assert.match(fold.frames[0].transform,/scale\(1\.36/);assert.equal(panel.dataset.motion,'closing');assert.equal(book.dataset.windowMotion,'true');assert.equal(panel.classList.contains('expanded'),false);
+  await wait(()=>motion.running.size===4);await motion.finish();await wait(()=>!panel.open);assert.equal(book.dataset.windowMotion,undefined);assert.equal(onBook(),undefined);
+  // A view turn during the shrink pins the real book too.
+  await reopen();press('f');await motion.finish();press('f');assert.ok(onBook());$('sheet-view').click();
+  assert.equal(onBook(),undefined);assert.equal(book.style.width,'880px');await motion.finish();await motion.finish();assert.equal(book.style.width,'');
+  $('album-view').click();await motion.finish();await motion.finish();
+  // The cover over the map is a different book from the full window, so no turn is pinned between them.
+  press('Home');await motion.finish();press('f');await motion.finish();assert.ok(panel.classList.contains('cover-view'));
+  $('sheet-view').click();assert.equal(book.dataset.viewMotion,undefined);assert.equal(book.style.width,'');assert.equal(panel.classList.contains('cover-view'),false);assert.equal($('album-book').dataset.mode,'sheet');assert.match(onBook().frames[0].transform,/scale\(0\.82/,'The book glides between them');
+  await motion.finish();$('album-view').click();assert.equal(book.dataset.viewMotion,undefined);assert.ok(panel.classList.contains('cover-view'));await motion.finish();
+});
+
+test('album and All Photos change directly on a short landscape page, whose sizes differ too much for one turn',async t=>{
+  const {w,$}=await setup(t),motion=controlledMotion(w);w.innerWidth=568;w.innerHeight=320;w.dispatchEvent(new w.Event('resize'));await pause(30);
+  $('sheet-view').click();assert.equal($('album-book').dataset.viewMotion,undefined);assert.equal($('album-book').dataset.mode,'sheet');assert.equal(motion.running.size,0);
+  $('album-view').click();assert.equal($('album-book').dataset.mode,'album');
+  w.innerWidth=480;w.innerHeight=800;w.dispatchEvent(new w.Event('resize'));await pause(30);
+  $('sheet-view').click();assert.equal($('album-book').dataset.viewMotion,'true','A portrait page still turns');await motion.finish();
+});
+
+test('toggling window view or resizing keeps the same prints at the top of All Photos',async t=>{
+  const {w,$,press,tiles}=await setup(t,{route:[paris],seedStops:Array.from({length:12},()=>paris)}),panel=$('photo-panel'),scroll=$('photo-scroll');
+  tiles();let wide=false;const pitch=()=>panel.classList.contains('expanded')||wide?50:100;
+  scroll.getBoundingClientRect=()=>({top:100,bottom:700,left:0,right:800,width:800,height:600});
+  $('photo-gallery').querySelectorAll('.photo-tile').forEach((tile,i)=>tile.getBoundingClientRect=()=>{const top=100+i*pitch()-scroll.scrollTop;return {top,bottom:top+pitch()-10,left:0,right:90};});
+  await pause(200);
+  scroll.scrollTop=520;press('f');assert.equal(scroll.scrollTop,270,'Print six stays at the top');press('f');assert.equal(scroll.scrollTop,520);
+  // The window has already changed by the time a resize is heard, so the place is read as the sheet scrolls.
+  scroll.dispatchEvent(new w.Event('scroll'));await pause(140);
+  wide=true;w.dispatchEvent(new w.Event('resize'));await pause(30);assert.equal(scroll.scrollTop,270);
+});
+
+test('a city chosen in All Photos is where the album opens next, and the highlight follows the sheet as it scrolls',async t=>{
+  const {w,$,tab}=await setup(t,{route:[paris,madrid,rome],seedStops:[paris,paris,paris,paris,paris,madrid,rome]});
+  const current=city=>tab(city.id).getAttribute('aria-current')==='true';
+  tab(paris.id).click();const start=$('album-position').textContent;
+  $('sheet-view').click();$('album-view').click();assert.equal($('album-position').textContent,start,'An untouched round trip keeps its page');
+  $('sheet-view').click();tab(rome.id).click();assert.ok(current(rome));
+  $('album-view').click();assert.match($('album-position').textContent,/Rome/);assert.ok(current(rome));
+  $('sheet-view').click();const scroll=$('photo-scroll');Object.defineProperties(scroll,{scrollHeight:{value:1300},clientHeight:{value:400}});
+  $('photo-gallery').querySelectorAll('.gallery-city').forEach((section,i)=>section.getBoundingClientRect=()=>({top:i*500-scroll.scrollTop,bottom:(i+1)*500-scroll.scrollTop}));
+  await pause(200);
+  scroll.scrollTop=520;scroll.dispatchEvent(new w.Event('scroll'));await wait(()=>current(madrid));
+  // A tab's own jump owns the highlight until it has landed.
+  tab(paris.id).click();scroll.scrollTop=520;for(const gap of [140,120,160]){scroll.dispatchEvent(new w.Event('scroll'));await pause(gap);}assert.ok(current(paris));
+  scroll.scrollTop=30;scroll.dispatchEvent(new w.Event('scroll'));await pause(160);assert.ok(current(paris));
+  // A short last city never reaches the top, so the end of the sheet counts.
+  scroll.scrollTop=900;scroll.dispatchEvent(new w.Event('scroll'));await wait(()=>current(rome));
+});
+
+test('the unread leaves dwindle with every way of turning, including the slider and reduced motion',async t=>{
+  const {w,$,press}=await setup(t,{route:[paris],seedStops:Array.from({length:24},()=>paris)}),scrub=$('album-scrub'),depth=()=>$('album-book').style.getPropertyValue('--page-depth');
+  const slide=value=>{scrub.value=String(value);scrub.dispatchEvent(new w.Event('input'));};
+  slide(Number(scrub.max)-2);assert.equal(depth(),'0px','No leaves left at the last spread');
+  slide(0);assert.equal(depth(),'6px');
+  press('End');press('ArrowLeft');assert.equal(depth(),'0px','Without animation too');press('ArrowLeft');assert.equal(depth(),'3px');
+  const motion=controlledMotion(w);press('ArrowRight');assert.equal(depth(),'0px','An animated turn does not wait to land');await motion.finish();
+});
+
+test('window view speaks page turns even with the foot hidden',async t=>{
+  const {w,$,press}=await setup(t),live=$('album-live');
+  assert.equal($('album-foot').contains(live),false);assert.ok($('photo-panel').contains(live),'Everything else is inert under the modal');assert.equal(live.getAttribute('role'),'status');
+  press('ArrowRight');assert.equal(live.textContent,'','The foot says it here');
+  press('f');press('ArrowRight');assert.ok(live.textContent);assert.equal(live.textContent,$('album-position').textContent);
+  press('f');assert.equal(live.textContent,'');
+});
+
+test('warming follows the open page, wherever it is in a long chapter',async t=>{
+  const {w,$,press,prints}=await setup(t,{route:[paris],seedStops:Array.from({length:60},()=>paris)}),scrub=$('album-scrub'),native=w.RedlineAlbumMotion.preload;
+  let warmed=[];w.RedlineAlbumMotion.preload=urls=>{warmed=urls;return native(urls);};
+  const shown=()=>prints().map(print=>print.querySelector('img').src),slide=value=>{scrub.value=String(value);scrub.dispatchEvent(new w.Event('input'));};
+  slide(Number(scrub.max)-8);assert.ok(warmed.length>0&&warmed.length<=48);
+  for(const src of shown())assert.ok(warmed.includes(src),'What is on screen');
+  const list=warmed;press('ArrowRight');assert.ok(shown().length>0);for(const src of shown())assert.ok(list.includes(src),'And the next spread, ready before it is turned to');
+  press('f');assert.ok(warmed.length>0&&warmed.length<=24,'Originals are big, so only the nearest are held');for(const src of shown())assert.ok(warmed.includes(src));
+});
+
+test('swipes ignore a press the browser took for itself',async t=>{
+  const {w,$,pages}=await setup(t),touch=(type,x)=>pointerOn(w,$('album-pages'),type,{pointerType:'touch',clientX:x,clientY:100});
+  touch('pointerdown',300);touch('pointercancel',300);touch('pointerup',100);assert.equal(pages(),'left:inside right:title');
+  touch('pointerdown',300);touch('pointerup',100);assert.equal(pages(),'left:contents right:city');
+});
+
+test('one page at a time the book gives up only the room its tabs use',async t=>{
+  const {$,choose}=await setup(t),gutter=()=>$('album-book').style.getPropertyValue('--tab-gutter');
+  assert.equal(gutter(),'31px','One column');
+  choose(['one.jpg']);await wait(()=>$('photo-review').children.length===1);assert.equal(gutter(),'0px','The tabs are away during review');
+  const empty=await setup(t,{seed:false});assert.equal(empty.$('album-book').style.getPropertyValue('--tab-gutter'),'0px','And on an empty album');
+  const crowded=await setup(t,{route:manyCities(20),seedStops:manyCities(20)});
+  assert.equal(crowded.$('album-book').style.getPropertyValue('--tab-gutter'),`${(Number(crowded.$('album-book').style.getPropertyValue('--tab-width').replace('px',''))-18)+4}px`);
+});
+
+test('the cover carries the tab rail at its full height, and hands it back unchanged',async t=>{
+  const {w,$,press}=await setup(t);press('Escape');const motion=controlledMotion(w),rail=$('gallery-filter');
+  rail.getBoundingClientRect=()=>({left:0,top:0,width:60,height:231,right:60,bottom:231});
+  $('photos-button').click();await wait(()=>motion.running.size===3);
+  assert.ok(rail.closest('.album-cover-scene'));assert.equal(rail.style.height,'231px');assert.equal(rail.style.maxHeight,'');
+  await motion.finish();assert.equal(rail.parentElement,$('album-book'));assert.equal(rail.style.height,'');
+});
+
+test('the tab rail lays out to its real height, settles before placing anything and follows every resize',async t=>{
+  const cities=manyCities(12),{w,$,press}=await setup(t,{route:cities,seedStops:cities}),rail=$('gallery-filter'),book=$('album-book'),panel=$('photo-panel');
+  const tall=()=>parseFloat(rail.style.getPropertyValue('--tab-h')),width=()=>parseFloat(book.style.getPropertyValue('--tab-width')),resize=async()=>{w.dispatchEvent(new w.Event('resize'));await pause(40);};
+  const bottom=()=>Math.max(...[...rail.children].map(tab=>(Number(tab.style.getPropertyValue('--tab-row'))+1)*tall()-2));
+  let height=()=>panel.classList.contains('expanded')?300:560;
+  Object.defineProperty(rail,'clientHeight',{configurable:true,get:()=>height()});
+  await resize();assert.ok(bottom()<=560,`${bottom()} of 560`);
+  // Window view keeps room below the rail for its exit button, in every mode.
+  press('f');assert.ok(bottom()<=300,`${bottom()} of 300 in the album`);press('f');assert.ok(bottom()>300);
+  $('sheet-view').click();press('f');assert.ok(bottom()<=300,`${bottom()} of 300 in All Photos`);press('f');$('album-view').click();
+  // More columns narrow a two-page book. The first draw must already fit what that leaves.
+  height=()=>560-width()*4/3;
+  book.style.setProperty('--tab-width','45px');await resize();
+  assert.ok(bottom()<=height()+1e-6,`${bottom()} of ${height()} after settling on ${width()}`);
+});
+
+test('tabs renumber on a resize that changes the contents pages, in any view',async t=>{
+  const cities=manyCities(8),{w,$,tab}=await setup(t,{route:cities,seedStops:cities}),book=$('album-book'),last=cities[7];let tall=600;
+  book.style.paddingTop=book.style.paddingBottom='0px';Object.defineProperty(book,'clientHeight',{configurable:true,get:()=>tall});
+  const resize=async()=>{w.dispatchEvent(new w.Event('resize'));await pause(40);},chip=()=>tab(last.id).querySelector('.chip-stop').textContent;
+  await resize();const roomy=chip();
+  tall=246;await resize();const tight=chip();assert.notEqual(tight,roomy,'A shorter page holds seven ports, so the chapters move on');
+  tab(last.id).click();assert.match($('album-position').textContent,new RegExp(`\\b${tight}\\b`),'The tab and the page agree');
+  $('sheet-view').click();tall=600;await resize();assert.equal(chip(),roomy,'All Photos keeps them right too');
+});
+
+test('tabs beyond the rail are cued by a quiet fade and reached by scrolling and keys, with the rail a single Tab stop',async t=>{
+  const cities=manyCities(6),{w,$,press,tab}=await setup(t,{route:cities,seedStops:cities}),rail=$('gallery-filter'),list=[...rail.children],stops=()=>list.filter(el=>el.tabIndex===0),position=$('album-position');
+  assert.deepEqual(stops(),[list[0]],'The first, with no city chosen');
+  tab(cities[2].id).click();assert.deepEqual(stops(),[list[2]],'Then the current tab');
+  const at=position.textContent;list[2].focus();
+  press('ArrowDown',list[2]);assert.equal(w.document.activeElement,list[3]);assert.deepEqual(stops(),[list[3]],'Tab returns to where the arrows left it');
+  press('ArrowUp',list[3]);press('ArrowUp',list[2]);assert.equal(w.document.activeElement,list[1]);
+  press('ArrowUp',list[1]);press('ArrowUp',list[0]);assert.equal(w.document.activeElement,list[0],'It stops at the ends');
+  assert.equal(position.textContent,at,'Walking the tabs turns nothing');
+  const down=new w.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true});list[0].dispatchEvent(down);assert.equal(down.defaultPrevented,true,'And does not scroll anything else');
+  $('album-next').focus();assert.deepEqual(stops(),[rail.querySelector('[aria-current="true"]')],'Leaving the rail puts the stop back on the current tab');
+  list[4].focus();tab(cities[4].id).click();assert.equal(w.document.activeElement,list[4],'A rebuild or a jump keeps the keyboard’s place');
+  // Fade only the ends that have more.
+  const ends=()=>[rail.hasAttribute('data-more-start'),rail.hasAttribute('data-more-end')],scrolled=top=>{rail.scrollTop=top;rail.dispatchEvent(new w.Event('scroll'));};
+  assert.deepEqual(ends(),[false,false],'Nothing to cue when all of it fits');
+  Object.defineProperties(rail,{clientHeight:{configurable:true,value:200},scrollHeight:{configurable:true,value:620}});
+  scrolled(0);assert.deepEqual(ends(),[false,true]);scrolled(200);assert.deepEqual(ends(),[true,true]);scrolled(420);assert.deepEqual(ends(),[true,false]);
+  Object.defineProperties(list[5],{offsetTop:{configurable:true,value:500},offsetHeight:{configurable:true,value:90}});
+  scrolled(0);tab(cities[5].id).click();assert.equal(rail.scrollTop,418,'The current tab stops clear of the fade');assert.deepEqual(ends(),[true,true]);
+  list[1].focus();Object.defineProperties(list[2],{offsetTop:{configurable:true,value:100},offsetHeight:{configurable:true,value:90}});press('ArrowDown',list[1]);assert.equal(rail.scrollTop,72,'A key can reach any of them');
+});
+
+test('route maps draw from land that is never culled, in their own colours',async t=>{
+  const {w,$,press}=await setup(t,{realMap:true});
+  assert.equal($('album-pages').querySelector('.route-map-land').getAttribute('href'),'#land');
+  press('Escape');$('zoom-in').click();$('zoom-in').click();mapClock(w).settle();
+  assert.ok([...$('land').children].every(path=>!path.hasAttribute('style')),'Zooming the map leaves the shared land alone');
+  const styles=source('public/style.css');
+  assert.match(styles,/\.route-map-land \{[^}]*fill: var\(--land\);[^}]*fill-rule: evenodd;[^}]*stroke: var\(--coast\);/,'A selector cannot reach into a <use> copy, so it inherits these, and is not drawn black until the painting arrives');
+  assert.doesNotMatch(styles,/\.route-map-land path/);assert.match(styles,/#land path \{[^}]*vector-effect: non-scaling-stroke;/);
+});
+
+test('the album rules only a browser can act on stay in place',()=>{
+  const css=source('public/gallery.css'),rule=(selector,part)=>assert.ok(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')} \\{[^}]*${part.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}`).test(css),`${selector} needs ${part}`);
+  rule('.closed-back .album-pages','pointer-events: none;');rule('.closed-back .album-pages > *','pointer-events: auto;');
+  rule('.album-pages','touch-action: pan-y pinch-zoom;');
+  rule('.folio','color: var(--muted);');
+  assert.match(css,/\.album\.expanded #photo-message\.error \{ position: absolute; bottom: 16px; z-index: 5; \}/,'An error keeps its own red toast and centring');
+  rule(':is(#photo-ready-count, .album-copy-photo-ready-count)','flex: 1;');
+  rule('.album-tab:focus-visible','z-index: 1001;');
+  // The rail meets the page edge at the same place before, during and after a cover's motion.
+  rule('.album-book .album-cover-scene .album-tabs','left: calc(100% + 2px - var(--tab-root, 28px)); top: 5px;');
+  rule('.album-book .album-cover-scene.closed-book .album-tabs','left: calc(75% + 1px - var(--tab-root, 28px));');
+  rule('.album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs, .album-book .album-cover-scene.closed-book .album-tabs','clip-path: inset(0 0 0 calc(var(--tab-root, 28px) - 2px));');
+  rule('.album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs, .album-book .album-cover-scene.closed-book .album-tabs','clip-path: inset(0 0 0 calc(var(--tab-root, 28px) - 3px));');
+  // Long rails fade, and keep scrolling.
+  rule('.album-tabs','overflow: hidden auto;');rule('.album-tabs:is([data-more-start], [data-more-end])','mask-image: linear-gradient(#0000, #000 var(--fade-start, 0px), #000 calc(100% - var(--fade-end, 0px)), #0000);');rule('.album-tabs[data-more-start]','--fade-start: 28px;');rule('.album-tabs[data-more-end]','--fade-end: 28px;');
+  // Touch: no invisible corner over the prints, while window view shows both its corners and its edges.
+  assert.match(css,/@media \(hover: none\) \{\s*\.page-corner \{ display: none; \}\s*\.album\.expanded \.page-corner \{ display: block;[^}]*opacity: 1; \}/);
+  assert.match(css,/@media \(pointer: coarse\) \{[^@]*#album-top-edge::after \{[^}]*height: 4px;[^@]*#album-edge::after \{[^}]*width: 4px;/);
+  // Import review stays an even count across the sheet, big enough to use: the later rules win.
+  const columns=[...css.matchAll(/--sheet-columns: (\d+);/g)].map(match=>Number(match[1]));assert.deepEqual(columns,[10,6,2,4]);
+  assert.match(css,/@media \(max-height: 520px\) and \(orientation: landscape\) \{ \.album \{ --sheet-columns: 4; \} \}/);
+  // A short landscape sheet has room for a whole print.
+  assert.match(css,/@media \(max-height: 520px\) and \(orientation: landscape\) \{[^@]*\.gallery-city-heading \{ position: static;[^@]*minmax\(84px, 1fr\)/);
+  // One page has no spine down its middle, on the sheet or the copy a view turn carries.
+  assert.match(css,/\.album-book:is\(\[data-mode=review\], \[data-mode=sheet\]\) \.album-sheet::after, \.album-view-layer\.single \.album-sheet::after \{ left: 0; \}/);
+  assert.match(css,/\.album-book \{[^}]*width: calc\(100% - var\(--tab-gutter, var\(--tab-width\)\)\);/);
+  for(const gone of ['album-loading-cover','drop-in','transition: transform .32s'])assert.equal(css.includes(gone),false,`${gone} did nothing`);
+});
+
+test('dividers grow to the longest name and letter it smaller, and long lists take more columns rather than clipping',async t=>{
+  const tabs=$=>[...$('gallery-filter').children],height=$=>parseFloat($('gallery-filter').style.getPropertyValue('--tab-h'));
+  const short=await setup(t,{route:[paris,madrid],seedStops:[paris,madrid]});
+  assert.equal(height(short.$),92,'Short names keep the shortest divider');
+  assert.ok(tabs(short.$).every(tab=>tab.querySelector('.tab-name').style.fontSize==='14px'),'And the full size of lettering');
+  const long={...madrid,name:'Santa Cruz de la Sierra del Mar'},named=await setup(t,{route:[paris,long],seedStops:[paris,long]});
+  assert.equal(height(named.$),146,'A long name takes the tallest divider, for every tab alike');
+  const [first,second]=tabs(named.$).map(tab=>parseFloat(tab.querySelector('.tab-name').style.fontSize));
+  assert.equal(first,14);assert.equal(second,10.5,'Beyond that its lettering shrinks, to no less than 10.5px');
+  const cities=Array.from({length:20},(_,i)=>({id:`divider-city-${i}`,name:`City number ${i}`,country:'Test',latitude:i*2,longitude:i*3}));
+  const crowded=await setup(t,{route:cities,seedStops:cities}),placed=tabs(crowded.$).map(tab=>[Number(tab.style.getPropertyValue('--tab-column')),Number(tab.style.getPropertyValue('--tab-row'))]);
+  assert.equal(placed.length,20);assert.equal(new Set(placed.map(String)).size,20,'No two dividers share a place');
+  const columns=Math.max(...placed.map(([column])=>column))+1,tall=height(crowded.$),room=crowded.w.innerHeight*.78-24-10;
+  assert.ok(columns>1&&columns<=6,`${columns} columns`);
+  assert.ok(placed.every(([column,row])=>(row+1)*tall<=room+1e-6),'Every divider fits within the book');
+  assert.ok(placed.every(([column,row])=>column%2===(row%1?1:0)),'Odd columns start half a divider lower, so names stay clear of their neighbours');
+  assert.equal(crowded.$('album-book').style.getPropertyValue('--tab-width'),`${columns*27+18}px`,'The book leaves room for its columns');
+});
+
+test('touch arrows stay after a turn of the card or a focus change, and a mouse still lets them fade',async t=>{
+  const {w,$,tiles}=await setup(t),armed=[],realTimeout=w.setTimeout.bind(w);
+  w.setTimeout=(fn,delay,...args)=>{if(delay===700){armed.push(fn);return 0;}return realTimeout(fn,delay,...args);};
+  w.matchMedia=query=>({matches:query==='(hover: none)'});
+  tiles()[0].click();const frame=$('full-photo').parentElement;
+  $('flip-postcard').click();$('unflip-postcard').click();$('viewer-next').focus();
+  assert.equal(armed.length,0,'README: touch controls stay visible');assert.equal(frame.classList.contains('arrows-idle'),false);
+  await w.RedlinePostcards.close();
+  w.matchMedia=()=>({matches:false});tiles()[0].click();assert.ok(armed.length>0,'With a mouse the arrows rest as before');
+});
+
+test('a drag that selects postcard text neither turns the card nor closes the viewer, wherever it ends',async t=>{
+  const {w,$,tiles}=await setup(t);tiles()[0].click();$('flip-postcard').click();
+  const viewer=$('photo-viewer'),flipped=()=>viewer.classList.contains('flipped');
+  const drag=(from,to,extra={})=>{from.dispatchEvent(new w.Event('pointerdown',{bubbles:true}));to.dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1,...extra}));};
+  const paper=$('postcard-back').querySelector('.postcard-columns');
+  drag($('postcard-message'),paper);assert.equal(flipped(),true,'Released over the paper between the columns');
+  drag($('postcard-recipient'),$('postcard-back'));assert.equal(flipped(),true,'Released over the card’s own padding');
+  drag($('postcard-message'),viewer,{clientX:5000,clientY:5000});await tick();assert.equal(viewer.open,true,'Released on the backdrop');assert.equal(flipped(),true);
+  drag($('full-photo'),viewer,{clientX:5000,clientY:5000});await tick();assert.equal(viewer.open,true,'Only a press on the backdrop itself closes');
+  drag(paper,paper);assert.equal(flipped(),false,'A plain click on the paper still turns the card');
+  drag(viewer,viewer,{clientX:5000,clientY:5000});await wait(()=>!viewer.open);
+  tiles()[0].click();viewer.dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1,clientX:5000,clientY:5000}));await wait(()=>!viewer.open);
+});
+
+test('a share too long to draw keeps saying so after the autosave, until the text fits or the card turns back',async t=>{
+  const {w,$,tiles,api,trip}=await setup(t);
+  w.RedlinePostcardExport={render:(image,place,value)=>{if(value.message.length>5)throw Error('Shorten the text to fit this postcard.');return {toBlob:callback=>callback(new Blob([jpeg],{type:'image/jpeg'}))};}};
+  const type=text=>{$('postcard-message').value=text;$('postcard-message').dispatchEvent(new w.Event('input'));};
+  tiles()[0].click();$('flip-postcard').click();type('far too long a message');
+  await wait(()=>$('postcard-error').textContent==='Shorten the text to fit this postcard.');
+  await wait(()=>$('postcard-saved').textContent==='Saved');await tick();
+  assert.ok((await api(`/trips/${trip.id}`)).photos.some(photo=>photo.postcard?.message==='far too long a message'),'The autosave ran');
+  assert.equal($('postcard-error').textContent,'Shorten the text to fit this postcard.','The dead button keeps its reason');assert.equal($('share-postcard').disabled,true);
+  type('fits');await wait(()=>!$('share-postcard').disabled);assert.equal($('postcard-error').textContent,'');
+  type('too long once more');await wait(()=>$('postcard-error').textContent!=='');
+  // A caption's autosave runs 600 ms after typing.
+  const caption=async text=>{$('caption-input').value=text;$('caption-input').dispatchEvent(new w.Event('input',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,650));assert.ok((await api(`/trips/${trip.id}`)).photos.some(photo=>photo.caption===text),'The caption saved');};
+  await caption('A caption too');
+  assert.equal($('postcard-error').textContent,'Shorten the text to fit this postcard.','A caption saved in the meantime leaves it too');
+  $('unflip-postcard').click();assert.equal($('postcard-error').textContent,'','The reason goes with the back of the card');
+  $('flip-postcard').click();await wait(()=>$('postcard-error').textContent!=='');
+  $('viewer-next').click();await wait(()=>$('photo-position').textContent==='2 / 2');assert.equal($('postcard-error').textContent,'');
+  await caption('On the next photo');assert.equal($('postcard-error').textContent,'','Another photo does not inherit the reason');
+});
+
+test('the All Photos badge follows a postcard written or cleared, without redrawing the sheet',async t=>{
+  const {w,$,tiles}=await setup(t);const first=tiles()[0],tile=first.closest('.photo-tile'),badge=()=>tile.querySelectorAll('.postcard-badge').length;
+  const save=async text=>{$('postcard-message').value=text;$('postcard-message').dispatchEvent(new w.Event('input'));$('postcard-save-status').textContent='';$('save-postcard').click();await wait(()=>$('postcard-save-status').textContent==='Postcard saved.');};
+  assert.equal(badge(),0);first.click();$('flip-postcard').click();
+  await save('Wish you were here');assert.equal(badge(),1);assert.equal(tile.isConnected,true,'The same tile');
+  await save('Wish you were here too');assert.equal(badge(),1,'One badge, however many saves');
+  await save('   ');assert.equal(badge(),0,'Nothing written, no badge');
+});
+
+test('the album catches up when the rest of a part-saved import is cancelled or removed',async t=>{
+  for(const finish of ['cancel','remove']){
+    const {w,$,choose,pages}=await setup(t,{seed:false});
+    await wait(()=>pages()==='left:inside right:title');
+    choose(['one.jpg','two.jpg']);await wait(()=>$('photo-review').children.length===2&&!$('choose-photos').disabled);
+    const select=$('photo-review').querySelector('select');select.value=paris.id;select.dispatchEvent(new w.Event('change'));
+    $('upload-photos').click();await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+    if(finish==='cancel')$('cancel-photo-import').click();else $('photo-review').querySelector('.remove-photo').click();
+    assert.equal($('album-pages').hidden,false);assert.equal($('album-pages').querySelector('.title-meta').textContent,'2 stops · 1 photo',finish);
+  }
+});
+
+test('GPS photos around one city make one new stop, under the city’s name and country',async t=>{
+  const {w,$,choose,api,trip}=await setup(t,{realMap:true,seed:false,route:[madrid]});
+  const index=JSON.parse(source('public/photo-cities.json')),spots={louvre:[48.8606,2.3376],eiffel:[48.8584,2.2945],notre:[48.853,2.3499],lyon:[45.764,4.8357]};
+  w.fetch=async()=>({ok:true,json:async()=>index});
+  w.exifr.gps=async file=>{const [latitude,longitude]=spots[file.name.split('.')[0]];return {latitude,longitude};};
+  choose(['louvre.jpg','eiffel.jpg','notre.jpg','lyon.jpg']);await wait(()=>$('photo-review').children.length===4&&!$('choose-photos').disabled);
+  assert.deepEqual([...$('photo-review').querySelectorAll('select')].map(select=>select.selectedOptions[0].text),['Paris (from GPS, new stop)','Paris (from GPS, new stop)','Paris (from GPS, new stop)','Lyon (from GPS, new stop)']);
+  $('upload-photos').click();await wait(()=>/4 photos saved/.test($('photo-message').textContent));
+  const stops=[...w.RedlineApp.getStops()];assert.deepEqual(stops.map(stop=>[stop.name,stop.country]),[['Madrid','Spain'],['Paris','France'],['Lyon','France']]);
+  assert.equal((await api(`/trips/${trip.id}`)).photos.filter(photo=>photo.city?.name==='Paris').length,3);
+});
+
+test('a batch reuses a new stop only within a city’s reach, and only a stop it has not already got',async t=>{
+  const {w,$,choose}=await setup(t,{realMap:true,seed:false,route:[madrid]});
+  const places=[['Near One',50,10,'DE'],['Near Two',50.05,10,'DE'],['Far',50.15,10,'DE'],['On the route',40.4,-3.7,'ES']];
+  w.fetch=async()=>({ok:true,json:async()=>places});
+  w.exifr.gps=async file=>{const place=places[Number(file.name[0])];return {latitude:place[1],longitude:place[2]};};
+  choose(['0.jpg','1.jpg','2.jpg','3.jpg']);await wait(()=>$('photo-review').children.length===4&&!$('choose-photos').disabled);
+  assert.deepEqual([...$('photo-review').querySelectorAll('select')].map(select=>select.selectedOptions[0].text),['Near One (from GPS, new stop)','Near One (from GPS, new stop)','Far (from GPS, new stop)','01 · Madrid, Spain'],'5 km away shares the stop, 17 km does not, and a stop on the route still wins');
+});
+
+test('the photo index names cities, and its generator leaves out sections of them',async()=>{
+  const {fromGeoNames,pruneIndex,coreRadius}=await import('../scripts/build-photo-cities.mjs');
+  const index=JSON.parse(source('public/photo-cities.json')),names=new Set(index.map(row=>row[0]));
+  for(const section of ['Paris 01 Louvre','Paris 16 Passy','Paris 10e Arrondissement','Lyon 01','Marseille 16','Shadwell','City of Westminster','Financial District','Times Square','Budapest V. kerület','Sector 1','Zürich (Kreis 11) / Oerlikon'])assert.equal(names.has(section),false,section);
+  for(const city of ['Paris','London','New York','Lyon','Versailles','Kawasaki','Yokohama'])assert.equal(names.has(city),true,city);
+  const row=(id,name,lat,lon,code,country)=>[id,name,name,'',lat,lon,'P',code,country,'','','','','','100000','','','UTC','2024-01-01'].join('\t');
+  assert.deepEqual(fromGeoNames([row(1,'Lyon',45.74846,4.84671,'PPLA','FR'),row(2,'Lyon 01',45.77,4.83,'PPLX','FR')].join('\n')+'\n'),[['Lyon',45.7485,4.8467,'FR']]);
+  assert.equal(coreRadius(35000000),15,'A megacity does not swallow its neighbours');
+  const cities=[{name:'Big  City',country:'Testland',latitude:10,longitude:10,population:4000000},{name:'Next Door',country:'Testland',latitude:10.02,longitude:10.02,population:150000},{name:'Far Hamlet',country:'Testland',latitude:30,longitude:30,population:0}];
+  const rows=[['Old Quarter',10.01,10.01,'TL'],['Next Door',10.02,10.02,'TL'],['Suburb',10.2,10.2,'TL'],['Far Hamlet',30,30,'TL'],['Outskirts',10.3,10.3,'TL'],['Paris 12e Arrondissement',48.8,2.4,'FR']];
+  const pruned=pruneIndex(rows,cities);
+  assert.deepEqual(pruned.map(place=>place[0]),['Big City','Next Door','Suburb','Far Hamlet','Outskirts','Big City'],'Its core answers as the city, a neighbour on the map stays, and the map’s name stands for the core');
+  assert.deepEqual(pruned[0],['Big City',10.01,10.01,'TL',10,10],'A core row stays where it is, so the rim still finds the city');
+  assert.deepEqual(pruned.at(-1),['Big City',10,10,'TL'],'With the ISO code of the rows around it');
+  assert.equal(pruneIndex([['Across the Border',10.01,10.01,'XX'],['Downtown',10,10,'TL']],cities)[0][4],undefined,'A row over the border stays itself');
+  assert.deepEqual(pruneIndex(pruned,cities),pruned,'Pruning again changes nothing');
+});
+
+test('a tile’s picker names its whole city on hover, once a tile is too narrow to',async t=>{
+  const {w,$,choose,change}=await setup(t);
+  choose(['one.jpg','two.jpg']);await wait(()=>$('photo-review').children.length===2&&!$('choose-photos').disabled);
+  const select=()=>$('photo-review').querySelector('select');assert.equal(select().title,'');
+  select().value=madrid.id;select().dispatchEvent(new w.Event('change'));assert.equal(select().title,'02 · Madrid, Spain');
+  change('bulk-photo-city',paris.id);assert.equal(select().title,'01 · Paris, France','A bulk choice redraws it too');
+  select().value='';select().dispatchEvent(new w.Event('change'));assert.equal(select().title,'');
+});
+
+test('a drop on the open viewer changes nothing behind it, and works again once it is closed',async t=>{
+  const {w,$,tiles}=await setup(t);tiles()[0].click();
+  const dragging=type=>{const event=new w.Event(type,{bubbles:true,cancelable:true});Object.defineProperty(event,'dataTransfer',{value:{types:['Files'],dropEffect:'',files:[new File([jpeg],'drop.jpg',{type:'image/jpeg'})]}});return event;};
+  $('full-photo').dispatchEvent(dragging('dragenter'));assert.equal($('photo-drop-hint').hidden,true);
+  const over=dragging('dragover');$('full-photo').dispatchEvent(over);assert.equal(over.dataTransfer.dropEffect,'none','The cursor says so');
+  $('full-photo').dispatchEvent(dragging('drop'));await tick();await tick();
+  assert.equal($('photo-review').children.length,0);assert.equal($('album-book').dataset.mode,'sheet');assert.equal($('photo-viewer').open,true);
+  await w.RedlinePostcards.close();
+  $('photo-panel').dispatchEvent(dragging('dragenter'));assert.equal($('photo-drop-hint').hidden,false);
+  const again=dragging('dragover');$('photo-panel').dispatchEvent(again);assert.equal(again.dataTransfer.dropEffect,'copy');
+  $('photo-panel').dispatchEvent(dragging('drop'));await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+});
+
+test('import review keeps keyboard focus through its page turns, and past the last photo in window view',async t=>{
+  const {w,$,choose,press}=await setup(t);
+  choose(Array.from({length:144},(_,i)=>`page-${i}.jpg`));await wait(()=>$('photo-selection-count').textContent==='144 selected'&&!$('choose-photos').disabled);
+  const motion=controlledMotion(w),focused=()=>w.document.activeElement;
+  // The book is inert for a turn, which in a browser drops focus; jsdom has no inert, so the test drops it, unless the button has just been disabled.
+  const turn=async id=>{$(id).focus();$(id).click();await wait(()=>motion.running.size===4);if(!$(id).disabled){$(id).blur();assert.equal(focused(),w.document.body);}await motion.finish();await wait(()=>!$('album-book').inert);await tick();};
+  await turn('review-next');assert.equal(focused(),$('review-next'),'A second Enter turns again');
+  await turn('review-next');assert.equal($('review-next').disabled,true);assert.equal(focused(),$('review-prev'),'The last page has no Next, so focus takes the other button');
+  await turn('review-prev');assert.equal(focused(),$('review-prev'));
+  $('cancel-photo-import').click();assert.equal(focused(),$('choose-photos'),'Outside window view, focus returns to Add photos');
+  press('f');assert.equal($('photo-panel').classList.contains('expanded'),true);
+  const emptied=[()=>$('cancel-photo-import').click(),()=>$('photo-review').querySelector('.remove-photo').click(),()=>{const select=$('photo-review').querySelector('select');select.value=paris.id;select.dispatchEvent(new w.Event('change'));$('upload-photos').click();}];
+  for(const empty of emptied){
+    choose(['one.jpg']);await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+    empty();await wait(()=>!$('photo-review').children.length&&focused()===$('photo-panel'));
+    await wait(()=>!$('photo-message').textContent.startsWith('Saving')&&!$('choose-photos').disabled);
+  }
+});
+
+test('saving many new GPS stops redraws the review once, and leaves the trip clean',async t=>{
+  const {w,$,choose,api,trip}=await setup(t,{realMap:true,seed:false,route:[madrid]});
+  const places=Array.from({length:6},(_,i)=>[`Place ${i}`,10+i*3,20+i*3,'FR']);
+  w.fetch=async()=>({ok:true,json:async()=>places});
+  w.exifr.gps=async file=>{const place=places[Number(file.name[0])];return {latitude:place[1],longitude:place[2]};};
+  choose(places.map((place,i)=>`${i}.jpg`));await wait(()=>$('photo-review').children.length===6&&!$('choose-photos').disabled);
+  const review=$('photo-review'),rebuild=review.replaceChildren;let rebuilt=0;review.replaceChildren=function(...nodes){rebuilt++;return rebuild.apply(this,nodes);};
+  $('upload-photos').click();await wait(()=>/6 photos saved/.test($('photo-message').textContent)&&!$('choose-photos').disabled);
+  assert.ok(rebuilt<=2,`${rebuilt} rebuilds for six new stops`);
+  assert.equal(w.RedlineApp.getStops().length,7);assert.equal((await api(`/trips/${trip.id}`)).trip.stops.length,7,'The new stops were still saved');
+  assert.equal($('save-trip').classList.contains('dirty'),false);
+});
+
+test('the caption editor’s pin goes when the editor does',async t=>{
+  const {$,tiles}=await setup(t);tiles()[0].click();const viewer=$('photo-viewer'),pinned=()=>[viewer.style.top,viewer.style.bottom,viewer.style.marginBlock];
+  $('edit-caption').click();assert.equal(viewer.style.bottom,'auto','Held still while the form opens beneath it');
+  $('edit-caption').click();await wait(()=>$('caption-form').hidden);assert.deepEqual(pinned(),['','','']);
+  $('edit-caption').click();assert.equal(viewer.style.bottom,'auto');$('flip-postcard').click();assert.deepEqual(pinned(),['','',''],'Turning the card closes it too');
+});
+
+test('the viewer and review rules only a browser can act on stay in place',()=>{
+  const css=source('public/gallery.css'),postcards=source('public/postcards.js');
+  // A faded arrow still takes its click, or it falls through and turns the card.
+  assert.match(css,/\.viewer-photo\.arrows-idle \.viewer-edge:not\(:focus-visible\) \{ opacity: 0; \}/);assert.match(css,/#photo-viewer\.flipped \.viewer-edge \{ pointer-events: none; \}/);
+  // A tick chooses photos for a bulk city, and an unticked photo still saves, so it does not dim as if it would not.
+  assert.equal(css.includes('.review-photo:not(.selected)'),false);
+  // A phone's Select toolbar wraps inside the sheet that clips it, so Done is always reachable.
+  assert.match(css,/@media \(max-width: 650px\) \{[^@]*\.gallery-actions \{ flex-wrap: wrap; row-gap: 4px; \}\s*\.toolbar-spacer \{ display: none; \}/);
+  // Postcard fields do not make iOS zoom, its buttons take a fingertip, and this comes after the rule it overrides.
+  const touch=css.indexOf('@media (hover: none), (any-pointer: coarse) {\n  #postcard-back textarea, #postcard-back input { font-size: 16px; }');
+  assert.ok(touch>css.indexOf('#postcard-back textarea, #postcard-back input { font-size: 12px; }'));assert.match(css.slice(touch),/\.postcard-actions button:not\(\.viewer-tool\) \{ min-width: 44px; min-height: 44px; \}/);
+  // A panorama keeps height for its fields, and a narrow photo keeps a toolbar and buttons that fit, the save note giving way first.
+  assert.match(css,/#postcard-back \{[^}]*padding: clamp\(10px, 4%, 24px\);/);
+  assert.match(css,/#postcard-card \{[^}]*min-width: min\(240px, calc\(90vw - 40px\)\);/);assert.match(css,/#full-photo \{[^}]*margin-inline: auto;/);assert.match(css,/#postcard-saved \{ min-width: 0;[^}]*overflow: hidden;/);
+  // Nothing reads these.
+  assert.equal(css.includes('#photo-viewer select'),false);
+  for(const gone of ['caption-editing',"toggle('preview'"])assert.equal(postcards.includes(gone),false,gone);
+});
+
+const contrast=(a,b)=>{
+  const luminance=hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(c=>c<=.03928?c/12.92:((c+.055)/1.055)**2.4).reduce((sum,c,i)=>sum+c*[.2126,.7152,.0722][i],0),[x,y]=[luminance(a),luminance(b)];
+  return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);
+};
+const markup=()=>new JSDOM(source('map.html')).window.document;
+const blockOf=(css,opening)=>{const from=css.indexOf(opening);assert.ok(from>=0,opening);let depth=0;for(let i=css.indexOf('{',from);i<css.length;i++){if(css[i]==='{')depth++;else if(css[i]==='}'&&--depth===0)return css.slice(from,i+1);}};
+
+test('quiet text and glyphs stay readable on the darkest paper behind them',()=>{
+  const css=source('public/style.css')+source('public/gallery.css'),rule=selector=>css.match(new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')} \\{([^}]*)\\}`,'m'))?.[1],muted=css.match(/--muted: (#\w{6})/)[1];
+  const logbook='#f1e7d4',page='#efe5d2',strip='#e4d5b9',leather='#594b3a';
+  for(const [selector,ground,need] of [['.folio',page,4.5],['#postcard-back textarea::placeholder, #postcard-back input::placeholder',page,4.5],['.trip-state',logbook,4.5],['.trip-state.unsaved',logbook,4.5],[':is(#photo-ready-count, .album-copy-photo-ready-count)',strip,4.5],['.danger-button',strip,4.5],['.cover-meta',leather,4.5],['.back-mark',leather,4.5],['.remove-stop',logbook,3]]){
+    const body=rule(selector);assert.ok(body,`${selector} is still styled`);
+    const colour=body.match(/(?:^|;)\s*color: ([^;]+);/)[1].replace('var(--muted)',muted);
+    assert.ok(contrast(colour,ground)>=need,`${selector} is ${contrast(colour,ground).toFixed(2)}:1, and needs ${need}:1`);
+    assert.doesNotMatch(body,/opacity: (?!1;)/,`${selector} would fade below that`);
+  }
+});
+
+test('keyboard focus stands out on the album\'s dark chrome, in the trip menu and in search results',()=>{
+  const style=source('public/style.css'),gallery=source('public/gallery.css'),paper=style.match(/--paper: (#\w{6})/)[1],logRed=style.match(/\.route-dock, \.route-log \{[^}]*--red: (#\w{6})/)[1];
+  assert.match(gallery,/\.album :is\(\.album-top, \.album-foot, #album-drawer\) :focus-visible \{ outline-color: var\(--paper\); \}/);
+  for(const ground of ['#302820','#29221c'])assert.ok(contrast(paper,ground)>=3,`The paper ring on ${ground}`);
+  for(const edge of ['album-top-edge','album-edge'])assert.match(gallery,new RegExp(`#${edge}:focus-visible \\{ outline: 2px solid var\\(--paper\\);`),'Brass falls under 3:1 on the leather');
+  assert.match(style,/\.trip-menu button:focus-visible \{ outline: 2px solid var\(--red\); outline-offset: -2px; \}/);
+  assert.doesNotMatch(style,/\.trip-menu button:hover, \.trip-menu button:focus-visible \{[^}]*outline: none/,'A tint alone is 1.17:1');
+  assert.match(style,/#suggestions button\[aria-selected=true\] \{ box-shadow: inset 3px 0 var\(--red\); \}/,'Focus stays in the field, so this is the only sign of the chosen row');
+  for(const ground of ['#faf5ea','#efe3cc'])assert.ok(contrast(logRed,ground)>=3,`The red mark on ${ground}`);
+});
+
+test('the trace button keeps its accessible name on a phone',()=>{
+  const phone=blockOf(source('public/style.css'),'@media (max-width: 650px)'),rule=phone.match(/\.travel-controls #play-label \{([^}]*)\}/)[1],play=markup().getElementById('play');
+  assert.doesNotMatch(rule,/display: none|visibility: hidden/,'Either would take the only text out of its name');
+  assert.match(rule,/position: absolute;/);assert.match(rule,/clip: rect\(0, 0, 0, 0\);/);
+  assert.equal(play.textContent.trim(),'Trace route');assert.equal(play.querySelector('svg').getAttribute('aria-hidden'),'true');
+});
+
+test('search results stay within a short window, and a trip menu has room with one saved trip',()=>{
+  const css=source('public/style.css'),[,inset]=css.match(/\.suggestion-panel \{[^}]*max-height: min\(260px, calc\(100svh - (\d+)px\)\);/);
+  // The panel sits 8px above the dock. Its status line adds 21px, and a phone-width dock wraps to 136.5px, 16px up rather than 22px.
+  const top=(height,dock,below)=>height-below-dock-8-Math.min(260,height-Number(inset));
+  for(const [height,dock,below] of [[375,110.5,22],[375,131.5,22],[320,157.5,16]])assert.ok(top(height,dock,below)>=0,`The first result starts at y=${top(height,dock,below)} in a ${height}px window`);
+  assert.equal(Math.min(260,720-Number(inset)),260,'A roomy window keeps the full list');
+  assert.match(css,/\.trip-switcher \.trip-grid:has\(\.trip-menu:not\(\[hidden\]\)\) \{ min-height: 240px; \}/);
+});
+
+test('with Switch trip open, + New trip and Export trip still come before the list in tab order',()=>{
+  const doc=markup(),actions=doc.querySelector('.current-actions'),list=doc.getElementById('trip-switcher');
+  assert.ok(actions.compareDocumentPosition(list)&doc.defaultView.Node.DOCUMENT_POSITION_FOLLOWING);
+  assert.equal(actions.parentElement,list.parentElement,'It is still placed against the navigation row');
+  assert.match(source('public/style.css'),/\.current-actions \{ position: absolute; top: 0; right: 0;/);
+  for(const id of ['current-trip-map','trips-summary','toggle-stops'])assert.equal(doc.getElementById(id),null,`${id} had no visible use`);
+});
+
+test('no field makes iOS zoom the page on focus',()=>{
+  const gallery=source('public/gallery.css'),block=blockOf(gallery,'@media (hover: none), (any-pointer: coarse) {\n  #postcard-back textarea');
+  const sixteen=[...block.matchAll(/^\s*([^{}\n]+?) \{ font-size: 16px; \}/gm)].map(match=>match[1]).join(', ');
+  assert.ok(gallery.indexOf('.album select {')<gallery.indexOf(block),'After the rules it overrides');
+  const doc=markup(),fields=[...doc.querySelectorAll('input:not([type=checkbox]):not([type=range]):not([type=file]),textarea,select')];
+  // Rename fields and the selects under each print are built later, inside these.
+  const rename=doc.createElement('input');rename.type='text';doc.getElementById('trip-list').append(Object.assign(doc.createElement('form'),{className:'trip-rename-form'}));doc.querySelector('.trip-rename-form').append(rename);
+  const pick=doc.createElement('select');doc.getElementById('photo-review').append(pick);
+  const largeAlready=['trip-name','caption-input'];assert.match(source('public/style.css'),/#trip-name-form input \{[^}]*italic 19px/);assert.match(gallery,/#caption-input \{[^}]*font: 16px/);
+  assert.ok(fields.length>8);
+  for(const field of [...fields,rename,pick])if(!largeAlready.includes(field.id))assert.ok(field.matches(sixteen),`${field.id||field.tagName} is 16px on a touch screen`);
+});
+
+test('every custom property and keyframes in the stylesheets has a reader',()=>{
+  const css=(source('public/style.css')+source('public/gallery.css')).replace(/\/\*[\s\S]*?\*\//g,''),scripts=readdirSync(new URL('../public/',import.meta.url)).filter(name=>/\.js$/.test(name)&&!/^(world|atlas-geography|atlas-names)\.js$/.test(name)).map(name=>source(`public/${name}`)).join('');
+  for(const name of new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map(match=>match[1])))assert.ok(css.includes(`var(${name}`)||scripts.includes(name),`${name} is read`);
+  for(const [,name] of css.matchAll(/@keyframes ([\w-]+)/g))assert.ok(new RegExp(`animation[^;}]*\\b${name}\\b`).test(css)||scripts.includes(name),`@keyframes ${name} is used`);
+});
+
+test('a click on a city goes to the closest dot, not to whichever neighbour paints last',async t=>{
+  const {w,clock,map,stop}=await chart(t,[LONDON,PARIS,ROME]);
+  [[100,100],[104,100],[300,300]].forEach(([x,y],i)=>{stop(i).querySelector('.stop-dot').getBoundingClientRect=()=>({left:x-4.5,top:y-4.5,width:9,height:9});});
+  const click=(i,clientX,clientY)=>{stop(i).querySelector('circle[r="12"]').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1,clientX,clientY}));clock.settle();};
+  click(1,100,100);assert.equal(map.dataset.tripStep,'1','Paris’ target lies over London’s dot');
+  click(1,104,100);assert.equal(map.dataset.tripStep,'2','And its own dot is still its own');
+  stop(2).querySelector('circle[r="12"]').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:0}));clock.settle();assert.equal(map.dataset.tripStep,'3','Assistive technology names the exact stop');
+});
+
+test('a flicked map stops coasting when a key or a city takes the camera',async t=>{
+  const {w,$,clock,map,press,wheel,stop}=await chart(t,[LONDON,PARIS,ROME,ATHENS]);
+  const flick=()=>{const fire=(type,x,at)=>{const event=new w.MouseEvent(type,{button:0,clientX:x,clientY:300,bubbles:true,cancelable:true});Object.defineProperties(event,{pointerId:{value:1},pointerType:{value:'mouse'},timeStamp:{value:at}});map.dispatchEvent(event);};
+    const began=clock.now;fire('pointerdown',700,began);for(let i=1;i<=6;i++)fire('pointermove',700+30*i,began+10*i);fire('pointerup',880,began+62);};
+  for(let i=0;i<5;i++)wheel(-160,720,200);clock.settle();
+  flick();press('ArrowRight',map);press('ArrowRight',map);press('ArrowRight',map);const landed=camera(w);clock.run(90);assert.deepEqual(camera(w),landed,'A key');
+  flick();stop(1).dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));clock.settle();const city=camera(w);clock.run(90);assert.deepEqual(camera(w),city,'A city');
+  assert.equal($('play-label').textContent,'Trace route');
+});
+
+test('a Safari pinch over a city zooms the map, not the page',async t=>{
+  const {w,clock,stop}=await chart(t,[LONDON,PARIS]);
+  const fire=(type,scale)=>{const event=new w.Event(type,{bubbles:true,cancelable:true});Object.assign(event,{scale,clientX:720,clientY:450});stop(0).dispatchEvent(event);return event;};
+  assert.equal(fire('gesturestart',1).defaultPrevented,true);assert.equal(fire('gesturechange',2).defaultPrevented,true);clock.settle();
+  assert.ok(Math.abs(camera(w).w-720)<1e-6);
+});
+
+test('a clean reload leaves the camera and a trace alone while the trip loads',async t=>{
+  const first=await setup(t,{realMap:true,seed:false,route:[paris,madrid]}),dump=store=>Object.fromEntries(Array.from({length:store.length},(_,i)=>[store.key(i),store.getItem(store.key(i))]));
+  const again=await setup(t,{realMap:true,seed:false,route:[paris,madrid],profile:{idb:first.w.indexedDB,local:dump(first.w.localStorage),session:dump(first.w.sessionStorage)}}),{w,$,press}=again,clock=mapClock(w),map=$('map');
+  map.dispatchEvent(new w.WheelEvent('wheel',{clientX:720,clientY:300,deltaY:-160,bubbles:true,cancelable:true}));press('Enter',map);
+  assert.equal($('play-label').textContent,'Pause');await tick();await new Promise(resolve=>setTimeout(resolve,120));clock.frame();
+  assert.equal($('play-label').textContent,'Pause');assert.ok(camera(w).w<1440,'Still zoomed');
+});
+
+test('long names never widen the rail past what the book can spare',async t=>{
+  const long=['Saint Petersburg','San Francisco','Rio de Janeiro','Buenos Aires','Philadelphia'].map((name,i)=>({id:`album-city-${i}`,name,country:'Test',latitude:10+i*5,longitude:10+i*5}));
+  const {w,$}=await setup(t,{route:long,seedStops:long}),book=$('album-book'),stage=book.parentElement;
+  const measure=(width,height,rail)=>{
+    for(const [node,field,value] of [[stage,'clientWidth',width],[stage,'clientHeight',height],[$('gallery-filter'),'clientHeight',rail]])Object.defineProperty(node,field,{configurable:true,value});
+    w.dispatchEvent(new w.Event('resize'));return Number(book.style.getPropertyValue('--tab-width').replace('px',''));
+  };
+  // Book height: the smaller of the stage's height and (width - 2 x rail - 28) / 1.5.
+  const fits=(width,height,rail)=>Math.min(height-8,(width-48-2*rail-28)/1.5);
+  for(const [width,height,railHeight] of [[820,270,120],[643,255,100]]){
+    const rail=measure(width,height,railHeight);
+    assert.ok(rail<=153,`${width}x${height} gives a ${rail}px rail`);
+    assert.ok(fits(width,height,rail)>=Math.min(height-8,(width-48-2*99-28)/1.5)-1,`${width}x${height} keeps its book`);
+  }
+  assert.equal(new Set([...$('gallery-filter').children].map(tab=>`${tab.style.getPropertyValue('--tab-column')},${tab.style.getPropertyValue('--tab-row')}`)).size,5,'No two tabs share a place');
+});
+
+test('a stray click during a turn stays in the album, and a near miss on a control does nothing',async t=>{
+  const {w,$,tab}=await setup(t),panel=$('photo-panel');
+  tab(paris.id).click();
+  const button=$('album-next'),foot=panel.querySelector('.album-foot');
+  button.getBoundingClientRect=()=>({left:100,right:142,top:50,bottom:92});
+  clickOn(w,foot,{clientX:148,clientY:70});assert.equal(panel.open,true,'Six pixels from the arrow');
+  clickOn(w,foot,{clientX:400,clientY:70});assert.equal(panel.open,false,'Clear of everything');
+});
+
+test('window view lets go of originals once the reader has moved on',async t=>{
+  const {w}=await setup(t),cache=w.RedlineAlbumMotion,urls=['https://redline.test/a.jpg','https://redline.test/b.jpg'];
+  cache.clearPreloads();let attempts=0;w.HTMLImageElement.prototype.decode=function(){attempts++;return Promise.resolve();};
+  await cache.preload(urls);assert.equal(attempts,2);await cache.preload(urls);assert.equal(attempts,2,'Held');
+  cache.release([urls[0],'https://redline.test/never-held.jpg']);await cache.preload(urls);assert.equal(attempts,3,'Only what was let go is fetched again');cache.clearPreloads();
+});
+
+test('an airport photo does not rename a city, and the rim of a city still finds it',async t=>{
+  const {w,$,choose,api,trip}=await setup(t,{realMap:true,seed:false,route:[madrid]});
+  const index=JSON.parse(source('public/photo-cities.json')),spots={cdg:[49.0097,2.5479],louvre:[48.8606,2.3376],eiffel:[48.8584,2.2945],boulogne:[48.8397,2.2399],denis:[48.9362,2.3574]};
+  w.fetch=async()=>({ok:true,json:async()=>index});
+  w.exifr.gps=async file=>{const [latitude,longitude]=spots[file.name.split('.')[0]];return {latitude,longitude};};
+  choose(['cdg.jpg','louvre.jpg','eiffel.jpg','boulogne.jpg','denis.jpg']);await wait(()=>$('photo-review').children.length===5&&!$('choose-photos').disabled);
+  const names=[...$('photo-review').querySelectorAll('select')].map(select=>select.selectedOptions[0].text);
+  assert.notEqual(names[0],'Paris (from GPS, new stop)');
+  assert.deepEqual(names.slice(1),Array(4).fill('Paris (from GPS, new stop)'));
+  $('upload-photos').click();await wait(()=>/5 photos saved/.test($('photo-message').textContent));
+  const stopNames=(await api(`/trips/${trip.id}`)).trip.stops.map(stop=>stop.name);assert.equal(stopNames.filter(name=>name==='Paris').length,1,stopNames.join());
+  const added=w.RedlineApp.getStops().find(stop=>stop.name==='Paris');assert.ok(Math.abs(added.latitude-48.85)<.05&&Math.abs(added.longitude-2.35)<.05,'At the city, not where the first photo stood');
+});
+
+test('a press that lands during a turn never shuts the album, whenever it is released',async t=>{
+  const {w,$,tab}=await setup(t),panel=$('photo-panel'),stage=panel.querySelector('.album-stage');tab(paris.id).click();
+  const motion=controlledMotion(w),fire=type=>stage.dispatchEvent(new w.MouseEvent(type,{bubbles:true}));
+  $('sheet-view').click();await wait(()=>motion.running.size);
+  fire('pointerdown');fire('pointerup');fire('click');assert.notEqual(panel.dataset.motion,'closing','Released during the turn');
+  fire('pointerdown');for(let i=0;i<4&&$('album-book').dataset.viewMotion;i++)await motion.finish();
+  assert.equal($('album-book').dataset.viewMotion,undefined,'The turn is over');
+  fire('pointerup');fire('click');assert.equal(panel.open,true,'Released after it');assert.notEqual(panel.dataset.motion,'closing');
+  fire('pointerdown');fire('pointerup');fire('click');assert.equal(panel.dataset.motion,'closing','At rest, the stage still closes the book');
+  for(let i=0;i<4&&panel.open;i++)await motion.finish();
+});
+
+test('the photo index has settled: repeating the generator changes nothing, and every row is a place',async()=>{
+  const {pruneIndex}=await import('../scripts/build-photo-cities.mjs');
+  const context={window:{}};vm.createContext(context);vm.runInContext(source('public/atlas-geography.js'),context);
+  const index=JSON.parse(source('public/photo-cities.json'));
+  assert.deepEqual(JSON.parse(JSON.stringify(pruneIndex(index,context.window.MAP_CITIES))),index);
+  assert.equal(new Set(index.map(row=>JSON.stringify(row))).size,index.length,'No row twice');
+  assert.deepEqual(index.filter(row=>!/^[A-Z]{2}$/.test(row[3])),[],'Every code is an ISO code');
+  assert.deepEqual(index.filter(row=>/\bhome$/i.test(row[0])),[],'And no one’s home');
+  assert.ok(index.some(row=>row[0]==='Macau'&&row.length===4));
 });

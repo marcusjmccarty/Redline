@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import vm from 'node:vm';
 import '../public/trace.js';
-const {measure,duration,timeline,journey,camera,cameraView,ease,spring,trackingCamera}=globalThis.RedlineTrace;
+const {measure,duration,zoomDuration,timeline,journey,camera,cameraView,ease,snap,spring,trackingCamera}=globalThis.RedlineTrace;
 import '../public/map-layout.js';
 const context={window:{}};vm.createContext(context);
 vm.runInContext(readFileSync('public/vendor/geo.js','utf8'),context);
@@ -30,8 +30,10 @@ test('screen-space ink retains its exact arc, arrival and date-line breaks at ev
   }
 });
 
-test('trace has time for a gentle camera move and starts without a delay',()=>{
-  assert.equal(duration(10),1600);assert.equal(duration(300),1800);assert.equal(duration(1000),3600);
+test('a leg never takes longer than a second and a half, and starts without a delay',()=>{
+  assert.equal(duration(0),150);assert.equal(duration(10),560);assert.equal(duration(300),660);assert.equal(duration(1000),1500);
+  for(let length=1;length<4000;length+=7)assert.ok(duration(length)>=560&&duration(length)<=1500,`${length} units take ${duration(length)}ms`);
+  assert.equal(zoomDuration(8),930);assert.equal(zoomDuration(1/8),930,'Zooming costs the same in either direction');
   const run=timeline({from:0,to:1,duration:2000});
   assert.equal(run.advance(100).position,.05);
   assert.equal(run.advance(900).position,.5);
@@ -47,14 +49,14 @@ test('reverse, resumed progress, and speed boosts retain exact arrival',()=>{
 });
 
 test('projected line reveal retains the same full arc and excludes date-line jumps',()=>{
+  const flat={a:1,d:1,e:0,f:0};
   for(const [from,to] of [[[-78.4678,-.1807],[-3.7038,40.4168]],[[-157.86,21.31],[139.69,35.68]],[[179,65],[-179,65]],[[0,80],[180,80]]]){
-    const full=route(from,to),leg=measure(full);
-    assert.equal(leg.pathAt(1),full);
-    for(const fraction of [.1,.3,.5,.8])assert.ok(Math.abs(measure(leg.pathAt(fraction)).length/leg.length-fraction)<1e-8);
+    const leg=measure(route(from,to));
+    for(const fraction of [.1,.3,.5,.8,1])assert.ok(Math.abs(measure(leg.screenPathAt(fraction,flat)).length/leg.length-fraction)<.01,`${fraction} of the arc`);
   }
   const dateLine=measure(route([179,65],[-179,65]));
   assert.equal((dateLine.path.match(/M/g)||[]).length,2);assert.ok(dateLine.length<20);
-  assert.ok(!measure(route([0,0],[0,0])).pathAt(.5).includes('NaN'));
+  assert.ok(!measure(route([0,0],[0,0])).screenPathAt(.5,flat).includes('NaN'));
 });
 
 test('label obstacles use only revealed route segments and never bridge the date line',()=>{
@@ -100,7 +102,7 @@ test('manual tracking retains the chosen zoom and settles exactly on the same ar
       const target=[500+i*2,300-i*.5],previous=view;
       view=tracker.step(target,4,1000/120);
       assert.ok(view.x>=0&&view.x+view.w<=1440+.001&&view.y>=0&&view.y+view.h<=720+.001);
-      assert.ok(Math.abs(view.w/previous.w-1)<.075,'Zoom changes without frame-sized jumps');
+      assert.ok(Math.abs(view.w/previous.w-1)<.11,'Zoom changes without frame-sized jumps, even with the snappier spring');
     }
     const destination=[740,240],plan=camera(measure('M500,300L740,240'),space,worldFrame,destination,4);
     for(let i=0;i<180;i++)view=tracker.step(destination,4,1000/120);
@@ -153,12 +155,12 @@ test('the ink stays on screen and zoom changes at a bounded rate across long and
     let view=worldFrame;
     for(let i=1;i<stops.length;i++){
       const geometry=measure(route(stops[i-1],stops[i])),start=view,plan=camera(geometry,space,worldFrame,geometry.pointAt(1));
-      const widthRatio=plan.arrival.w/start.w,run=timeline({from:0,to:1,duration:duration(geometry.length),widthRatio,easeStops:true});
+      const widthRatio=plan.arrival.w/start.w,run=journey({geometry,space,start,plan});
       let state;
       do{
         state=run.advance(16);
         const tip=geometry.pointAt(state.position),frame=cameraView(start,plan,tip,state.time);
-        assert.ok(Math.abs(Math.log2(frame.w/view.w))/.016<1.8,'At normal speed the zoom changes by less than 1.8 doublings per second');
+        assert.ok(Math.abs(Math.log2(frame.w/view.w))/.016<3.3,'At normal speed the zoom changes by about 3.2 doublings per second at most');
         const x=(tip[0]-frame.x)*space.width/frame.w,y=(tip[1]-frame.y)*space.height/frame.h;
         assert.ok(x>=0&&x<=space.width&&y>=0&&y<=space.bottom,'The ink stays in the available map area');
         if(widthRatio>4&&state.time<.5)assert.ok(state.position<state.time/2,'A long leg waits for the map to pull back');
@@ -176,25 +178,19 @@ test('an isolated local leg eases the zoom peak while successive nearby legs ret
   const natural=frame(null,null),isolated=frame(wide,wide);
   assert.ok(isolated.w>=natural.w*1.2&&isolated.w<=worldFrame.w/16+.001,'An isolated tiny hop limits the zoom peak while preserving at least 16× local detail');
   assert.deepEqual(frame(local,wide),natural);assert.deepEqual(frame(wide,local),natural);
-  for(const [from,to] of [[0,1],[1,0]]){
-    const run=timeline({from,to,duration:2000,easeStops:true}),start=run.advance(50).position;
-    assert.ok(Math.abs(start-from)>0&&Math.abs(start-from)<.01);
-    assert.equal(run.advance(950).position,.5);
-    assert.ok(Math.abs(to-run.advance(950).position)<.01);assert.equal(run.advance(50).position,to);
-  }
 });
 
 test('long automatic zooms ease into a steady middle speed in either direction',()=>{
   for(const ratio of [1/32,32]){
-    const start={x:0,y:0,w:100,h:50},end={x:0,y:0,w:100*ratio,h:50*ratio};
-    const plan={follow:()=>end,arrival:end},run=timeline({from:0,to:1,duration:1600,widthRatio:ratio,easeStops:true});
+    const start={x:0,y:0,w:100,h:50},end={x:0,y:0,w:100*ratio,h:50*ratio},geometry=measure('M0,0L.01,0'),space={width:1200,height:800,left:40,right:1160,top:40,bottom:640};
+    const plan={follow:()=>end,arrival:end},run=journey({geometry,space,start,plan});
     let last=start,maxSpeed=0;
     for(let i=0;i<400;i++){
       const state=run.advance(16),frame=cameraView(start,plan,[0,0],state.time);
       maxSpeed=Math.max(maxSpeed,Math.abs(Math.log2(frame.w/last.w))/.016);last=frame;
       if(state.done)break;
     }
-    assert.deepEqual(last,end);assert.ok(maxSpeed<1.38);
+    assert.deepEqual(last,end);assert.ok(maxSpeed<3.3,`Peak zoom ${maxSpeed} octaves per second`);
   }
 });
 
@@ -239,17 +235,17 @@ test('automatic playback bounds visible ink speed and zoom together in every vie
   const routes=[[[0,0],[2,1]],[[2,1],[2.01,1.01]],[[2.01,1.01],[100,30]],[[100,30],[101,30]],[[101,30],[175,20]],[[175,20],[-175,20]]];
   for(const [width,height] of [[1440,900],[390,844],[844,390]]){
     const space={width,height,left:30,right:width-30,top:30,bottom:height-130};
-    const limit=Math.max(150,Math.min(300,Math.hypot(space.right-space.left,space.bottom-space.top)*.24));
+    const limit=Math.max(420,Math.min(1000,Math.hypot(space.right-space.left,space.bottom-space.top)*.62));
     let start=worldFrame;
     for(const pair of routes){
       const geometry=measure(route(...pair)),plan=camera(geometry,space,worldFrame,geometry.pointAt(1));
       const run=journey({geometry,space,start,plan});
-      assert.ok(run.duration<11000,`Move duration ${run.duration}ms for ${pair} on ${width}×${height}`);
+      assert.ok(run.duration>=420&&run.duration<2500,`Move duration ${run.duration}ms for ${pair} on ${width}×${height}`);
       let state,previous=start,last=geometry.pointAt(0);
       do{
         state=run.advance(16);const point=geometry.pointAt(state.position),view=cameraView(start,plan,point,state.time);
         const zoom=Math.abs(Math.log2(view.w/previous.w))/.016;
-        assert.ok(zoom<1.08,`Zoom advances without a rush (${zoom})`);
+        assert.ok(zoom<3.3,`Zoom stays within about 3.2 octaves per second (${zoom})`);
         if(Math.abs(point[0]-last[0])<720){
           const ink=Math.hypot((point[0]-last[0])*width/((view.w+previous.w)/2),(point[1]-last[1])*height/((view.h+previous.h)/2))/.016;
           assert.ok(ink<limit*1.04,`The ink does not surge at the end of a zoom (${ink})`);
@@ -259,6 +255,28 @@ test('automatic playback bounds visible ink speed and zoom together in every vie
       assert.equal(state.position,1);assert.deepEqual(previous,plan.arrival);start=previous;
     }
   }
+});
+
+test('a seven-stop trip around the world takes under twelve seconds at normal speed',()=>{
+  const cities=[[-74.006,40.7128],[-.1257,51.5085],[31.2497,30.0626],[77.2315,28.6519],[139.6917,35.6895],[151.2073,-33.8679],[-43.1729,-22.9068]];
+  for(const [width,height] of [[1440,900],[1920,1080],[390,844],[844,390]]){
+    const space={width,height,left:30,right:width-30,top:30,bottom:height-130},legs=cities.slice(1).map((to,i)=>measure(route(cities[i],to)));
+    let view=worldFrame,total=0;
+    legs.forEach((geometry,i)=>{
+      // The same composition the app asks for: each leg knows its neighbours.
+      const plan=camera(geometry,space,worldFrame,project(cities[i+1]),null,legs[i-1],legs[i+1]);
+      total+=journey({geometry,space,start:view,plan}).duration;view=plan.arrival;
+    });
+    assert.ok(total<12000,`${total}ms on ${width}×${height}`);
+  }
+});
+
+test('camera moves answer at once and land softly',()=>{
+  assert.equal(snap(0),0);assert.equal(snap(1),1);assert.equal(snap(-1),0);assert.equal(snap(2),1);
+  assert.ok(snap(.05)>ease(.05)*50,'The first frames already cover real ground, unlike a symmetric ease');
+  assert.ok(snap(.05)>.1&&snap(.25)>.5,`Most of the move happens early (${snap(.25)})`);
+  assert.ok(1-snap(.98)<.0001,'The last frames barely move');
+  for(let t=0;t<1;t+=.01)assert.ok(snap(t+.01)>=snap(t),'A camera move never doubles back');
 });
 
 test('camera and ink share the same boosted, paused and resumed clock in either direction',()=>{
@@ -274,4 +292,74 @@ test('camera and ink share the same boosted, paused and resumed clock in either 
     assert.equal(normal.advance(100000).position,to);
     assert.equal(boost.advance(100000).done,true);
   }
+});
+
+// Where the app's camera really is when a leg begins: the frame the previous leg settled on, or wherever the map was left.
+function sail(names,space,start=worldFrame){
+  const legs=names.slice(1).map((to,i)=>measure(route(names[i],to)));let view=start;
+  return legs.map((geometry,i)=>{
+    const plan=camera(geometry,space,worldFrame,project(names[i+1]),null,legs[i-1],legs[i+1]),from=view,run=journey({geometry,space,start:from,plan});
+    let state,farOff=0,time=0;
+    do{
+      state=run.advance(16);time+=16;const [x,y]=geometry.pointAt(state.position),frame=cameraView(from,plan,[x,y],state.time);
+      const sx=(x-frame.x)*space.width/frame.w,sy=(y-frame.y)*space.height/frame.h;
+      if(sx<-24||sx>space.width+24||sy<-24||sy>space.height+24)farOff+=16;
+    }while(!state.done);
+    assert.equal(state.position,1);view=plan.arrival;
+    return {duration:run.duration,farOff};
+  });
+}
+const places={london:[-.1257,51.5085],paris:[2.3488,48.8534],tokyo:[139.6917,35.6895],sydney:[151.2073,-33.8679],auckland:[174.7635,-36.8485],rio:[-43.1729,-22.9068],prague:[14.4208,50.088],krakow:[19.9366,50.0614],honolulu:[-157.8583,21.3069]};
+
+test('ink out of sight does not crawl: a leg starting far from the camera takes no longer at any zoom',()=>{
+  for(const [width,height] of [[1440,900],[3840,2160]]){
+    const space={width,height,left:54,right:width-54,top:54,bottom:height-166},[tx,ty]=project(places.tokyo);
+    const fromWorld=sail([places.london,places.paris],space)[0].duration;
+    for(const zoom of [13,40,240]){
+      const w=1440/zoom,h=720/zoom,{duration:took,farOff}=sail([places.london,places.paris],space,{x:tx-w/2,y:ty-h/2,w,h})[0];
+      assert.ok(took<fromWorld+2400,`${zoom}× over Tokyo at ${width}×${height}: ${took}ms against ${fromWorld}ms from the world`);
+      assert.ok(took-farOff>=420,`And the ink is drawn where it can be seen (${farOff}ms of ${took}ms out of sight)`);
+    }
+  }
+});
+
+test('a leg leaving a close-up across the date line or the Arctic waits for the camera rather than drawing out of sight',()=>{
+  for(const [width,height] of [[1440,900],[2560,1440],[3840,2160]]){
+    const space={width,height,left:54,right:width-54,top:54,bottom:height-166};
+    for(const trip of [[places.sydney,places.auckland,places.rio],[places.prague,places.krakow,places.honolulu]]){
+      const leg=sail(trip,space)[1];
+      assert.ok(leg.duration<5000,`The long leg takes ${leg.duration}ms at ${width}×${height}`);
+      assert.ok(leg.farOff<=64,`The tip stays in the window (${leg.farOff}ms out of it)`);
+    }
+  }
+});
+
+test('a leg that goes nowhere holds the next leg\'s composition and is over quickly, and its neighbours ignore it',()=>{
+  const space={width:1440,height:900,left:54,right:1386,top:54,bottom:734},rome=[12.5113,41.8919];
+  const still=measure(route(places.london,places.london)),onward=measure(route(places.london,rome));
+  assert.equal(still.length,0);assert.equal((still.path.match(/L/g)||[]).length,8,'Nothing to draw, so hardly any points');
+  const alone=camera(onward,space,worldFrame,project(rome)),plan=camera(still,space,worldFrame,project(places.london),null,null,onward);
+  assert.equal(plan.arrival.w,alone.arrival.w,'It frames the next real leg, not a 36× dive');
+  assert.deepEqual(camera(onward,space,worldFrame,project(rome),null,still,null).arrival,alone.arrival,'The next leg is composed as if it were not there');
+  assert.equal(camera(still,space,worldFrame,project(places.london),null,still,onward).arrival.w,alone.arrival.w,'Three stops in one place do not dive at one another either');
+  assert.ok(journey({geometry:still,space,start:worldFrame,plan}).duration<1200,'Only the camera takes any time');
+  assert.equal(journey({geometry:still,space,start:plan.arrival,plan}).duration,duration(0),'With the camera in place it takes a moment');
+  const nowhere=camera(still,space,worldFrame,project(places.london));assert.equal(nowhere.arrival.w,1440,'A route of one place twice stays on the world');
+});
+
+test('a leg resumed near its port takes only the time that is left',()=>{
+  const space={width:1440,height:900,left:54,right:1386,top:54,bottom:734},geometry=measure(route(places.london,places.paris));
+  const plan=camera(geometry,space,worldFrame,project(places.paris)),whole=journey({geometry,space,start:plan.arrival,plan}).duration;
+  for(const from of [.9,.97]){
+    const left=journey({geometry,space,start:plan.arrival,plan,from}).duration;
+    assert.ok(left<=whole*(1-from)*1.05+1,`From ${from}, ${left}ms of a ${whole}ms leg`);
+  }
+  assert.ok(whole>=420,'A whole leg keeps its minimum');
+});
+
+test('the tracking camera cuts to a new point without sweeping the sheet',()=>{
+  const space={width:1440,height:900,left:0,right:1440,top:0,bottom:900},start={x:0,y:150,w:360,h:180},tracker=trackingCamera(start,space,worldFrame,240);
+  tracker.step([200,240],4,16);tracker.jump([1000,240]);
+  const frame=tracker.step([1000,240],4,16);
+  assert.ok(Math.abs(frame.x+frame.w/2-1000)<1,`The next frame is already there (${frame.x})`);
 });

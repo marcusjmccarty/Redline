@@ -3,8 +3,9 @@
   const $=id=>document.getElementById(id),fields=['message','recipient','address','sender'],states=new Map();
   let active=null,request=null,timer=null,closing=false,printing=false,restoreAfterPrint=false;
   let shareFile=null,shareGeneration=0,shareTimer=null,sharing=false;
-  let sequence=[],navigating=false,navigationVersion=0,returnFocus=null,swipe=null,suppressClickUntil=0,actions=null,changing=false,arrowTimer=null;
-  function wakeArrows(pointer='mouse'){
+  let sequence=[],navigating=false,navigationVersion=0,returnFocus=null,swipe=null,suppressClickUntil=0,actions=null,changing=false,arrowTimer=null,shareError='';
+  // With no pointer to name, as after a flip or on focus, the device decides: touch arrows never fade.
+  function wakeArrows(pointer=window.matchMedia?.('(hover: none)').matches?'touch':'mouse'){
     const frame=$('full-photo').parentElement;clearTimeout(arrowTimer);frame.classList.remove('arrows-idle');
     if(pointer==='touch')return;
     arrowTimer=setTimeout(()=>{if($('photo-viewer').open)frame.classList.add('arrows-idle');},700);
@@ -25,8 +26,10 @@
     state.promise=(async()=>{
       const result=await request(`/photos/${state.photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:JSON.parse(snapshot),revision:state.revision})});
       state.revision=result.revision;state.photo.postcardRevision=result.revision;state.saved=snapshot;
+      window.dispatchEvent(new CustomEvent('redline:postcardchange',{detail:{id:state.photo.id,postcard:JSON.parse(snapshot),revision:result.revision}}));
     })();status();
-    try{await state.promise;if(active===state)$('postcard-error').textContent='';}
+    // A save says nothing about whether the text fits, so a share that could not be drawn still explains its dead button.
+    try{await state.promise;if(active===state)$('postcard-error').textContent=shareError;}
     catch(error){if(active===state)$('postcard-error').textContent=error.message;throw error;}
     finally{state.promise=null;status();}
     if(cardDirty(state))return savePostcard(state);
@@ -39,8 +42,9 @@
   function captionEditor(open){
     if(open&&$('caption-form').hidden){const viewer=$('photo-viewer'),top=viewer.getBoundingClientRect().top;viewer.style.top=`${top}px`;viewer.style.bottom='auto';viewer.style.marginBlock='0';}
     $('caption-form').hidden=!open;
+    // The pin only holds the card still while the form opens beneath it. Left on, a rotated phone could push the toolbar off the screen.
+    if(!open)for(const property of ['top','bottom','margin-block'])$('photo-viewer').style.removeProperty(property);
     $('edit-caption').setAttribute('aria-expanded',String(open));
-    $('postcard-front').classList.toggle('caption-editing',open);
     if(open){$('caption-input').value=active.caption;$('caption-input').focus();captionStatus();}
     $('photo-caption').textContent=$('photo-caption').title=active.photo.city?.name||'';
     $('photo-note').textContent=$('photo-note').title=active.caption.trim();$('photo-note').hidden=open||!active.caption.trim();
@@ -56,7 +60,7 @@
       state.photo.caption=result.caption;state.photo.captionRevision=result.revision;
       window.dispatchEvent(new CustomEvent('redline:captionchange',{detail:{id:state.photo.id,caption:result.caption,revision:result.revision}}));
     })();captionStatus();
-    try{await state.captionPromise;if(active===state)$('postcard-error').textContent='';}
+    try{await state.captionPromise;if(active===state)$('postcard-error').textContent=shareError;}
     catch(error){if(active===state)$('postcard-error').textContent=error.message;throw error;}
     finally{state.captionPromise=null;captionStatus();}
     if(captionDirty(state))return saveCaption(state);
@@ -80,7 +84,7 @@
     if(motion(viewer)){viewer.classList.remove('flip-motion');void viewer.offsetWidth;viewer.classList.add('flip-motion');clearTimeout(flip.timer);flip.timer=setTimeout(()=>viewer.classList.remove('flip-motion'),950);}
     $('photo-viewer').classList.toggle('flipped',back);
     if(back&&!shareFile)queueShare();
-    else if(!back){clearTimeout(shareTimer);shareGeneration++;}
+    else if(!back){clearTimeout(shareTimer);shareGeneration++;clearShareError();}
     $('postcard-front').inert=back;$('postcard-front').setAttribute('aria-hidden',String(back));
     $('postcard-back').inert=!back;$('postcard-back').setAttribute('aria-hidden',String(!back));
     if(document.activeElement!==document.body)closer().focus({preventScroll:true});
@@ -150,6 +154,8 @@
     if(!motion(viewer)||viewer.classList.contains('flipped'))return ()=>{};
     const before=image.getBoundingClientRect();if(!before.width)return ()=>{};
     const ghost=image.cloneNode();ghost.removeAttribute('id');ghost.className='viewer-ghost';ghost.alt='';ghost.setAttribute('aria-hidden','true');
+    const box=image.parentElement.getBoundingClientRect();
+    Object.assign(ghost.style,{left:`${before.left-box.left}px`,top:`${before.top-box.top}px`,width:`${before.width}px`,height:`${before.height}px`});
     return ()=>{
       const after=image.getBoundingClientRect(),timing={duration:360,easing:'cubic-bezier(.25,.8,.25,1)'};
       image.parentElement.append(ghost);
@@ -162,13 +168,13 @@
   }
   function open(photo,api,collection=[photo],viewerActions=null,origin=null){
     const wasOpen=$('photo-viewer').open,onBack=$('postcard-back').contains(document.activeElement);
-    for(const property of ['top','bottom','margin-block'])$('photo-viewer').style.removeProperty(property);
     if(!wasOpen)returnFocus=origin||document.activeElement;
     sequence=collection;actions=api?viewerActions:null;
-    shareGeneration++;shareFile=null;clearTimeout(shareTimer);$('share-postcard').disabled=true;
+    shareGeneration++;shareFile=null;shareError='';clearTimeout(shareTimer);$('share-postcard').disabled=true;
     request=api;clearTimeout(timer);
     const previous=api?states.get(photo.id):null;
-    if(previous&&(dirty(previous)||previous.promise||previous.captionPromise))active=previous;
+    // The album rebuilds its photo objects when it reopens, so a kept draft moves to the new one, which also learns the revisions saved since.
+    if(previous&&(dirty(previous)||previous.promise||previous.captionPromise)){active=previous;previous.photo=photo;Object.assign(photo,{postcard:{...previous.value},postcardRevision:previous.revision,caption:previous.savedCaption,captionRevision:previous.captionRevision});}
     else {const value={...empty(),...photo.postcard};active={photo,value,saved:JSON.stringify(value),revision:photo.postcardRevision||1,promise:null,preview:!api,caption:photo.caption||'',savedCaption:photo.caption||'',captionRevision:photo.captionRevision||1,captionPromise:null};if(api)states.set(photo.id,active);}
     const place=photo.city?.name||'';
     const full=$('full-photo');
@@ -183,8 +189,7 @@
     requestAnimationFrame(()=>requestAnimationFrame(()=>$('photo-viewer').classList.remove('changing-photo')));
     $('postcard-front').inert=false;$('postcard-front').setAttribute('aria-hidden','false');$('postcard-back').inert=true;$('postcard-back').setAttribute('aria-hidden','true');
     $('print-postcard').disabled=active.preview;$('flip-postcard').hidden=active.preview;
-    $('photo-viewer').classList.toggle('preview',active.preview);
-    status();updateOrientation();updateNavigation();renderCity();wakeArrows(window.matchMedia?.('(hover: none)').matches?'touch':'mouse');
+    status();updateOrientation();updateNavigation();renderCity();wakeArrows();
     if(!wasOpen){
       const viewer=$('photo-viewer');viewer.getAnimations?.().forEach(animation=>animation.cancel());viewer.showModal();
       if(motion(viewer)&&origin){
@@ -242,11 +247,14 @@
   });
   $('delete-photo').addEventListener('click',removeCurrent);
   $('photo-viewer').addEventListener('cancel',event=>{event.preventDefault();close();});
+  // A drag selecting text in a field can end anywhere, and its click lands on whatever holds both ends. Only a press on the backdrop itself closes.
+  let pressed=null;$('photo-viewer').addEventListener('pointerdown',event=>{pressed=event.target;});
   $('photo-viewer').addEventListener('click',event=>{
-    if(Date.now()<suppressClickUntil)return;
+    const started=pressed;pressed=null;
+    if(Date.now()<suppressClickUntil||started?.closest?.('input,textarea,select'))return;
     if(event.target===$('photo-viewer')){
       const box=$('photo-viewer').getBoundingClientRect();
-      if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom){close();return;}
+      if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom){if(!started||started===$('photo-viewer'))close();return;}
     }
     // The photo and the postcard paper turn the card; the toolbar and fields never do.
     if(event.detail>1||event.target.closest('input,textarea,button,a,label,select,.photo-viewer-footer,.postcard-actions'))return;
@@ -276,6 +284,7 @@
   // The 4.4-megapixel share export is only needed on the back. Browsing photos
   // should not rebuild it, and typing waits for a pause before drawing again.
   function queueShare(){clearTimeout(shareTimer);shareTimer=setTimeout(prepareShare,250);}
+  function clearShareError(){if(shareError&&$('postcard-error').textContent===shareError)$('postcard-error').textContent='';shareError='';}
   async function prepareShare(){
     if(closing||!$('photo-viewer').open||!$('photo-viewer').classList.contains('flipped'))return;
     const generation=++shareGeneration,state=active;
@@ -288,8 +297,8 @@
       const blob=await new Promise((resolve,reject)=>canvas.toBlob(value=>value?resolve(value):reject(Error('Could not create the postcard image.')),'image/jpeg',.94));
       if(generation!==shareGeneration||active!==state)return;
       const name=(state.photo.city?.name||'Travel').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'')||'Travel';
-      shareFile=new File([blob],`${name}-postcard.jpg`,{type:'image/jpeg'});$('share-postcard').disabled=sharing;
-    }catch(error){if(generation===shareGeneration&&$('full-photo').naturalWidth)$('postcard-error').textContent=error.message;}
+      shareFile=new File([blob],`${name}-postcard.jpg`,{type:'image/jpeg'});$('share-postcard').disabled=sharing;clearShareError();
+    }catch(error){if(generation===shareGeneration&&$('full-photo').naturalWidth)$('postcard-error').textContent=shareError=error.message;}
   }
   function downloadPostcard(file){
     const url=URL.createObjectURL(file),link=document.createElement('a');link.href=url;link.download=file.name;link.hidden=true;($('photo-viewer').open?$('photo-viewer'):document.body).append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);

@@ -19,6 +19,7 @@ async function upload(store,trip,bytes=jpeg) {
   return (await store.api(`/trips/${trip.id}/photos`,{method:'POST',body:form})).photo;
 }
 const plain=value=>JSON.parse(JSON.stringify(value));
+const single=async(store,id)=>{const parts=await store.exportParts(id);assert.equal(parts.length,1);return parts[0];};
 
 test('trips survive reopening and simultaneous tabs cannot overwrite newer edits',async()=>{
   const {store,indexedDB}=library(),trip=await create(store),second=library(indexedDB).store;
@@ -45,7 +46,7 @@ test('photos and postcard notes persist, with metadata removed and revisions che
 test('binary backup restores routes, image bytes and postcards on a different device without overwriting trips',async()=>{
   const source=library().store,trip=await create(source),photo=await upload(source,trip);
   await source.api(`/photos/${photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:card,revision:1})});
-  const backup=await source.exportArchive(),target=library().store,existing=await create(target);
+  const backup=await single(source),target=library().store,existing=await create(target);
   const result=await target.importArchive(backup);
   assert.deepEqual(plain(result),{tripCount:1,photoCount:1});
   const list=(await target.api('/trips')).trips;assert.equal(list.length,2);
@@ -69,7 +70,7 @@ test('backup round-trips preserve photo order when creation timestamps tie',asyn
   }
   const before=(await source.api(`/trips/${trip.id}`)).photos;
   assert.equal(new Set(before.map(photo=>photo.createdAt)).size,1);
-  let backup=await source.exportArchive(trip.id);
+  let backup=await single(source,trip.id);
   for(let round=0;round<2;round++){
     const target=library(undefined,{crypto:{randomUUID:()=>`photo-${String(--targetId).padStart(8,'0')}`}}).store;
     await target.importArchive(backup);
@@ -77,7 +78,7 @@ test('backup round-trips preserve photo order when creation timestamps tie',asyn
     const photos=(await target.api(`/trips/${copy.id}`)).photos;
     assert.deepEqual(plain(photos.map(photo=>photo.caption)),['First','Second','Third']);
     assert.ok(photos.every(photo=>!before.some(original=>original.id===photo.id)),'Restored photos still receive independent IDs');
-    backup=await target.exportArchive(copy.id);
+    backup=await single(target,copy.id);
   }
 });
 
@@ -104,7 +105,7 @@ test('a 512-photo trip survives backup, restore, and bulk edits',async()=>{
   const store=library().store,trip=await create(store);
   for(let i=0;i<512;i++)await upload(store,trip);
   const restored=library().store;
-  const result=await restored.importArchive(await store.exportArchive(trip.id));
+  const result=await restored.importArchive(await single(store,trip.id));
   assert.equal(result.photoCount,512);
   const [copy]=(await restored.api('/trips')).trips;
   const photosPath=`/trips/${copy.id}/photos`;
@@ -189,7 +190,7 @@ test('small previews and photo sizes are stored, cleaned, and carried through ba
   assert.ok(updated.thumbUrl);assert.equal(updated.url,plainPhoto.url,'The full photo URL stays valid');assert.equal(updated.height,1200);
   const bad=new FormData();bad.append('thumb',new Blob(['not a jpeg'],{type:'image/jpeg'}));
   await assert.rejects(store.api(`/photos/${plainPhoto.id}/thumb`,{method:'PUT',body:bad}));
-  const target=library().store;await target.importArchive(await store.exportArchive());
+  const target=library().store;await target.importArchive(await single(store));
   const restored=await target.api(`/trips/${(await target.api('/trips')).trips[0].id}`);
   assert.deepEqual(plain(restored.photos.map(p=>[p.width,p.height]).sort((a,b)=>b[0]-a[0])),[[1600,1000],[800,1200]]);
 });
@@ -205,7 +206,7 @@ test('renaming changes only the title and refuses a stale revision',async()=>{
 
 test('backup history records downloads and imported copies without overwriting concurrent trip edits',async()=>{
   const {store,indexedDB}=library(),trip=await create(store),other=await create(store);
-  const blob=await store.exportArchive(trip.id);
+  const blob=await single(store,trip.id);
   assert.equal((await store.api(`/trips/${trip.id}`)).trip.backedUpAt,undefined,'Packing alone is not a completed export');
   const second=library(indexedDB).store;
   await second.api(`/trips/${trip.id}`,{method:'PUT',body:JSON.stringify({...trip,title:'Updated elsewhere'})});
@@ -217,7 +218,7 @@ test('backup history records downloads and imported copies without overwriting c
   await assert.rejects(store.recordBackup(new Blob(['unknown'])),/Unknown backup/);
   const target=library().store;await target.importArchive(blob);
   const imported=(await target.api('/trips')).trips[0];assert.equal(imported.backupSource,'import');assert.ok(imported.backedUpAt);
-  const all=await store.exportArchive();await store.recordBackup(all);
+  const all=await single(store);await store.recordBackup(all);
   assert.ok((await library(indexedDB).store.api('/trips')).trips.every(trip=>trip.backedUpAt),'Export history survives reopening');
 });
 
@@ -234,7 +235,7 @@ test('captions save independently of postcards, reject stale edits, and survive 
   assert.equal(saved.captionRevision,2);assert.equal(saved.postcardRevision,2);
   await assert.rejects(other.api(`/photos/${photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption:'Stale',revision:1})}),e=>e.status===409);
   for(const caption of ['x'.repeat(181),123])await assert.rejects(store.api(`/photos/${photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption,revision:2})}));
-  const target=library().store;await target.importArchive(await store.exportArchive(trip.id));
+  const target=library().store;await target.importArchive(await single(store,trip.id));
   const restored=(await target.api(`/trips/${(await target.api('/trips')).trips[0].id}`)).photos[0];
   assert.equal(restored.caption,saved.caption);assert.deepEqual(plain(restored.postcard),card);
   await store.api(`/photos/${photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption:'',revision:2})});
@@ -253,7 +254,7 @@ test('caption and postcard edits never reserialize image Blobs, and deleting pho
     await store.api(`/photos/${photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:card,revision:1})});
     await store.api(`/photos/${second.id}/caption`,{method:'PUT',body:JSON.stringify({caption:'Later that day',revision:1})});
   }finally{IDBObjectStore.prototype.put=original;}
-  assert.deepEqual(written,['photoNotes','photoNotes','photoNotes']);
+  assert.deepEqual(written.filter(name=>name!=='trips'),['photoNotes','photoNotes','photoNotes']);
   const reopened=(await library(indexedDB).store.api(`/trips/${trip.id}`)).photos.find(p=>p.id===photo.id);
   assert.equal(reopened.caption,'By the river');assert.deepEqual(plain(reopened.postcard),card);
   assert.deepEqual(await (await fetch(reopened.url)).arrayBuffer(),bytes);
@@ -282,7 +283,7 @@ test('upgrading an existing library keeps original photos and text, then exports
   const after=(await store.api(`/trips/${trip.id}`)).photos[0];assert.equal(after.captionRevision,5);assert.deepEqual(plain(after.postcard),card);
   const updated={...card,message:'Updated without rewriting the photo'};
   await store.api(`/photos/${photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:updated,revision:7})});
-  const target=library().store;await target.importArchive(await store.exportArchive(trip.id));
+  const target=library().store;await target.importArchive(await single(store,trip.id));
   const restored=(await target.api(`/trips/${(await target.api('/trips')).trips[0].id}`)).photos[0];
   assert.equal(restored.caption,'A new caption');assert.deepEqual(plain(restored.postcard),updated);
 });
@@ -299,6 +300,135 @@ test('trip listing and a single-trip backup never read unrelated photo collectio
   t.after(()=>{IDBObjectStore.prototype.getAll=getAll;IDBIndex.prototype.get=get;});
   const {trips}=await store.api('/trips');assert.equal(covers,2,'Only one cover photo is read per trip');
   assert.equal(trips.find(trip=>trip.id===first.id).photoCount,6);assert.equal(trips.find(trip=>trip.id===second.id).photoCount,3);
-  const target=library();await target.store.importArchive(await store.exportArchive(first.id));
+  const target=library();await target.store.importArchive(await single(store,first.id));
   const restored=(await target.store.api('/trips')).trips;assert.equal(restored.length,1);assert.equal(restored[0].photoCount,6);
+});
+
+const webkitBlobFailure=()=>{
+  const original=IDBObjectStore.prototype.put;
+  IDBObjectStore.prototype.put=function(value,...args){
+    if(this.name==='photos'||(this.name==='photoNotes'&&value.id&&!value.id.endsWith('.thumb')&&Object.values(value).some(field=>field instanceof Blob)))throw new DOMException('Error preparing Blob/File data to be stored in object store','DataCloneError');
+    return original.call(this,value,...args);
+  };
+  return ()=>{IDBObjectStore.prototype.put=original;};
+};
+
+test('moving photos and backfilling previews never reserialize a stored image Blob',async t=>{
+  const rome={id:'city-rome-0001',name:'Rome',country:'Italy',latitude:41.9,longitude:12.5};
+  const {store,indexedDB}=library(),trip=(await store.api('/trips',{method:'POST',body:JSON.stringify({title:'Europe',stops:[paris,rome]})})).trip;
+  const photo=await upload(store,trip),other=await upload(store,trip),bytes=await (await fetch(photo.url)).arrayBuffer();
+  const restore=webkitBlobFailure();t.after(restore);
+  const moved=(await store.api(`/trips/${trip.id}/photos`,{method:'PUT',body:JSON.stringify({ids:[photo.id],stopId:rome.id})})).photos[0];
+  assert.equal(moved.stopId,rome.id);assert.equal(moved.city.name,'Rome');
+  const form=new FormData();form.append('thumb',new Blob([jpeg],{type:'image/jpeg'}));form.append('width','800');form.append('height','1200');
+  const filled=(await store.api(`/photos/${photo.id}/thumb`,{method:'PUT',body:form})).photo;
+  assert.ok(filled.thumbUrl);assert.equal(filled.id,photo.id);assert.equal(filled.height,1200);assert.equal(filled.url,photo.url);
+  const form2=new FormData();form2.append('thumb',new Blob([jpeg],{type:'image/jpeg'}));await store.api(`/photos/${other.id}/thumb`,{method:'PUT',body:form2});
+  await store.api(`/photos/${photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption:'Still editable',revision:1})});
+  await store.api(`/photos/${photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:card,revision:1})});
+  const fresh=library(indexedDB).store,reread=(await fresh.api(`/trips/${trip.id}`)).photos.find(p=>p.id===photo.id);
+  assert.equal(reread.stopId,rome.id);assert.equal(reread.city.name,'Rome');assert.ok(reread.thumbUrl,'The preview survives reopening');assert.equal(reread.width,800);assert.equal(reread.caption,'Still editable');
+  assert.deepEqual(await (await fetch(reread.url)).arrayBuffer(),bytes,'The full photo is untouched');
+  const thumbBytes=Buffer.from(await (await fetch(reread.thumbUrl)).arrayBuffer());assert.ok(thumbBytes.length&&!thumbBytes.includes(Buffer.from('Exif')));
+  const listed=(await fresh.api('/trips')).trips[0],previews=(await fresh.api(`/trips/${trip.id}`)).photos.map(p=>p.thumbUrl);
+  assert.ok(previews.includes(listed.coverUrl),'The logbook cover uses the small preview, not the full photo');
+  const records=await library().archive.unpack(await single(fresh,trip.id));
+  const exported=records[0].photos.find(entry=>entry.photo.stopId===rome.id);assert.equal(exported.photo.caption,'Still editable');assert.equal(exported.photo.width,800);assert.equal(records[0].photos.length,2);
+  restore();
+  const db=await new Promise((resolve,reject)=>{const operation=indexedDB.open('redline-library-v1',2);operation.onsuccess=()=>resolve(operation.result);operation.onerror=()=>reject(operation.error);});
+  t.after(()=>db.close());
+  const notes=()=>new Promise((resolve,reject)=>{const operation=db.transaction('photoNotes').objectStore('photoNotes').getAll();operation.onsuccess=()=>resolve(operation.result);operation.onerror=()=>reject(operation.error);});
+  assert.equal((await notes()).length,4,'Each photo’s notes and preview sit beside it');
+  await store.api(`/trips/${trip.id}/photos`,{method:'DELETE',body:JSON.stringify({ids:[photo.id]})});
+  assert.equal((await notes()).length,2,'Deleting a photo removes its notes and its preview');
+  await store.api(`/trips/${trip.id}`,{method:'DELETE'});assert.equal((await notes()).length,0,'Deleting a trip removes them too');
+});
+
+test('a closed database connection is replaced, so the next save works without a reload',async()=>{
+  const real=new IDBFactory(),connections=[];
+  const counted={open:(...args)=>{const operation=real.open(...args);operation.addEventListener('success',()=>connections.push(operation.result));return operation;}};
+  const {store}=library(counted),trip=await create(store);assert.equal(connections.length,1);
+  connections[0].close();
+  assert.equal((await store.api(`/trips/${trip.id}`)).trip.title,'Europe');assert.equal(connections.length,2);
+  connections[1].onclose();
+  assert.equal((await store.api('/trips')).trips.length,1);assert.equal(connections.length,3,'A close signalled by the browser drops the cached connection at once');
+});
+
+test('persistent storage is requested once a session, on real saves, and never when already granted',async()=>{
+  for(const route of ['photo save','route save']){
+    let asked=0,granted=false;const indexedDB=new IDBFactory();
+    const navigator={storage:{persisted:async()=>granted,persist:async()=>{asked++;return false;}}};
+    await create(library(indexedDB,{navigator:{}}).store);
+    const open=library(indexedDB,{navigator}).store;assert.equal(asked,0,'Opening the library asks nothing');
+    const [trip]=(await open.api('/trips')).trips;
+    if(route==='photo save')await upload(open,trip);else await open.api(`/trips/${trip.id}`,{method:'PUT',body:JSON.stringify({title:trip.title,stops:[paris],revision:1})});
+    await new Promise(resolve=>setTimeout(resolve,0));assert.equal(asked,1,`A ${route} asks after an earlier session did not`);
+    await upload(open,trip);await new Promise(resolve=>setTimeout(resolve,0));assert.equal(asked,1,'Only once a session');
+    granted=true;const later=library(indexedDB,{navigator}).store;await upload(later,trip);await new Promise(resolve=>setTimeout(resolve,0));assert.equal(asked,1,'A granted library is not asked again');
+  }
+});
+
+test('a library over one file splits into parts that import completely, and counts as backed up only after the last',async()=>{
+  const {store,archive}=library(),trip=await create(store),other=await create(store);
+  for(let i=0;i<3;i++)await upload(store,trip);await upload(store,other);
+  const split=archive.split,{size}=await (await fetch((await store.api(`/trips/${other.id}`)).photos[0].url)).blob();
+  archive.split=records=>split(records,{bytes:size*2.5});
+  const parts=await store.exportParts();
+  assert.ok(parts.length>1);
+  await assert.rejects(store.recordBackup(parts[0]),/Unknown backup/,'Earlier parts are not the whole backup');
+  assert.equal((await store.api(`/trips/${trip.id}`)).trip.backedUpAt,undefined);
+  await store.recordBackup(parts.at(-1));
+  assert.ok((await store.api('/trips')).trips.every(saved=>saved.backedUpAt),'The last part records every trip');
+  const target=library().store;let photos=0;for(const part of parts)photos+=(await target.importArchive(part)).photoCount;
+  assert.equal(photos,4,'Every photo is restored');
+  const titles=(await target.api('/trips')).trips.map(saved=>saved.title);
+  assert.ok(titles.includes('Europe')&&titles.includes('Europe (part 2)'),'A continued trip names its part');
+  for(const saved of (await target.api('/trips')).trips)assert.deepEqual((await target.api(`/trips/${saved.id}`)).trip.stops.map(stop=>stop.id),[paris.id],'Each part repeats the route');
+});
+
+test('splitting respects both caps at their real sizes, keeps order, and keeps trips whole where it can',()=>{
+  const {archive}=library(),MB=1024*1024,GB=1024*MB;
+  const photos=(count,size,postcard={})=>Array.from({length:count},(_,i)=>({photo:{id:`photo-${String(i).padStart(8,'0')}`,postcard,createdAt:'2026-11-05T00:00:00.000Z',stopId:paris.id,city:paris},blob:{size}}));
+  const trip=(title,list)=>({trip:{id:`trip-${title}-0000`,title,stops:[paris],createdAt:'2026-11-05T00:00:00.000Z'},photos:list});
+  const manifestBytes=part=>new TextEncoder().encode(JSON.stringify({version:1,trips:part.map(record=>({trip:{id:record.trip.id,title:record.trip.title,stops:record.trip.stops,createdAt:record.trip.createdAt},photos:record.photos.map(({photo,blob})=>({stopId:photo.stopId,city:photo.city,postcard:photo.postcard||{},caption:'',createdAt:photo.createdAt,orderKey:photo.id,bytes:blob.size}))}))})).length;
+  const blobs=part=>part.flatMap(record=>record.photos).reduce((sum,item)=>sum+item.blob.size,0);
+  const huge=photos(513,4*MB),large=archive.split([trip('Long',huge)]);
+  assert.equal(large.length,2);assert.equal(large[1][0].trip.title,'Long (part 2)');
+  assert.deepEqual(plain(large.flatMap(part=>part.flatMap(record=>record.photos)).map(item=>item.photo.id)),huge.map(item=>item.photo.id),'Every photo, once, in order');
+  for(const part of large)assert.ok(blobs(part)+manifestBytes(part)+13<=2*GB);
+  const wordy=photos(1600,10*1024,{message:'東'.repeat(1200),recipient:'東'.repeat(120),address:'東'.repeat(400),sender:'東'.repeat(120)}),notes=archive.split([trip('Letters',wordy)]);
+  assert.ok(notes.length>1,'Text alone can force another part');
+  for(const part of notes)assert.ok(manifestBytes(part)<=8*MB);
+  assert.equal(notes.flatMap(part=>part.flatMap(record=>record.photos)).length,1600);
+  const whole=archive.split([trip('One',photos(300,4*MB)),trip('Two',photos(300,4*MB)),trip('Three',photos(100,4*MB))]);
+  assert.deepEqual(plain(whole.map(part=>part.map(record=>[record.trip.title,record.photos.length]))),[[['One',300]],[['Two',300],['Three',100]]],'A trip that fits a fresh file is not cut');
+  assert.deepEqual(plain(archive.split([trip('Tiny',[])]).map(part=>part.length)),[1]);
+  assert.equal(archive.split([trip('A'.repeat(80),huge)])[1][0].trip.title.length,77,'A continued title stays within the 80-character limit');
+});
+
+test('a photo or note edit marks a trip as changed since its backup; a backfilled preview does not',async()=>{
+  const {store}=library(),trip=await create(store),photo=await upload(store,trip);
+  const changedAt=async()=>{await new Promise(resolve=>setTimeout(resolve,2));return (await store.api(`/trips/${trip.id}`)).trip.changedAt;};
+  const first=await changedAt();assert.ok(first,'Saving a photo marks the trip');
+  await store.api(`/photos/${photo.id}/caption`,{method:'PUT',body:JSON.stringify({caption:'Later',revision:1})});const second=await changedAt();assert.ok(second>first);
+  await store.api(`/photos/${photo.id}/postcard`,{method:'PUT',body:JSON.stringify({postcard:card,revision:1})});const third=await changedAt();assert.ok(third>second);
+  const form=new FormData();form.append('thumb',new Blob([jpeg],{type:'image/jpeg'}));await store.api(`/photos/${photo.id}/thumb`,{method:'PUT',body:form});
+  assert.equal(await changedAt(),third,'A preview is rebuilt, not part of what a backup must hold');
+  await store.api(`/trips/${trip.id}/photos`,{method:'PUT',body:JSON.stringify({ids:[photo.id],stopId:paris.id})});const fourth=await changedAt();assert.ok(fourth>third);
+  await store.api(`/trips/${trip.id}/photos`,{method:'DELETE',body:JSON.stringify({ids:[photo.id]})});assert.ok(await changedAt()>fourth);
+  assert.equal((await store.api(`/trips/${trip.id}`)).trip.revision,1,'None of this is a route revision');
+});
+
+test('the JPEG sanitizer keeps an allowlist of decoder segments, so hidden segments do not survive',async()=>{
+  const {store}=library(),trip=await create(store);
+  const segment=(marker,text)=>{const body=Buffer.from(text);return Buffer.concat([Buffer.from([255,marker,(body.length+2)>>8,(body.length+2)&255]),body]);};
+  const hide=marker=>Buffer.concat([jpeg.subarray(0,2),segment(marker,'HIDDEN SECRET'),jpeg.subarray(2)]);
+  const clean=async bytes=>Buffer.from(await (await fetch((await upload(store,trip,bytes)).url)).arrayBuffer());
+  const baseline=await clean(jpeg);
+  for(const marker of [0xF5,0xDE,0xC8,0xE1,0xFE,0x02]){
+    const out=await clean(hide(marker));
+    assert.equal(out.includes(Buffer.from('HIDDEN SECRET')),false,`Segment ${marker.toString(16)} is dropped`);assert.deepEqual(out,baseline);
+  }
+  assert.ok(baseline.includes(Buffer.from([255,0xDB])),'Quantization tables stay');assert.ok(baseline.includes(Buffer.from([255,0xDA])),'The scan stays');
+  assert.ok([0xC0,0xC1,0xC2].some(marker=>baseline.includes(Buffer.from([255,marker]))),'The frame header stays');
 });

@@ -40,16 +40,17 @@
     if (Array.isArray(saved) && saved.length <= 100 && saved.every(p => p && typeof p.name === 'string' && p.name.length <= 120 && Number.isFinite(p.latitude) && Math.abs(p.latitude) <= 90 && Number.isFinite(p.longitude) && Math.abs(p.longitude) <= 180)) stops = saved;
   } catch {}
   const map = $('map'), input = $('destination');
+  const atlasView=RedlineAtlasView.create(map,JSON.parse($('atlas-assets').textContent),{inset:6,labelsReady:()=>{lastLayout='';scheduleView();}});
   let animation = 0, running = false, lines = [], searchTimer, controller, searchVersion = 0, results = [], selected = -1;
   let resultsQuery = '', resultsReady = false, addingQuery = '';
   let progress=null,activeLeg=null,geometry=[],playback=null,lastTick=null;
-  let traceZoom=null,idleZoom=null,suppressStopClickUntil=0,focused=null,cityFrame=null;
+  let traceZoom=null,idleZoom=null,suppressStopClickUntil=0,focused=null;
   const held=new Map();
   const labelSlots=new Map(),labelWidths=new Map(),zoomControls=document.querySelector('.zoom-controls');
   const WORLD_W=1440,WORLD_H=720,MAX_ZOOM=RedlineTrace.maxZoom;
   let view={x:0,y:0,w:WORLD_W,h:WORLD_H};
   let baseView={...view},viewFrame=0,zoomLevel=1,activeStopId=null;
-  let atlas=null,lastLayout='',lastLayoutGeometry=null,mapOccluded=false,viewportBounds=null;
+  let lastLayout='',lastLayoutGeometry=null,mapOccluded=false,viewportBounds=null;
   const changed=(node,name,value)=>{const text=String(value);if(node.getAttribute(name)!==text)node.setAttribute(name,text);};
   const mapMatrix=bounds=>({a:bounds.width/view.w,b:0,c:0,d:bounds.height/view.h,e:bounds.left-view.x*bounds.width/view.w,f:bounds.top-view.y*bounds.height/view.h});
   stops=stops.map(p=>({...p,id:p.id||crypto.randomUUID()}));
@@ -75,7 +76,6 @@
   persist();
   const project=p=>RedlineLayout.project([p.longitude,p.latitude]);
   const backgroundPoints=window.MAP_CITIES.map(project);
-  const paintRelief=RedlineAtlas.relief($('atlas-relief'),window.REDLINE_RELIEF,$('atlas-overview'));
   let hiddenMapCities=new Set(),stopPeers=[],routeIndex=null,routeIndexGeometry=null,routeIndexKey='',routeMatrix=null,routeMatrixKey='';
   function rebuildGeometry(){
     const names=stops.map(stop=>normalize(stop.name));
@@ -88,22 +88,33 @@
     lines.forEach(path=>{path._amount=null;path.removeAttribute('d');});
   }
   function setPlayState(value) {
-    running=value;$('play-label').textContent=value?'Pause':'Trace route';$('route-dock').classList.toggle('sailing',value);
+    running=value;$('play-label').textContent=value?'Pause':'Trace route';
     $('play-icon').firstElementChild.setAttribute('d',value?'M4.5 3.5h2.5v9H4.5zM9 3.5h2.5v9H9z':'m5 3 8 5-8 5z');
   }
   function stopAnimation() {
-    cancelAnimationFrame(animation);animation=0;lastTick=null;playback=null;idleZoom=null;setPlayState(false);
+    stopGlide();cancelAnimationFrame(animation);animation=0;lastTick=null;playback=null;idleZoom=null;setPlayState(false);
   }
-  const stopShown=i=>!(activeLeg?.destination===i&&Math.abs(progress-i)>1e-7)&&(progress===null||i<=progress+1e-7||activeLeg?.origin===i);
+  const stopShown=i=>!(activeLeg?.destination===i&&activeLeg.destination>activeLeg.origin&&Math.abs(progress-i)>1e-7)&&(progress===null||i<=progress+1e-7||activeLeg?.origin===i);
   // A city visited twice (same name, close by: sources differ slightly) is named once, by the active visit or else the first one shown; its dot goes there too.
   function labelOwner(index){const peers=stopPeers[index]||[index];return peers.find(i=>stops[i].id===activeStopId&&stopShown(i))??peers.find(stopShown)??index;}
+  // Later stops paint over earlier ones, so a generous target can lie over a neighbour's dot. The closest dot shown is the one meant.
+  function nearestStop(event,index){
+    let best=index,distance=Infinity;
+    [...$('route-stops').children].forEach((group,i)=>{
+      if(!stopShown(i))return;
+      const box=group.querySelector('.stop-dot').getBoundingClientRect(),d=Math.hypot(box.left+box.width/2-event.clientX,box.top+box.height/2-event.clientY);
+      if(d<distance){distance=d;best=i;}
+    });
+    return best;
+  }
   function paintProgress(){
     lines.forEach((path,i)=>{
       const amount=progress===null?1:Math.max(0,Math.min(1,progress-i));
       // Reveal the cached arc by screen distance for a steady drawing speed.
       if(path._amount!==amount||path._matrix!==routeMatrixKey){
-        path.style.visibility=amount===0||!routeMatrix?'hidden':'';
-        path.setAttribute('d',routeMatrix?geometry[i].screenPathAt(amount,routeMatrix):'');
+        // A leg wholly off screen costs nothing: no string to build and no path for the browser to parse.
+        const b=geometry[i].bounds,m=routeMatrix,seen=amount>0&&m&&b.right*m.a+m.e>-4&&b.left*m.a+m.e<viewportBounds.width+4&&b.bottom*m.d+m.f>-4&&b.top*m.d+m.f<viewportBounds.height+4;
+        if(seen||!path._blank){path.style.visibility=seen?'':'hidden';path.setAttribute('d',seen?geometry[i].screenPathAt(amount,m):'');path._blank=!seen;}
         path._amount=amount;path._matrix=routeMatrixKey;
       }
     });
@@ -115,26 +126,30 @@
     });
   }
   function drawRoute() {
+    // Rebuilding the list would drop keyboard focus to the page, where the next Space sets sail behind the logbook.
+    const had=document.activeElement,hadRow=had?.closest?.('#stop-list li'),hadIndex=hadRow?[...$('stop-list').children].indexOf(hadRow):-1,hadPart=had?.classList?.contains('remove-stop')?'.remove-stop':'.stop-grip';
     stopAnimation();traceZoom=null;progress=null;activeLeg=null;activeStopId=null;focused=null;$('route-lines').replaceChildren();$('route-stops').replaceChildren();$('stop-list').replaceChildren();lines=[];
     stops.forEach((place,index)=>{
       if(index) {const path=svg('path',{class:'route-path'});$('route-lines').append(path);lines.push(path);}
       const [x,y]=project(place),group=svg('g',{'data-index':index,visibility:'hidden'}),dot=svg('circle',{cx:0,cy:0,r:4.5,class:'stop-dot'});
       const label=svg('text',{x:10,y:-12,class:'stop-label label-hidden'});
       label.textContent=place.name.toUpperCase();
-      const leader=svg('path',{class:'stop-leader','aria-hidden':'true'});group.append(leader,dot,label);group._leader=leader;group._point=[x,y];group._label=label;$('route-stops').append(group);
+      const leader=svg('path',{class:'stop-leader','aria-hidden':'true'}),hit=svg('circle',{r:12,fill:'transparent'});group.append(leader,dot,hit,label);group._leader=leader;group._point=[x,y];group._label=label;$('route-stops').append(group);
       group.setAttribute('role','button');group.setAttribute('aria-label',`Go to ${place.name}, stop ${index+1}`);
-      group.addEventListener('pointerdown',event=>event.stopPropagation());
+      group.addEventListener('pointerdown',event=>{event.stopPropagation();closeSearch();});
       // A mouse click focuses the city without leaving a keyboard focus ring on its dot, and keys then act on the map.
       group.addEventListener('mousedown',event=>event.preventDefault());
       // A pointer goes to the visit that owns the label; assistive technology clicks reach the exact stop it names.
-      group.addEventListener('click',event=>{if(event.detail||document.activeElement?.matches?.('input,textarea'))map.focus({preventScroll:true});jumpToCity(event.detail?labelOwner(index):index);});
+      group.addEventListener('click',event=>{if(event.detail||document.activeElement?.matches?.('input,textarea'))map.focus({preventScroll:true});jumpToCity(event.detail?labelOwner(event.target===hit?nearestStop(event,index):index):index);});
       // Return or Space on the city already in view sets sail from it (holding speeds up, as on the map).
-      group.addEventListener('keydown',event=>{if(!['Enter',' '].includes(event.key))return;event.preventDefault();event.stopPropagation();if(event.repeat)return;if(focused===stops[index].id){held.set(event.key,performance.now());startTrace();}else jumpToCity(index);});
+      group.addEventListener('keydown',event=>{if(!['Enter',' '].includes(event.key))return;event.preventDefault();event.stopPropagation();if(event.repeat)return;if(focused===stops[index].id||running){held.set(event.key,performance.now());startTrace();}else jumpToCity(index);});
+      // A keyboard user tabbing to a port out of view is shown it, at the zoom already chosen.
+      group.addEventListener('focus',()=>{if(running)return;const [px,py]=group._point;if(px<view.x||px>view.x+view.w||py<view.y||py>view.y+view.h)animateView(RedlineTrace.pointFrame(group._point,cameraSpace(),baseView,baseView.w/view.w));});
       const li=document.createElement('li'),number=document.createElement('span'),name=document.createElement('span'),remove=document.createElement('button'),grip=document.createElement('button');
       li.dataset.index=String(index);grip.type='button';grip.className='stop-grip';grip.title='Go to city · Drag to reorder';grip.setAttribute('aria-label',`Go to ${place.name}, stop ${index+1}; drag to reorder`);grip.setAttribute('aria-keyshortcuts','Alt+ArrowLeft Alt+ArrowRight');
       number.className='stop-number';number.textContent=String(index+1).padStart(2,'0');name.textContent=place.name;
       remove.className='remove-stop';remove.textContent='×';remove.setAttribute('aria-label',`Remove ${place.name}, stop ${index+1}`);
-      remove.addEventListener('click',()=>{checkpoint('remove city');stops.splice(index,1);drawRoute();persist();$('status').textContent='';});
+      remove.addEventListener('click',event=>{if(event.detail)$('trip-panel').focus({preventScroll:true});checkpoint('remove city');stops.splice(index,1);drawRoute();persist();$('status').textContent='';});
       grip.append(number,name);li.append(grip,remove);$('stop-list').append(li);
       grip.addEventListener('click',event=>{if(event.detail){if(performance.now()<suppressStopClickUntil)return;map.focus({preventScroll:true});}jumpToCity(index);});
       grip.addEventListener('keydown',event=>{if(!event.altKey||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key))return;event.preventDefault();const to=index+(['ArrowLeft','ArrowUp'].includes(event.key)?-1:1);if(to>=0&&to<stops.length){moveStop(index,to);$('stop-list').children[to].querySelector('.stop-grip').focus();}});
@@ -145,17 +160,17 @@
     $('empty-hint').hidden=stops.length>0;$('stop-list').hidden=stops.length===0;
     $('play').disabled=stops.length<2;$('clear').disabled=stops.length===0;
     updateActiveStop();
-    $('toggle-stops').disabled=stops.length===0;
     $('status').textContent='';
+    if(hadRow){const rows=$('stop-list').children;(rows[Math.min(hadIndex,rows.length-1)]?.querySelector(hadPart)||$('trip-panel')).focus();}
     scheduleView();
   }
-  // Label widths are measured once per name; Courier's fixed advance is the fallback.
+  // Label widths are measured once per name; 8.3 px a character is the fallback for 13 px lettering.
   function labelWidth(text){
     const name=text.textContent;
-    if(!labelWidths.has(name)){let width=0;try{width=text.getComputedTextLength();}catch{}if(!(width>0))return window.RedlineLabels?.estimate(name)??name.length*8.3;labelWidths.set(name,width);}
-    // Do not trust a transient font/layout measurement smaller than Courier's
-    // known advance. A short cached width lets long names overlap indefinitely.
-    return Math.max(labelWidths.get(name),window.RedlineLabels?.estimate(name)??name.length*8.3);
+    if(!labelWidths.has(name)){let width=0;try{width=text.getComputedTextLength();}catch{}if(!(width>0))return RedlineLabels.estimate(name);labelWidths.set(name,width);}
+    // Do not trust a transient font or layout measurement below that floor.
+    // A short cached width lets long names overlap indefinitely.
+    return Math.max(labelWidths.get(name),RedlineLabels.estimate(name));
   }
   function moveStop(from,to) {
     if(from===to)return;
@@ -163,7 +178,8 @@
     $('status').textContent='';
   }
   function startStopDrag(event,from,grip) {
-    if(event.button!==0)return;
+    // On a touch screen a swipe along the list scrolls it; only the numeral picks a stop up.
+    if(event.button!==0||event.pointerType==='touch'&&!event.target.closest('.stop-number'))return;
     const list=$('stop-list'),item=grip.closest('li'),box=grip.getBoundingClientRect(),startX=event.clientX,startY=event.clientY;
     let moved=false,to=from,preview=null;
     grip.setPointerCapture(event.pointerId);
@@ -199,9 +215,11 @@
     const leg=direction>0?Math.floor(progress+1e-7):Math.ceil(progress-1e-7)-1;
     activeLeg={origin:direction>0?leg:leg+1,destination:direction>0?leg+1:leg};
     const autoCamera=cameraFor(leg,direction,null),defaultFrame=autoCamera.arrival;
-    playback={leg,target,direction,returnToOverview,nominalWidth:defaultFrame.w,manual:traceZoom?manualCamera(baseView.w/traceZoom):null,from:progress-leg,to:direction>0?1:0,startView:{...view},camera:traceZoom?cameraFor(leg,direction):autoCamera,timeline:traceZoom?RedlineTrace.timeline({
-      from:progress-leg,to:direction>0?1:0,duration:RedlineTrace.duration(geometry[leg].length),widthRatio:traceZoom?1:defaultFrame.w/view.w,easeStops:!traceZoom
+    playback={leg,target,direction,returnToOverview,nominalWidth:defaultFrame.w,manual:traceZoom?manualCamera(baseView.w/traceZoom):null,startView:{...view},camera:traceZoom?cameraFor(leg,direction):autoCamera,timeline:traceZoom?RedlineTrace.timeline({
+      from:progress-leg,to:direction>0?1:0,duration:RedlineTrace.duration(geometry[leg].length)
     }):RedlineTrace.journey({geometry:geometry[leg],space:cameraSpace(),start:view,plan:autoCamera,from:progress-leg,to:direction>0?1:0})};
+    // The next port's map is already painted when the camera gets there.
+    atlasView.prefetch(playback.camera.arrival);
     paintProgress();
   }
   function runTo(target,{returnToOverview=false}={}){
@@ -210,8 +228,9 @@
     target=Math.max(0,Math.min(lines.length,target));
     const direction=target>=progress?1:-1;
     reachedCity();paintProgress();
-    if(Math.abs(progress-target)<1e-7){activeLeg=null;paintProgress();return;}
-    if(matchMedia('(prefers-reduced-motion: reduce)').matches){finishLeg(direction>0?target-1:target,direction);if(returnToOverview)goToStep(0);return;}
+    if(Math.abs(progress-target)<1e-7){activeLeg=null;paintProgress();scheduleView();return;}
+    // Without motion a whole trace lands on its last port with the route drawn, rather than appearing to do nothing.
+    if(matchMedia('(prefers-reduced-motion: reduce)').matches){finishLeg(direction>0?target-1:target,direction);return;}
     beginLeg(target,direction,returnToOverview);setPlayState(true);lastTick=performance.now();
     let speed=1;
     function nextLeg(run){
@@ -219,22 +238,22 @@
       beginLeg(run.target,run.direction,run.returnToOverview);return true;
     }
     function tick(now){
-      const targetSpeed=[...held.values()].some(since=>now-since>=180)?2:1;
+      const targetSpeed=[...held.values()].some(since=>now-since>=140)?2.5:1;
       const elapsed=lastTick===null?0:Math.max(0,Math.min(80,now-lastTick));lastTick=now;
       // Integrate the speed ramp over this frame so 60 and 120 Hz cover the same distance.
       const decay=Math.exp(-elapsed/110),travel=targetSpeed*elapsed+(speed-targetSpeed)*110*(1-decay);
       speed=targetSpeed+(speed-targetSpeed)*decay;
       const run=playback;
       if(run.settling){
-        run.settling.elapsed+=elapsed;
+        run.settling.elapsed+=elapsed*speed;
         view=run.manual.tracker.step(project(stops[run.direction>0?run.leg+1:run.leg]),traceZoom,elapsed);
-        const settled=frameDistance(view,run.camera.arrival)<.2||run.settling.elapsed>=1800;
+        const settled=frameDistance(view,run.camera.arrival)<.2||run.settling.elapsed>=620;
         if(settled)view={...run.camera.arrival};paintView();
         if(settled&&!nextLeg(run))return;
         animation=requestAnimationFrame(tick);return;
       }
       // Keep the visible drawing speed comfortable as the user moves closer.
-      const pace=run.manual?Math.min(1,view.w/run.nominalWidth):1;
+      const pace=run.manual?Math.max(.45,Math.min(1,view.w/run.nominalWidth)):1;
       const state=run.timeline.advance(travel*pace);
       progress=run.leg+state.position;
       if(state.arrived)activeLeg=null;
@@ -242,11 +261,12 @@
         const lead=run.direction*90*speed*pace/RedlineTrace.duration(geometry[run.leg].length);
         const position=Math.max(0,Math.min(1,state.position+lead));
         const point=geometry[run.leg].pointAt(position),here=geometry[run.leg].pointAt(state.position);
-        // Never anticipate a jump across the map's date-line seam.
+        // Cut when the ink crosses the map's date-line seam, rather than sweep the whole sheet, and never anticipate that jump.
+        if(run.tipX!==undefined&&Math.abs(here[0]-run.tipX)>WORLD_W/2)run.manual.tracker.jump(here);run.tipX=here[0];
         view=run.manual.tracker.step(Math.abs(point[0]-here[0])>WORLD_W/2?here:point,traceZoom,elapsed);
       }else view=RedlineTrace.cameraView(run.startView,run.camera,geometry[run.leg].pointAt(state.position),state.time);
       paintView();
-      if(state.arrived)reachedCity();
+      if(state.arrived){reachedCity();scheduleView();}
       if(state.done){
         if(run.manual)run.settling={elapsed:0};
         else if(!nextLeg(run))return;
@@ -255,13 +275,15 @@
     }
     animation=requestAnimationFrame(tick);
   }
+  // The glide back to the overview is the voyage finishing: anything that would stop it completes it instead.
+  function endGlide(){if(playback?.phase!=='overview')return false;stopAnimation();showWorld();view={...baseView};paintView();return true;}
   function startTrace(){
-    if(running||!lines.length)return;
+    endGlide();if(running||!lines.length)return;
     resumeFromFocus();
-    if(progress===null||progress>=lines.length){progress=0;traceZoom=null;}
+    if(progress===null||progress>=lines.length)progress=0;
     runTo(lines.length,{returnToOverview:true});
   }
-  function trace(){if(running)stopAnimation();else startTrace();}
+  function trace(){if(endGlide())return;if(running)stopAnimation();else startTrace();}
   function reframeTrace(){if(running&&playback?.phase!=='overview'){const {target,returnToOverview}=playback;if(playback.settling){playback.camera=cameraFor(playback.leg,playback.direction);playback.manual=manualCamera(baseView.w/traceZoom);playback.settling={elapsed:0};}else runTo(target,{returnToOverview});}}
   function closeSearch() {
     clearTimeout(searchTimer);searchVersion++;controller?.abort();addingQuery='';$('destination-form').removeAttribute('aria-busy');$('suggestion-panel').hidden=true;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');selected=-1;
@@ -340,75 +362,58 @@
   document.addEventListener('pointerdown',event=>{if(!$('destination-form').contains(event.target)&&!$('suggestion-panel').contains(event.target))closeSearch();});
   $('play').addEventListener('click',trace);
   $('clear').addEventListener('click',()=>{if(!stops.length)return;checkpoint('clear route');stops=[];drawRoute();persist();input.value='';closeSearch();$('undo-route').focus({preventScroll:true});});
-  const labelNodes=new Map();
-  const typeWidths=new Map(),typeContext=document.createElement('canvas').getContext('2d');
-  function typeWidth(name,font,spacing=0){
-    const key=[name,font,spacing].join('|');
-    if(!typeWidths.has(key)){
-      let width=0;
-      if(typeContext?.measureText){typeContext.font=font;width=typeContext.measureText(name).width;}
-      typeWidths.set(key,(width||name.length*parseFloat(font.replace(/^[^\d]*/,''))*.65)+Math.max(0,name.length-1)*spacing);
-    }
-    return typeWidths.get(key);
-  }
+  // The chart's great names, in sheet coordinates: where a hand would letter them on an empty map.
+  const GREAT_NAMES=[['continent','North America',318,150,-3,.04],['continent','South America',470,424,66,0],['continent','Europe',790,146,0,0],['continent','Africa',800,330,0,0],['continent','Asia',1092,172,0,0],['continent','Australia',1250,472,0,0],['ocean','Pacific Ocean',164,330,-6,.12],['ocean','Atlantic Ocean',604,290,-30,.1],['ocean','Indian Ocean',1000,412,8,-.08],['ocean','Southern Ocean',470,620,0,.04],['ocean','Arctic Ocean',1120,30,0,0]];
+  // Every other name appears as you come close enough to read it, and leaves once it spans the window.
+  const nameZoom={1:1.5,2:2.4,3:4,4:6.5},atlasNames=(window.ATLAS_NAMES||[]).map(name=>({...name,from:nameZoom[name.rank]||9}));
+  let letteredNames=new Set();
   // Place names avoid the route's dots, its chosen label boxes, and the dock.
   function renderLabels(matrix,bounds,occupied,routes) {
-    const layer=$('background-labels'),width=bounds.width,height=bounds.height;
-    const visible=new Set();
-    const screen=(x,y)=>[x*matrix.a+matrix.e-bounds.left,y*matrix.d+matrix.f-bounds.top];
-    function placeLabel(key,name,x,y,isCity) {
-      const [sx,sy]=screen(x,y);
-      if(sy<22||sy>height+16||sx<0||sx>width)return;
-      const w=typeWidth(name,isCity?'11px Arial':'12px Georgia',isCity?0:1)+8;
-      const box={x:isCity?sx-4:sx-w/2,y:sy-(isCity?16:12),w:w+(isCity?7:0),h:22};
-      if(box.x<30||box.x+box.w>width-30||box.y<22||box.y+box.h>height-22)return;
-      if(occupied.some(b=>RedlineLabels.overlaps(box,b,6)))return;
-      if(routes?.hits(box,4))return;
-      occupied.push(box);visible.add(key);
-      let node=labelNodes.get(key);
-      if(!node){node=svg('g',{class:isCity?'city-label':'country-label'});if(isCity)node.append(svg('circle',{r:2}));const text=svg('text',{'font-size':isCity?11:12,'text-anchor':isCity?'start':'middle',x:isCity?7:0,y:isCity?-4:4});text.textContent=name;node.append(text);labelNodes.set(key,node);layer.append(node);}
-      changed(node,'transform',`translate(${sx.toFixed(1)} ${sy.toFixed(1)})`);
+    const width=bounds.width,height=bounds.height,labels=[];
+    function placeLabel(kind,name,x,y,angle=0,curve=0) {
+      const sx=x*matrix.a+matrix.e-bounds.left,sy=y*matrix.d+matrix.f-bounds.top;
+      if(sy<14||sy>height+16||sx<-40||sx>width+40)return false;
+      const size=atlasView.measure(kind,name,angle,curve),dotted=kind==='city'||kind==='capital';
+      const box=dotted?{x:sx-5,y:sy-size.h/2-3,w:size.w+7,h:size.h+6}:{x:sx-size.w/2,y:sy-size.h/2,w:size.w,h:size.h};
+      if(box.x<16||box.x+box.w>width-16||box.y<14||box.y+box.h>height-14)return false;
+      if(occupied.some(b=>RedlineLabels.overlaps(box,b,dotted?4:6)))return false;
+      if(routes?.hits(box,4))return false;
+      occupied.push(box);labels.push({kind,text:name,x:sx,y:sy,angle,curve});return true;
     }
-    if(zoomLevel>=1.3){
-      for(let i=0;i<window.MAP_COUNTRIES.length;i++){
-        const p=window.MAP_COUNTRIES[i];if(zoomLevel<1.25+Math.max(0,p.rank-2)*.42)continue;
-        placeLabel(`country-${i}`,p.name.toUpperCase(),p.x,p.y,false);
+    if(zoomLevel<1.6){
+      for(const [kind,name,x,y,angle,curve] of GREAT_NAMES)placeLabel(kind,name,x,y,angle,curve);
+      // The title piece sits in the empty far south, and gives way to anything else.
+      const title=$('trip-title').textContent.trim()||'The Known World',size=atlasView.measure('cartouche',title,'A chart of'),cx=Math.max(20+size.w/2,(208-view.x)*matrix.a),cy=(574-view.y)*matrix.d,box={x:cx-size.w/2,y:cy-size.h/2,w:size.w,h:size.h};
+      if(box.x>=14&&box.x+box.w<=width-14&&box.y+box.h<=height-14&&!occupied.some(b=>RedlineLabels.overlaps(box,b,6))&&!routes?.hits(box,4)){occupied.push(box);labels.push({kind:'cartouche',text:title,kicker:'A chart of',x:cx,y:cy});}
+    }
+    for(const name of atlasNames){
+      if(zoomLevel<name.from||name.spread*matrix.a>width*.9)continue;
+      placeLabel(name.kind,name.name,name.x,name.y,name.kind==='land'||name.kind==='desert'?0:name.angle);
+    }
+    // Names already lettered claim their places before new arrivals, so one change does not cascade through the crowd as the camera moves.
+    for(const keeping of [true,false]){
+      if(zoomLevel>=1.3){
+        for(let i=0;i<window.MAP_COUNTRIES.length;i++){
+          const p=window.MAP_COUNTRIES[i];if(zoomLevel<1.25+Math.max(0,p.rank-2)*.42||letteredNames.has(p.name)!==keeping)continue;
+          placeLabel('country',p.name,p.x,p.y);
+        }
+      }
+      if(zoomLevel>=1.8){
+        for(let i=0;i<window.MAP_CITIES.length&&labels.length<115;i++){
+          const p=window.MAP_CITIES[i];
+          const threshold=p.population>=8000000?1.8:(p.capital||p.population>=2000000)?2.5:p.population>=500000?3.8:p.population>=100000?4.5:5.3;
+          if(zoomLevel<threshold||letteredNames.has(p.name)!==keeping)continue;
+          if(hiddenMapCities.has(i))continue;
+          placeLabel(p.capital?'capital':'city',p.name,...backgroundPoints[i]);
+        }
       }
     }
-    if(zoomLevel>=1.8){
-      for(let i=0;i<window.MAP_CITIES.length&&visible.size<115;i++){
-        const p=window.MAP_CITIES[i];
-        const threshold=p.population>=8000000?1.8:(p.capital||p.population>=2000000)?2.5:p.population>=500000?3.8:p.population>=100000?4.5:5.3;
-        if(zoomLevel<threshold)continue;
-        if(hiddenMapCities.has(i))continue;
-        placeLabel(`city-${i}`,p.name,...backgroundPoints[i],true);
-      }
-    }
-    for(const [key,node] of labelNodes)if(!visible.has(key)){node.remove();labelNodes.delete(key);}
-    $('map-labels').style.display=zoomLevel>=1.6?'none':'';
-  }
-  function paintAtlasNames(matrix,bounds,occupied,routes){
-    if(zoomLevel>=1.6)return;
-    for(const label of $('map-labels').children){
-      const x=Number(label.dataset.mapX),y=Number(label.dataset.mapY),angle=Number(label.dataset.mapRotation),ocean=label.classList.contains('ocean');
-      changed(label,'transform',`translate(${x} ${y}) scale(${1/matrix.a} ${1/matrix.d}) rotate(${angle})`);
-      const width=typeWidth(label.textContent,ocean?'italic 15px Georgia':'15px Georgia',ocean?1:4)+8,radians=angle*Math.PI/180;
-      const w=Math.abs(width*Math.cos(radians))+Math.abs(24*Math.sin(radians)),h=Math.abs(width*Math.sin(radians))+Math.abs(24*Math.cos(radians));
-      const box={x:x*matrix.a+matrix.e-bounds.left+6*Math.sin(radians)-w/2,y:y*matrix.d+matrix.f-bounds.top-6*Math.cos(radians)-h/2,w,h};
-      const hidden=occupied.some(other=>RedlineLabels.overlaps(box,other,6))||routes?.hits(box,5);
-      label.style.visibility=hidden?'hidden':'';if(!hidden)occupied.push(box);
-    }
+    letteredNames=new Set(labels.map(label=>label.text));
+    return labels;
   }
   function constrainView(frame){
     const {w,h}=frame;
     return {...frame,x:w>=WORLD_W?(WORLD_W-w)/2:Math.max(0,Math.min(WORLD_W-w,frame.x)),y:h>=WORLD_H?(WORLD_H-h)/2:Math.max(0,Math.min(WORLD_H-h,frame.y))};
-  }
-  let antarcticaBottom=null;
-  function paintAntarctica(matrix,bounds){
-    const bottom=Math.max(WORLD_H,(bounds.top+bounds.height-matrix.f+2)/matrix.d);
-    if(bottom===antarcticaBottom)return;antarcticaBottom=bottom;
-    $('antarctica').setAttribute('transform',`translate(0 ${bottom/2}) scale(1 .5)`);
-    [...$('antarctica').children].forEach((path,i)=>path.setAttribute('d',window.ANTARCTICA_POLYGONS[i].map(ring=>ring.map(([x,y],j)=>`${j?'L':'M'}${x},${y===WORLD_H?bottom:y}`).join('')+'Z').join('')));
   }
   function paintView() {
     if(viewFrame)cancelAnimationFrame(viewFrame);viewFrame=0;
@@ -420,8 +425,7 @@
     const matrix=mapMatrix(bounds);
     routeMatrix={a:matrix.a,d:matrix.d,e:matrix.e-bounds.left,f:matrix.f-bounds.top};
     routeMatrixKey=[routeMatrix.a,routeMatrix.d,routeMatrix.e,routeMatrix.f].join(',');
-    // All geometry reads precede writes. Asking SVG for its CTM after changing
-    // viewBox used to force layout on every zoom / trace frame.
+    // All geometry reads precede writes, so a camera frame never forces layout.
     const local=(el,pad)=>{const r=el.getBoundingClientRect();return {x:r.left-bounds.left-pad,y:r.top-bounds.top-pad,w:r.width+pad*2,h:r.height+pad*2};};
     const controls=!document.body.classList.contains('map-only'),dock=controls?local($('route-dock'),8):null,obstacles=[];
     if(controls){obstacles.push({x:dock.x+4,y:dock.y+4,w:dock.w-8,h:dock.h-8});if(zoomControls)obstacles.push(local(zoomControls,4));if(!$('trip-panel').hidden)obstacles.push(local($('trip-panel'),8));}
@@ -432,20 +436,18 @@
     const layout=JSON.stringify([view,bounds.width,bounds.height,bounds.left,bounds.top,obstacles,key,activeStopId,stops.map((_,i)=>stopShown(i))]);
     if(layout===lastLayout&&lastLayoutGeometry===geometry){paintProgress();return;}
     lastLayout=layout;lastLayoutGeometry=geometry;
-    changed(map,'viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);
-    paintAntarctica(matrix,bounds);
     zoomLevel=baseView.w/view.w;
     $('zoom-in').disabled=zoomLevel>=MAX_ZOOM-.001;$('zoom-out').disabled=zoomLevel<=1.001;
     map.classList.toggle('zoomed-out',zoomLevel<=1.001);
-    atlas?.paint(view,zoomLevel>=1.6);paintRelief(view,zoomLevel);
-    if(window.RedlineLabels&&(routeIndexGeometry!==geometry||routeIndexKey!==key)){
+    if(routeIndexGeometry!==geometry||routeIndexKey!==key){
       routeIndex=RedlineLabels.indexLines(geometry.flatMap((leg,i)=>leg.segmentsAt(amounts[i])),{width:WORLD_W,height:WORLD_H});
       routeIndexGeometry=geometry;routeIndexKey=key;
     }
-    const routes=routeIndex&&RedlineLabels.projectIndex(routeIndex,matrix,bounds);
+    const routes=RedlineLabels.projectIndex(routeIndex,matrix,bounds);
     const occupied=paintStops(matrix,bounds,obstacles,routes);
     if(dock)occupied.push(...obstacles);
-    renderLabels(matrix,bounds,occupied,routes);paintAtlasNames(matrix,bounds,occupied,routes);paintProgress();
+    // Map and lettering land in the same frame as the route above them.
+    atlasView.update(view,renderLabels(matrix,bounds,occupied,routes));paintProgress();
   }
   function paintStops(matrix,bounds,obstacles,routes){
     const items=[],texts=[],occupied=[];
@@ -456,15 +458,14 @@
       const sx=x*matrix.a+matrix.e-bounds.left,sy=y*matrix.d+matrix.f-bounds.top;
       changed(group,'transform',`translate(${sx} ${sy})`);
       if(group.hasAttribute('visibility'))group.removeAttribute('visibility');
-      // Unreached stops stay out of the layout while a trace reveals them.
-      if(!stopShown(index))return;
+      // Unreached stops stay out of the layout while a trace reveals them, and so do stops well off screen.
+      if(!stopShown(index)||sx<-300||sx>bounds.width+300||sy<-300||sy>bounds.height+300)return;
       const id=stops[index].id;
       if(labelOwner(index)!==index){group._leader.removeAttribute('d');text.classList.add('label-hidden');occupied.push({x:sx-7,y:sy-7,w:14,h:14});return;}
       items.push({id,x:sx,y:sy,width:text._width??text.textContent.length*8.3,height:17,priority:id===activeStopId?-1:index});texts.push(text);
       occupied.push({x:sx-7,y:sy-7,w:14,h:14});
     });
-    const flip=item=>{const end=item.x>bounds.width-180;return {name:end?'left-above':'right-above',x:end?-10:10,y:-12,anchor:end?'end':'start',box:{x:end?item.x-12-item.width:item.x+8,y:item.y-23,w:item.width+4,h:14}};};
-    const placed=window.RedlineLabels?RedlineLabels.place(items,{width:bounds.width,height:bounds.height,obstacles,previous:labelSlots,clusterDistance:9,routes}):items.map(flip);
+    const placed=RedlineLabels.place(items,{width:bounds.width,height:bounds.height,obstacles,previous:labelSlots,clusterDistance:9,routes});
     labelSlots.clear();
     placed.forEach((slot,i)=>{
       const text=texts[i],leader=text.parentNode._leader;
@@ -477,6 +478,7 @@
     return occupied;
   }
   function scheduleView(){if(!viewFrame)viewFrame=requestAnimationFrame(paintView);}
+  let resizeTimer=0;
   function resizeMap(){
     const bounds=map.getBoundingClientRect();if(!bounds.width||!bounds.height)return;viewportBounds=bounds;
     // Fill the viewport with the original full-width map and flush poles.
@@ -484,9 +486,12 @@
     const previousZoom=baseView.w/view.w,centerX=view.x+view.w/2,centerY=view.y+view.h/2;
     baseView={x:0,y:0,w,h};
     view=previousZoom<=1.001?{...baseView}:{x:centerX-w/previousZoom/2,y:centerY-h/previousZoom/2,w:w/previousZoom,h:h/previousZoom};
-    paintView();reframeTrace();
+    // A dragged window edge must not restart the leg, and its ease-in, every frame.
+    paintView();clearTimeout(resizeTimer);resizeTimer=setTimeout(reframeTrace,150);
   }
   function zoom(factor,clientX,clientY) {
+    // A drag's origin is stale once the scale changes; carrying on from it would throw the map across the sheet.
+    if(drag){drag=null;map.classList.remove('dragging');}
     if(running&&playback?.phase!=='overview'){
       const run=playback,width=Math.max(baseView.w/MAX_ZOOM,Math.min(baseView.w,(run.manual?.width||view.w)*factor));
       traceZoom=baseView.w/width;run.camera=cameraFor(run.leg,run.direction);
@@ -497,6 +502,8 @@
     if(playback?.phase==='overview'){stopAnimation();showWorld();}
     const matrix=mapMatrix(viewportBounds||map.getBoundingClientRect()),rx=clientX===undefined ? .5 : Math.max(0,Math.min(1,((clientX-matrix.e)/matrix.a-view.x)/view.w)),ry=clientY===undefined ? .5 : Math.max(0,Math.min(1,((clientY-matrix.f)/matrix.d-view.y)/view.h));
     const width=Math.max(baseView.w/MAX_ZOOM,Math.min(baseView.w,(idleZoom?.width||view.w)*factor));
+    // A zoom chosen at rest carries into the next trace. Back out to the whole world, it hands over to the automatic camera again.
+    if(width!==(idleZoom?.width||view.w))traceZoom=progress===null&&focused===null&&width>=baseView.w?null:baseView.w/width;
     const anchor={x:view.x+view.w*rx,y:view.y+view.h*ry,rx,ry};
     if(matchMedia('(prefers-reduced-motion: reduce)').matches){stopAnimation();const height=width*baseView.h/baseView.w;view={x:anchor.x-rx*width,y:anchor.y-ry*height,w:width,h:height};paintView();return;}
     if(idleZoom){Object.assign(idleZoom,{width,anchor});return;}
@@ -504,21 +511,69 @@
     idleZoom={width,anchor,zoom:{value:Math.log(baseView.w/view.w),velocity:0},last:performance.now()};
     const tick=now=>{
       const motion=idleZoom,elapsed=Math.min(80,Math.max(0,now-motion.last));motion.last=now;
-      motion.zoom=RedlineTrace.spring(motion.zoom,Math.log(baseView.w/motion.width),elapsed/1000,18);
+      motion.zoom=RedlineTrace.spring(motion.zoom,Math.log(baseView.w/motion.width),elapsed/1000,32);
       const level=Math.max(1,Math.min(MAX_ZOOM,Math.exp(motion.zoom.value))),w=baseView.w/level,h=w*baseView.h/baseView.w;
       view={x:motion.anchor.x-motion.anchor.rx*w,y:motion.anchor.y-motion.anchor.ry*h,w,h};
-      if(Math.abs(w-motion.width)<.01){const h=motion.width*baseView.h/baseView.w;view={x:motion.anchor.x-motion.anchor.rx*motion.width,y:motion.anchor.y-motion.anchor.ry*h,w:motion.width,h};idleZoom=null;animation=0;paintView();return;}
+      if(Math.abs(w-motion.width)*(viewportBounds?.width||1440)/w<1){const h=motion.width*baseView.h/baseView.w;view={x:motion.anchor.x-motion.anchor.rx*motion.width,y:motion.anchor.y-motion.anchor.ry*h,w:motion.width,h};idleZoom=null;animation=0;paintView();return;}
       paintView();animation=requestAnimationFrame(tick);
     };
     animation=requestAnimationFrame(tick);
   }
-  $('zoom-in').addEventListener('click',()=>zoom(.75));$('zoom-out').addEventListener('click',()=>zoom(4/3));
+  $('zoom-in').addEventListener('click',()=>zoom(.6));$('zoom-out').addEventListener('click',()=>zoom(1/.6));
   $('reset-view').addEventListener('click',()=>showOverview());
-  $('map-shell').addEventListener('wheel',event=>{event.preventDefault();if(!event.deltaY)return;const units=event.deltaMode===1?16:event.deltaMode===2?(viewportBounds||map.getBoundingClientRect()).height:1;const delta=Math.max(-160,Math.min(160,event.deltaY*units));zoom(Math.exp(delta*(event.ctrlKey?.008:.0018)),event.clientX,event.clientY);},{passive:false});
-  let drag=null;
-  map.addEventListener('pointerdown',event=>{if(event.button!==0||baseView.w/view.w<=1.001)return;stopAnimation();const m=mapMatrix(viewportBounds||map.getBoundingClientRect());drag={x:event.clientX,y:event.clientY,vx:view.x,vy:view.y,scaleX:m.a,scaleY:m.d,id:event.pointerId};map.setPointerCapture(event.pointerId);map.classList.add('dragging');});
-  map.addEventListener('pointermove',event=>{if(!drag||event.pointerId!==drag.id||baseView.w/view.w<=1.001)return;view.x=drag.vx-(event.clientX-drag.x)/drag.scaleX;view.y=drag.vy-(event.clientY-drag.y)/drag.scaleY;scheduleView();});
-  const endDrag=()=>{drag=null;map.classList.remove('dragging');};map.addEventListener('pointerup',endDrag);map.addEventListener('pointercancel',endDrag);map.addEventListener('lostpointercapture',endDrag);
+  $('map-shell').addEventListener('wheel',event=>{event.preventDefault();if(!event.deltaY)return;const units=event.deltaMode===1?33:event.deltaMode===2?(viewportBounds||map.getBoundingClientRect()).height:1;const delta=Math.max(-160,Math.min(160,event.deltaY*units));zoom(Math.exp(delta*(event.ctrlKey?.012:.0034)),event.clientX,event.clientY);},{passive:false});
+  let drag=null,glide=0,pinchDistance=0;
+  const touches=new Map();
+  function stopGlide(){if(glide){cancelAnimationFrame(glide);glide=0;}}
+  // A flicked map coasts briefly to a stop, as paper does on a table.
+  function coast(vx,vy){
+    let last=performance.now();stopGlide();
+    const step=now=>{
+      const dt=Math.min(40,now-last);last=now;const decay=Math.exp(-dt/170);vx*=decay;vy*=decay;
+      if(Math.hypot(vx,vy)<.02){glide=0;return;}
+      view={...view,x:view.x-vx*dt*view.w/(viewportBounds?.width||1),y:view.y-vy*dt*view.h/(viewportBounds?.height||1)};paintView();glide=requestAnimationFrame(step);
+    };
+    glide=requestAnimationFrame(step);
+  }
+  map.addEventListener('pointerdown',event=>{
+    stopGlide();
+    if(event.pointerType==='touch'){
+      touches.set(event.pointerId,{x:event.clientX,y:event.clientY});
+      if(touches.size===2){drag=null;map.classList.remove('dragging');const [a,b]=[...touches.values()];pinchDistance=Math.hypot(a.x-b.x,a.y-b.y);map.setPointerCapture(event.pointerId);return;}
+    }
+    if(event.button!==0||baseView.w/view.w<=1.001)return;const m=mapMatrix(viewportBounds||map.getBoundingClientRect());drag={x:event.clientX,y:event.clientY,vx:view.x,vy:view.y,scaleX:m.a,scaleY:m.d,id:event.pointerId,lastX:event.clientX,lastY:event.clientY,lastT:event.timeStamp,speedX:0,speedY:0};map.setPointerCapture(event.pointerId);map.classList.add('dragging');
+  });
+  map.addEventListener('pointermove',event=>{
+    if(touches.has(event.pointerId)){
+      touches.set(event.pointerId,{x:event.clientX,y:event.clientY});
+      if(touches.size===2){
+        const [a,b]=[...touches.values()],distance=Math.hypot(a.x-b.x,a.y-b.y);
+        if(pinchDistance&&distance)zoom(pinchDistance/distance,(a.x+b.x)/2,(a.y+b.y)/2);
+        pinchDistance=distance;return;
+      }
+    }
+    if(!drag||event.pointerId!==drag.id||baseView.w/view.w<=1.001)return;
+    // A press alone leaves the voyage sailing; only a real drag takes the camera, from wherever it has got to.
+    if(!drag.moving){
+      if(Math.hypot(event.clientX-drag.x,event.clientY-drag.y)<4)return;
+      if(playback?.phase==='overview')showWorld();
+      stopAnimation();const m=mapMatrix(viewportBounds||map.getBoundingClientRect());Object.assign(drag,{moving:true,vx:view.x,vy:view.y,scaleX:m.a,scaleY:m.d});
+    }
+    const dt=Math.max(1,event.timeStamp-drag.lastT);drag.speedX=.7*(event.clientX-drag.lastX)/dt+.3*drag.speedX;drag.speedY=.7*(event.clientY-drag.lastY)/dt+.3*drag.speedY;drag.lastX=event.clientX;drag.lastY=event.clientY;drag.lastT=event.timeStamp;
+    view.x=drag.vx-(event.clientX-drag.x)/drag.scaleX;view.y=drag.vy-(event.clientY-drag.y)/drag.scaleY;scheduleView();
+  });
+  const endDrag=event=>{
+    touches.delete(event.pointerId);if(touches.size<2)pinchDistance=0;
+    if(drag&&event.type==='pointerup'&&event.timeStamp-drag.lastT<60&&Math.hypot(drag.speedX,drag.speedY)>.25&&!matchMedia('(prefers-reduced-motion: reduce)').matches)coast(drag.speedX,drag.speedY);
+    drag=null;map.classList.remove('dragging');
+  };
+  map.addEventListener('pointerup',endDrag);map.addEventListener('pointercancel',endDrag);map.addEventListener('lostpointercapture',endDrag);
+  // Safari reports a trackpad pinch as gesture events rather than a control-wheel.
+  let gestureScale=1;
+  $('map-shell').addEventListener('gesturestart',event=>{event.preventDefault();gestureScale=1;});
+  // iOS fires these alongside the touch pointers, which have the pinch already.
+  $('map-shell').addEventListener('gesturechange',event=>{event.preventDefault();if(!touches.size)zoom(gestureScale/event.scale,event.clientX,event.clientY);gestureScale=event.scale;});
+  $('map-shell').addEventListener('gestureend',event=>event.preventDefault());
   function updateActiveStop(){
     const step=activeStopId?stops.findIndex(p=>p.id===activeStopId)+1:0;
     map.dataset.tripStep=String(Math.max(0,step));
@@ -546,7 +601,7 @@
     // Interpolate each frame's share of the free margin, so no frame is clamped against the sheet's edge.
     const share=(f,key,span)=>span>1e-3?f[key]/span:null,fx=[share(from,'x',WORLD_W-from.w),share(to,'x',WORLD_W-to.w)],fy=[share(from,'y',WORLD_H-from.h),share(to,'y',WORLD_H-to.h)];
     for(const f of [fx,fy]){f[0]??=f[1]??.5;f[1]??=f[0];}
-    return {length,duration:Math.max(600,Math.min(1600,420+length*560)),at:t=>{
+    return {length,duration:Math.max(300,Math.min(820,220+length*280)),at:t=>{
       const [u,s]=curve.at(t),w=Math.min(WORLD_W,WORLD_W*s/size),h=w*WORLD_H/WORLD_W;
       return {x:(fx[0]+u*(fx[1]-fx[0]))*(WORLD_W-w),y:(fy[0]+u*(fy[1]-fy[0]))*(WORLD_H-h),w,h};
     }};
@@ -555,7 +610,7 @@
   function animateView(target,{overview=false,hold=0,speed=1}={}){
     stopAnimation();cancelAnimationFrame(viewFrame);viewFrame=0;
     const finish=()=>{stopAnimation();view={...target};if(overview)showWorld();paintView();};
-    const path=zoomPath(constrainView(view),target);
+    const path=zoomPath(constrainView(view),target);atlasView.prefetch(target);
     if(matchMedia('(prefers-reduced-motion: reduce)').matches||path.length<1e-4){finish();return;}
     // Arrow keys during an overview move finish it instantly.
     if(overview)playback={phase:'overview'};
@@ -563,24 +618,20 @@
     const began=performance.now();
     const tick=now=>{
       const amount=Math.max(0,Math.min(1,(now-began-hold)/duration));
-      view=path.at(RedlineTrace.ease(amount));paintView();
+      view=path.at(RedlineTrace.snap(amount));paintView();
       if(amount===1){finish();return;}animation=requestAnimationFrame(tick);
     };
     animation=requestAnimationFrame(tick);
   }
-  function returnToWorld(){animateView({...baseView},{overview:true,hold:320});if(playback)setPlayState(true);}
-  // Enter, Home, and the globe: the complete route, with the camera easing back to the world.
+  function returnToWorld(){const hurried=held.size>0;animateView({...baseView},{overview:true,hold:hurried?0:90,speed:hurried?2.5:1});if(playback)setPlayState(true);}
+  // Backspace, Home, and the globe: the complete route, with the camera easing back to the world.
   function showOverview(speed=1){stopAnimation();showWorld();paintProgress();animateView({...baseView},{overview:true,speed});}
   // A clicked city is seen within the whole drawn trip; the arrows or play then continue from it.
   function jumpToCity(index){
     if(!stops[index])return;
-    stopAnimation();traceZoom=null;progress=null;activeLeg=null;activeStopId=stops[index].id;focused=stops[index].id;updateActiveStop();paintProgress();
-    animateView(cityFrame=RedlineTrace.pointFrame(project(stops[index]),cameraSpace(),baseView,Math.max(3,baseView.w/view.w)));
-  }
-  // A focused city the camera is still flying to, or resting on, moves into the free space the settled dock leaves.
-  function reframeCity(){
-    if(focused===null||running||idleZoom||drag||!animation&&frameDistance(view,cityFrame)>.5)return;
-    const index=stops.findIndex(p=>p.id===focused);if(index>=0)animateView(cityFrame=RedlineTrace.pointFrame(project(stops[index]),cameraSpace(),baseView,baseView.w/cityFrame.w));
+    const level=Math.max(3,baseView.w/view.w);
+    stopAnimation();if(traceZoom)traceZoom=level;progress=null;activeLeg=null;activeStopId=stops[index].id;focused=stops[index].id;updateActiveStop();paintProgress();
+    animateView(RedlineTrace.pointFrame(project(stops[index]),cameraSpace(),baseView,level));
   }
   function resumeFromFocus(){
     if(focused===null||running)return false;
@@ -617,29 +668,9 @@
   $('previous-city').addEventListener('click',()=>stepTrip(-1));
   $('next-city').addEventListener('click',()=>stepTrip(1));
   // A click on a map control leaves the keys with the map, so Return sets sail rather than pressing it again.
-  for(const id of ['previous-city','next-city','zoom-in','zoom-out','reset-view','toggle-stops'])$(id).addEventListener('click',event=>{if(event.detail)map.focus({preventScroll:true});});
-  function collapseStops(collapsed){
-    $('route-dock').classList.toggle('stops-collapsed',collapsed);$('route-stops-panel').hidden=collapsed;
-    $('toggle-stops').setAttribute('aria-expanded',String(!collapsed));$('toggle-stops').setAttribute('aria-label',collapsed?'Show stops':'Collapse stops');$('toggle-stops').title=collapsed?'Show stops':'Collapse stops';
-    try{localStorage.setItem('redline-cities-collapsed',String(collapsed));}catch{}scheduleView();
-    // An animated dock reframes the camera once its height settles (or soon after, without transitions).
-    clearTimeout(dockTimer);
-    if($('route-dock').classList.contains('dock-motion')&&!matchMedia('(prefers-reduced-motion: reduce)').matches)dockTimer=setTimeout(settleDock,450);else settleDock();
-  }
-  // While the ports or the logbook fold, labels keep clear of the dock frame by frame; the last fold to end settles it.
-  const stopsPanel=$('route-stops-panel'),dockPanels=[stopsPanel,$('trip-panel')],dockMoving=new Set();let dockTimer=0,dockMovingUntil=0;
-  const dockSize=event=>dockPanels.includes(event.target)&&event.propertyName==='grid-template-rows';
-  const followDock=()=>{if(performance.now()>dockMovingUntil)return;if(!animation)scheduleView();requestAnimationFrame(followDock);};
-  function settleDock(){clearTimeout(dockTimer);dockTimer=0;dockMovingUntil=0;dockMoving.clear();scheduleView();reframeTrace();reframeCity();}
-  for(const panel of dockPanels){
-    panel.addEventListener('transitionrun',event=>{if(!dockSize(event))return;const idle=performance.now()>dockMovingUntil;dockMoving.add(panel);dockMovingUntil=performance.now()+600;clearTimeout(dockTimer);dockTimer=setTimeout(settleDock,600);if(idle)followDock();});
-    panel.addEventListener('transitionend',event=>{if(dockSize(event)&&dockMoving.delete(panel)&&!dockMoving.size)settleDock();});
-    // A cancelled fold (reversed, or hidden mid-way) is settled by whichever ends next, or the timer.
-    panel.addEventListener('transitioncancel',event=>{if(dockSize(event))dockMoving.delete(panel);});
-  }
-  // Only the user's toggle animates; the saved state is restored at once.
-  $('toggle-stops').addEventListener('click',()=>{$('route-dock').classList.add('dock-motion');collapseStops(!stopsPanel.hidden);});
-  try{collapseStops(localStorage.getItem('redline-cities-collapsed')==='true');}catch{}
+  for(const id of ['previous-city','play','next-city','zoom-in','zoom-out','reset-view'])$(id).addEventListener('click',event=>{if(event.detail)map.focus({preventScroll:true});});
+  // The stop list moved into the logbook, which folds on its own; an old preference has nothing left to hide.
+  try{localStorage.removeItem('redline-cities-collapsed');}catch{}
   function setMapOnly(hidden){
     document.body.classList.toggle('map-only',hidden);
     document.querySelectorAll('.route-dock,.zoom-controls,#trip-panel').forEach(el=>{el.inert=hidden;});
@@ -648,12 +679,12 @@
   $('info-button').addEventListener('click',()=>$('info-dialog').showModal());
   $('close-info').addEventListener('click',()=>$('info-dialog').close());
   $('info-dialog').addEventListener('click',event=>{if(event.target===$('info-dialog'))$('info-dialog').close();});
-  map.addEventListener('dblclick',()=>{if(document.body.classList.contains('map-only'))setMapOnly(false);});
+  map.addEventListener('dblclick',event=>{if(document.body.classList.contains('map-only'))setMapOnly(false);else zoom(event.shiftKey?2:.5,event.clientX,event.clientY);});
   document.addEventListener('keydown',event=>{
     if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"],#trip-panel')||document.querySelector('dialog[open]'))return;
     if(event.key==='Escape'&&document.body.classList.contains('map-only')){event.preventDefault();setMapOnly(false);return;}
-    if(event.key.toLowerCase()==='h'){event.preventDefault();setMapOnly(!document.body.classList.contains('map-only'));return;}
-    // Space or Return starts or resumes the trace, and holding either doubles the speed.
+    if(event.key.toLowerCase()==='h'){event.preventDefault();if(!event.repeat)setMapOnly(!document.body.classList.contains('map-only'));return;}
+    // Space or Return starts or resumes the trace, and holding either speeds it up.
     if(event.key===' '||event.key==='Enter'){
       if(event.target.closest?.('button,a,[role=button]')&&event.target.id!=='play')return;
       event.preventDefault();if(!held.has(event.key))held.set(event.key,performance.now());
@@ -674,38 +705,43 @@
   window.addEventListener('keydown',event=>{
     if(event.key!=='Escape'||event.isComposing)return;
     if(!event.defaultPrevented&&!event.repeat){
-      const dialog=document.querySelector('dialog[open]');
+      // The innermost dialog: the photo viewer sits inside the album, so the first one open is the wrong one.
+      const dialog=[...document.querySelectorAll('dialog[open]')].at(-1);
       if(dialog){if(dialog.dispatchEvent(new Event('cancel',{cancelable:true})))dialog.close();}
-      else if(running)stopAnimation();
+      else if(!endGlide()&&running)stopAnimation();
     }
     event.preventDefault();event.stopPropagation();
   });
   window.addEventListener('keyup',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();}});
   window.addEventListener('blur',()=>held.clear());
   document.addEventListener('visibilitychange',()=>{if(document.hidden){held.clear();lastTick=null;}});
-  atlas=RedlineAtlas.create($('land'),$('regions'),window.ATLAS_LAND,window.REGION_PATHS,$('country-borders'),window.ATLAS_BORDERS);
-  for(const polygon of window.ANTARCTICA_POLYGONS)$('antarctica').append(svg('path'));
-  for(const label of $('map-labels').children){label.dataset.mapX=label.getAttribute('x');label.dataset.mapY=label.getAttribute('y');label.dataset.mapRotation=label.getAttribute('transform')?.match(/rotate\(([-\d.]+)/)?.[1]||'0';label.setAttribute('x','0');label.setAttribute('y','0');}
+  // Route thumbnails draw on these simple shapes until the painted sheet is ready.
+  $('land').append(...window.ATLAS_LAND.map(d=>svg('path',{d})));
+  document.fonts?.ready?.then(()=>{labelWidths.clear();for(const text of $('route-stops').querySelectorAll('.stop-label'))text._width=labelWidth(text);lastLayout='';scheduleView();});
+  // The chart's title piece follows the trip's name.
+  new MutationObserver(()=>{lastLayout='';scheduleView();}).observe($('trip-title'),{childList:true,characterData:true,subtree:true});
   const photoVisibility=new MutationObserver(()=>{
     const hidden=$('photo-panel').open||$('photo-viewer').open;
     if(hidden===mapOccluded)return;mapOccluded=hidden;
-    if(hidden)paintRelief(view,0);else{lastLayout='';scheduleView();}
+    if(hidden)atlasView.release();else{lastLayout='';scheduleView();}
   });
   for(const id of ['photo-panel','photo-viewer'])photoVisibility.observe($(id),{attributes:true,attributeFilter:['open']});
   window.RedlineApp={
     showControls:()=>setMapOnly(false),
     closeSearch,
     refreshLayout:scheduleView,
+    atlas:atlasView,
     focusStop:id=>{const index=stops.findIndex(p=>p.id===id);if(index>=0){jumpToCity(index);map.focus({preventScroll:true});}return index>=0;},
     getStops:()=>stops.map(p=>({...p})),
-    setStops:(items,{preserveView=false,preserveHistory=false}={})=>{if(!preserveHistory){undoStack.length=0;redoStack.length=0;updateUndo();}stops=items.map(p=>({...p,id:p.id||crypto.randomUUID()}));if(!preserveView)drawRoute();persist();},
+    isStarterRoute:()=>stops.length===3&&stops.every((s,i)=>s.name===places[i].name&&s.latitude===places[i].latitude&&s.longitude===places[i].longitude),
+    setStops:(items,{preserveView=false,preserveHistory=false}={})=>{if(!preserveHistory){undoStack.length=0;redoStack.length=0;updateUndo();if(!preserveView)view={...baseView};}stops=items.map(p=>({...p,id:p.id||crypto.randomUUID()}));if(!preserveView)drawRoute();persist();},
     addCity:place=>{let existing=stops.find(p=>Math.abs(p.latitude-place.latitude)<.02&&Math.abs(p.longitude-place.longitude)<.02);if(existing)return {...existing};if(stops.length>=100)throw Error('A trip can contain up to 100 stops.');const added={...place,id:crypto.randomUUID()};checkpoint('add city');stops.push(added);drawRoute();persist();return {...added};},
     cityDistance:(a,b)=>RedlineGeo.geoDistance([a.longitude,a.latitude],[b.longitude,b.latitude])*6371,
   };
   new ResizeObserver(resizeMap).observe(map);
-  // Dock size changes without a fold animation (reduced motion, the logbook's list filling in) still move the labels.
+  // The dock or the logbook changing size (its list filling in) moves the labels.
   const overlayObserver=new ResizeObserver(()=>{if(!animation)scheduleView();});
   overlayObserver.observe($('route-dock'));overlayObserver.observe($('trip-panel'));
   drawRoute();resizeMap();
-  window.RedlineMapIntro?.start();
+  window.RedlineMapIntro?.start(atlasView);
 })();

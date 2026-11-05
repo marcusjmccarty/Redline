@@ -13,7 +13,7 @@
 #choose-photos:hover:not(:disabled) { border-color: #892b24; background: #892b24; }
 .small-button.primary-button:hover:not(:disabled) { border-color: var(--red-dark); background: var(--red-dark); }
 .primary-button svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
-.album select, #photo-viewer select {
+.album select {
   appearance: none; -webkit-appearance: none; min-width: 0; min-height: 32px; padding: 6px 26px 6px 9px;
   border: 1px solid var(--line); border-radius: 2px; color: var(--ink); font: 12px Arial, sans-serif; text-overflow: ellipsis; cursor: pointer;
   background: var(--paper-high) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='m1 1 4 4 4-4' fill='none' stroke='%23685c49' stroke-width='1.3'/%3E%3C/svg%3E") no-repeat right 9px center / 9px 6px;
@@ -21,7 +21,9 @@
 }
 .album select:hover:not(:disabled) { border-color: var(--brass); }
 .album :is(input, select):focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
-.danger-button { color: var(--red); }
+/* Red falls under 3:1 on the album's dark chrome, so the ring turns to paper there. */
+.album :is(.album-top, .album-foot, #album-drawer) :focus-visible { outline-color: var(--paper); }
+.danger-button { color: #8b3f2e; }
 .danger-button:hover:not(:disabled) { color: #7c211a; text-decoration: underline; }
 .away { opacity: 0 !important; pointer-events: none !important; }
 
@@ -50,9 +52,9 @@
 .album:focus { outline: none; }
 .album-top { display: flex; align-items: center; gap: 14px; padding: 16px 22px 6px; }
 .album-title { flex: 1; min-width: 0; }
-.album-title h2 { margin: 0; color: #f8f1e2; font: normal 24px/1.1 Georgia, serif; }
+.album-title h2 { margin: 0; color: #f8f1e2; font: normal 24px/1.1 var(--serif); }
 .album-subtitle { display: flex; gap: 6px; margin: 5px 0 0; overflow: hidden; color: #d9ccb3; font: 12px Arial, sans-serif; white-space: nowrap; }
-#photo-trip-name { overflow: hidden; text-overflow: ellipsis; font: italic 13px Georgia, serif; }
+#photo-trip-name { overflow: hidden; text-overflow: ellipsis; font: italic 13px var(--serif); }
 #photo-trip-name:not(:empty) + #gallery-count:not(:empty)::before { content: '·'; margin-right: 6px; }
 .album-modes { display: flex; padding: 3px; border: 1px solid #ffffff38; border-radius: 18px; transition: opacity .25s; }
 .album-modes button { padding: 6px 13px; border: 0; border-radius: 14px; background: none; color: var(--paper-low); font: 12px Arial, sans-serif; transition: background-color .25s, color .25s; }
@@ -65,14 +67,17 @@
 .album .close-panel:hover { background: #ffffff1f; color: #fff; }
 .album .small-button { min-height: 34px; padding: 7px 13px; font-size: 12px; }
 .album-stage { container-type: size; position: relative; display: flex; align-items: center; justify-content: center; gap: 0; min-height: 0; height: 100%; padding: 4px 24px; }
-.album-book { isolation: isolate; --tab-width: 126px; --turn-duration: 900ms; --turn-ease: cubic-bezier(.4,0,.2,1); --pad: clamp(10px, 1.4cqh, 16px); position: relative; flex: none; height: min(100cqh - 8px, (100cqw - 2 * var(--tab-width) - 28px) / 1.5, 840px); aspect-ratio: 1.5; padding: var(--pad) calc(var(--pad) + 2px); transition: transform .32s var(--ease-out), translate .32s var(--ease-out); transform-origin: 50% 60%; }
+.album-book { isolation: isolate; --tab-width: 126px; --turn-duration: 900ms; --turn-ease: cubic-bezier(.4,0,.2,1); --pad: clamp(10px, 1.4cqh, 16px); position: relative; flex: none; height: min(100cqh - 8px, (100cqw - 2 * var(--tab-width) - 28px) / 1.5, 840px); aspect-ratio: 1.5; padding: var(--pad) calc(var(--pad) + 2px); transition: translate .32s var(--ease-out); }
 .album-book::before { z-index: 0; content: ''; position: absolute; inset: 0; border-radius: 9px 14px 14px 9px; background: var(--leather); box-shadow: 0 34px 90px #000a, 0 0 0 1px #0007, inset 0 1px 0 #ffffff14, inset 0 0 0 6px #00000014; transition: opacity .45s ease .25s; }
 .album-book:is(.closed-front, .closed-back)::before { opacity: 0; transition-delay: 0s; }
-.album-pages { z-index: 2; --read: 0; position: relative; display: grid; grid-template-columns: 1fr 1fr; height: 100%; perspective: 2800px; border-radius: 3px; transition: translate var(--turn-duration) var(--turn-ease), box-shadow .25s ease;
+/* A sideways swipe turns the page: left to the browser it would become a pan, ending in pointercancel with no turn. */
+.album-pages { z-index: 2; --read: 0; position: relative; display: grid; grid-template-columns: 1fr 1fr; height: 100%; perspective: 2800px; border-radius: 3px; touch-action: pan-y pinch-zoom; transition: translate var(--turn-duration) var(--turn-ease), box-shadow .25s ease;
   box-shadow: calc(-.6px - var(--read) * 3px) 0 0 var(--paper-low), calc(-1.4px - var(--read) * 5px) 0 0 var(--paper-low), calc(-2px - var(--read) * 6px) 0 0 var(--paper), calc(.6px + (1 - var(--read)) * 3px) 0 0 var(--paper-low), calc(1.4px + (1 - var(--read)) * 5px) 0 0 var(--paper-low), calc(2px + (1 - var(--read)) * 6px) 0 0 var(--paper); }
 .album-pages::after { content: ''; position: absolute; z-index: 2; top: 0; bottom: 0; left: 50%; width: 46px; transform: translateX(-50%); pointer-events: none; background: linear-gradient(90deg, #0000, #5143301c 40%, #51433040 50%, #5143301c 60%, #0000); transition: opacity .4s; }
 .closed-front .album-pages { translate: -25% 0; box-shadow: none; }
-.closed-back .album-pages { translate: 25% 0; box-shadow: none; }
+/* Beside the back cover, the box's empty half lies over the tabs and must not take their clicks or wheel. Raising the rail instead would paint it over a turning leaf. */
+.closed-back .album-pages { translate: 25% 0; box-shadow: none; pointer-events: none; }
+.closed-back .album-pages > * { pointer-events: auto; }
 :is(.closed-front, .closed-back) .album-pages::after { opacity: 0; }
 .album-pages.single { grid-template-columns: 1fr; translate: none; box-shadow: 2px 0 0 var(--paper-low), 4px 0 0 var(--paper-low), 5px 0 0 var(--paper); }
 :is(.closed-front, .closed-back) .album-pages.single { box-shadow: none; }
@@ -83,7 +88,7 @@
 .album-page.single { border-radius: 0 3px 3px 0; box-shadow: inset 18px 0 26px -22px #51433080; }
 .album-page.void { visibility: hidden; }
 .album-page.page-blank { background-image: radial-gradient(120% 90% at 50% 40%, #0000 60%, #8a6a3c14); }
-.folio { position: absolute; bottom: 3.2%; color: var(--paper-edge); font: italic 12px Georgia, serif; }
+.folio { position: absolute; bottom: 3.2%; color: var(--muted); font: italic 12px var(--serif); }
 .album-page.left .folio { left: 6.5%; }
 .album-page.right .folio, .album-page.single .folio { right: 6.5%; }
 .page-corner { position: absolute; z-index: 4; bottom: 0; width: 64px; height: 64px; padding: 0; border: 0; background: none; opacity: 0; transition: opacity .25s ease; cursor: pointer; }
@@ -91,6 +96,12 @@
 .album-page.left .page-corner { left: 0; background: linear-gradient(45deg, #0000 0 36%, var(--paper-low) 37%, var(--paper) 50%, #0000 51%); filter: drop-shadow(2px -2px 3px #51433040); }
 .album-page:hover .page-corner { opacity: 1; }
 .leaf-face .page-corner { display: none; }
+/* Without hover a corner is an invisible button over the prints, and a swipe turns the page anyway. Window view has no other visible way to turn, so there it shows, smaller. */
+@media (hover: none) {
+  .page-corner { display: none; }
+  .album.expanded .page-corner { display: block; width: 44px; height: 44px; opacity: 1; }
+  .album.expanded :is(.leaf-face, .album-snapshot) .page-corner { display: none; }
+}
 
 /* A few unturned leaves sit above the city dividers, dwindling at the end. */
 .album-book::after { content: ''; position: absolute; z-index: 3; top: calc(var(--pad) + 2px); bottom: calc(var(--pad) + 2px); right: calc(var(--pad) + 2px - var(--page-depth, 6px)); width: var(--page-depth, 6px); background: repeating-linear-gradient(90deg, var(--paper-low) 0 1px, var(--paper-edge) 1px 2px); border-radius: 0 2px 2px 0; pointer-events: none; }
@@ -102,9 +113,7 @@
 .album-book:is([data-cover-motion], [data-preparing])::before,
 .album-book:is([data-cover-motion], [data-preparing])::after { visibility: hidden; }
 .album-book[data-preparing] > .album-tabs { visibility: hidden; }
-.album-loading-cover { position: absolute; z-index: 7; top: var(--pad); bottom: var(--pad); left: calc(25% + var(--pad) / 2 + 1px); width: calc(50% - var(--pad) - 2px); }
 .album-arrival { position: absolute; z-index: 7; inset: 0; will-change: transform; }
-.album[data-motion=opening] .album-loading-cover { visibility: hidden; }
 .album-cover-scene { position: absolute; z-index: 7; inset: var(--pad) calc(var(--pad) + 2px); isolation: isolate; }
 .album-cover-hinge { position: absolute; z-index: 3; inset: 0; perspective: 2800px; pointer-events: none; }
 .album-cover-scene::before { content: ''; position: absolute; top: calc(-1 * var(--pad)); bottom: calc(-1 * var(--pad)); left: 50%; right: calc(-1 * var(--pad) - 2px); border-radius: 3px 8px 8px 3px; background: var(--leather); box-shadow: 0 24px 60px #0008; }
@@ -152,14 +161,15 @@
 /* Settle hidden layout transitions before taking or releasing a spread. */
 .album-book:is([data-cover-preparing], [data-preparing], [data-cover-motion]) :is(.album-pages, .album-sheet, .album-tabs),
 .album-book:is([data-cover-preparing], [data-preparing], [data-cover-motion])::before { transition: none !important; animation: none !important; }
-.album-book .album-cover-scene .album-tabs { z-index: 0; left: calc(100% - 18px); transition: none; }
+/* The scene is inset from the book by its padding, so these place the rail exactly where the live one lies, with no jump at the hand-off. album-motion.js pins its height. */
+.album-book .album-cover-scene .album-tabs { z-index: 0; left: calc(100% + 2px - var(--tab-root, 28px)); top: 5px; bottom: 5px; transition: none; }
 .album-cover-scene.single .album-cover-leaf { left: 0; width: 100%; }
 .album-cover-scene.single .album-cover-still { width: 100%; }
 .album-cover-scene.single::before { left: -5px; }
 .album-cover-scene.single .album-cover-back { background: var(--leather); }
 .album-cover-scene.closed-book .album-cover-leaf { left: 25%; width: 50%; transform-origin: center; }
 .album-cover-scene.closed-book::before, .album-cover-scene.closed-book::after { display: none; }
-.album-book .album-cover-scene.closed-book .album-tabs { left: calc(75% - 18px); }
+.album-book .album-cover-scene.closed-book .album-tabs { left: calc(75% + 1px - var(--tab-root, 28px)); }
 .album-cover-scene.closed-book.single .album-cover-leaf { left: 0; width: 100%; }
 
 /* Turning leaves */
@@ -204,42 +214,42 @@
 .cover-plate { display: flex; flex-direction: column; align-items: center; gap: clamp(4px, 2cqh, 8px); width: 70%; padding: clamp(12px, 7cqh, 28px) clamp(10px, 4.5cqh, 18px) clamp(10px, 6cqh, 24px); border: 1px solid #c4ad7e66; border-radius: 3px; text-align: center; background: #00000014; }
 .album-cover .cover-plate { align-self: start; margin-top: calc(clamp(22px, 16cqh, 112px) + 4px); }
 .cover-emblem { width: clamp(24px, 11.5cqh, 46px); height: clamp(24px, 11.5cqh, 46px); margin-bottom: 4px; }
-.cover-kicker { margin: 0; font: 10px Georgia, serif; letter-spacing: 3.4px; text-transform: uppercase; }
-.cover-title { margin: 0; font: italic clamp(15px, 6cqh, clamp(22px, 2.6svh - 3.5px, 34px))/1.15 Georgia, serif; overflow-wrap: anywhere; text-shadow: 0 1px 0 #0008, 0 -1px 0 #fff2; }
-.cover-meta { margin: 0; font: 11px Georgia, serif; letter-spacing: 1px; opacity: .8; }
+.cover-kicker { margin: 0; font: 10px var(--serif); letter-spacing: 3.4px; text-transform: uppercase; }
+.cover-title { margin: 0; font: italic clamp(15px, 6cqh, clamp(22px, 2.6svh - 3.5px, 34px))/1.15 var(--serif); overflow-wrap: anywhere; text-shadow: 0 1px 0 #0008, 0 -1px 0 #fff2; }
+.cover-meta { margin: 0; color: #d8c59a; font: 11px var(--serif); letter-spacing: 1px; }
 .cover-rule, .bookplate-rule { display: block; width: 40%; height: 1px; margin: clamp(3px, 2.5cqh, 10px) auto; background: currentColor; opacity: .5; }
-.back-mark { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: auto; padding-bottom: 14%; opacity: .75; }
+.back-mark { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: auto; padding-bottom: 14%; color: #d8c59a; }
 .back-mark svg { width: 30px; height: 30px; }
-.back-mark p { margin: 0; font: 10px Georgia, serif; letter-spacing: 3px; text-transform: uppercase; }
+.back-mark p { margin: 0; font: 10px var(--serif); letter-spacing: 3px; text-transform: uppercase; }
 .album-page.page-inside { justify-content: center; align-items: center; background-color: #4f5f59; background-image: radial-gradient(circle at 50% 50%, #c4ad7e59 0 1.3px, #0000 1.8px), radial-gradient(circle at 50% 50%, #c4ad7e38 0 1px, #0000 1.5px), linear-gradient(45deg, #0000 47%, #ffffff0a 48% 52%, #0000 53%), linear-gradient(-45deg, #0000 47%, #ffffff0a 48% 52%, #0000 53%); background-size: 22px 22px; background-position: 0 0, 11px 11px, 0 0, 0 0; }
 .bookplate { width: max(64%, min(92%, 170px)); padding: clamp(8px, 7cqh, 26px) clamp(8px, 5cqh, 20px); text-align: center; color: #5a4632; background: var(--paper); border: 1px solid var(--paper-edge); box-shadow: 0 0 0 5px var(--paper), 0 0 0 6px var(--paper-edge), 0 10px 24px #0005; }
-.bookplate-label { margin: 0; font: 10px Georgia, serif; letter-spacing: 2px; text-transform: uppercase; }
-.bookplate-title { margin: clamp(4px, 2.5cqh, 10px) 0 0; color: #3e2f20; font: clamp(16px, 7.5cqh, 28px)/1.15 var(--hand); overflow-wrap: anywhere; }
+.bookplate-label { margin: 0; font: 10px var(--serif); letter-spacing: 2px; text-transform: uppercase; }
+.bookplate-title { margin: clamp(4px, 2.5cqh, 10px) 0 0; color: #3e2f20; font: clamp(16px, 7.5cqh, 28px)/1.15 var(--lettering); overflow-wrap: anywhere; }
 .album-page.page-title, .album-page.page-contents { justify-content: safe center; }
 .title-block { display: flex; flex-direction: column; align-items: center; gap: clamp(3px, 2cqh, 8px); min-height: 0; text-align: center; }
-.album-name { margin: 0; color: #3a2c1e; font: clamp(20px, 10cqh, 44px)/1.1 var(--hand); overflow-wrap: anywhere; }
-.title-meta { margin: 0; color: var(--muted); font: 12px Georgia, serif; letter-spacing: .3px; }
+.album-name { margin: 0; color: #3a2c1e; font: clamp(20px, 10cqh, 44px)/1.1 var(--lettering); overflow-wrap: anywhere; }
+.title-meta { margin: 0; color: var(--muted); font: 12px var(--serif); letter-spacing: .3px; }
 /* The map gives up height last of all, if the words still need room. */
 .title-map { width: min(92%, 72cqh); min-height: 0; margin: clamp(4px, 3cqh, 14px) 0 clamp(2px, 1.7cqh, 8px); aspect-ratio: 1.6; padding: 6px; background: #fbf6ea; box-shadow: 0 1px 2px #51433040, 0 12px 22px -10px #51433066; transform: rotate(-1deg); }
 .title-map .route-map { display: block; width: 100%; height: 100%; }
-.title-route { max-width: 92%; margin: 4px 0 0; color: var(--ink); font: italic 13px/1.5 Georgia, serif; }
+.title-route { max-width: 92%; margin: 4px 0 0; color: var(--ink); font: italic 13px/1.5 var(--serif); }
 .contents { display: flex; flex-direction: column; gap: 2px; }
-.contents-title { margin: 0 0 clamp(4px, 2.2cqh, 18px); color: var(--ink); font: clamp(18px, 6cqh, 38px)/1.1 var(--hand); }
+.contents-title { margin: 0 0 clamp(4px, 2.2cqh, 18px); color: var(--ink); font: clamp(18px, 6cqh, 38px)/1.1 var(--lettering); }
 .contents-list { margin: 0; padding: 0; list-style: none; }
-.contents-list button { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: clamp(2px, 1.1cqh, 7px) 2px; border: 0; background: none; color: var(--page-ink); text-align: left; font: clamp(12px, 5.5cqh, 16px) Georgia, serif; transition: color .2s; }
+.contents-list button { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: clamp(2px, 1.1cqh, 7px) 2px; border: 0; background: none; color: var(--page-ink); text-align: left; font: clamp(12px, 5.5cqh, 16px) var(--serif); transition: color .2s; }
 .contents-list button:hover { color: var(--red); }
-.contents-no { flex: none; width: 22px; color: var(--red); font: 10px Georgia, serif; letter-spacing: 1px; }
+.contents-no { flex: none; width: 22px; color: var(--red); font: 10px var(--serif); letter-spacing: 1px; }
 .contents-name { flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .contents-dots { flex: 1; min-width: 20px; border-bottom: 1.5px dotted var(--line); transform: translateY(-4px); }
-.contents-page { flex: none; color: var(--muted); font: italic .875em Georgia, serif; }
+.contents-page { flex: none; color: var(--muted); font: italic .875em var(--serif); }
 
 /* City pages and their prints */
 .page-head { position: relative; flex: none; margin-bottom: 3%; padding-right: 40px; }
-.page-stop { color: var(--red); font: 9px Georgia, serif; letter-spacing: 2.2px; text-transform: uppercase; }
+.page-stop { color: var(--red); font: 9px var(--serif); letter-spacing: 2.2px; text-transform: uppercase; }
 /* A city page measures its own width, so a port's name shrinks to fit a narrow page instead of breaking mid-word. */
 .album-page.page-city { container-type: inline-size; }
-.city-name { margin: 2px 0 0; color: var(--ink); font: clamp(14px, min(max(28px, 4.4cqh), (100cqi - 40px) / 6.5), 46px)/1.05 var(--hand); overflow-wrap: anywhere; }
-.page-country { margin: 4px 0 0; color: var(--muted); font: 11px Georgia, serif; }
+.city-name { margin: 2px 0 0; color: var(--ink); font: clamp(14px, min(max(28px, 4.4cqh), (100cqi - 40px) / 6.5), 46px)/1.05 var(--lettering); overflow-wrap: anywhere; }
+.page-country { margin: 4px 0 0; color: var(--muted); font: 11px var(--serif); }
 .page-head .gallery-map-button { position: absolute; top: 2px; right: 0; border-radius: 50%; color: var(--muted); }
 .page-head .gallery-map-button:hover { background: #b7a68833; color: var(--red); }
 .page-head.continued { margin-bottom: 2%; color: var(--muted); font: 17px var(--hand); }
@@ -272,18 +282,29 @@
 
 /* Divider tabs and page controls */
 /* Narrow, layered divider tabs: labels read clockwise down the book edge. */
-.album-tabs { position: absolute; z-index: 1; isolation: isolate; left: calc(100% - var(--pad) - 18px); top: 50%; width: calc(var(--tab-width) + 22px); height: min(82%, calc(var(--tab-rows, 4) * 104px + 12px)); display: grid; grid-auto-flow: column; grid-template-rows: repeat(var(--tab-rows, 4), 104px); grid-auto-columns: 28px; align-content: start; margin: 0; padding: 6px 6px 6px 0; transform: translateY(-50%); overflow: hidden auto; clip-path: inset(0 0 0 calc(18px + var(--page-depth, 6px))); scrollbar-width: none; overscroll-behavior: contain; transition: left var(--turn-duration) var(--turn-ease); }
+.album-tabs { position: absolute; z-index: 1; isolation: isolate; left: calc(100% - var(--pad) - var(--tab-root, 28px)); top: calc(var(--pad) + 5px); bottom: calc(var(--pad) + 5px); width: calc(var(--tab-root, 28px) + var(--tab-width) + 14px); margin: 0; padding: 0; overflow: hidden auto; clip-path: inset(0 0 0 calc(var(--tab-root, 28px) + var(--page-depth, 6px))); scrollbar-width: none; overscroll-behavior: contain; transition: left var(--turn-duration) var(--turn-ease); }
 .album-tabs::-webkit-scrollbar { display: none; }
-.album-tab { display: flex; align-items: center; justify-content: center; position: relative; z-index: var(--tab-order, 0); width: 54px; height: 106px; translate: 0 calc(var(--tab-column, 0) * 3px); padding: 7px 5px 7px 28px; border: 0; border-radius: 0 5px 5px 0; background: linear-gradient(90deg, #6b2c2a 0 16.667%, #2f4b3b 0 33.333%, #2d3c58 0 50%, #6c4f1e 0 66.667%, #583450 0 83.333%, #465360 0) calc((var(--tab, 0) * 2 + .5) * 100% / 11) 0 / 1200% 100%; color: #fbf4e6; font: 11px Georgia, serif; text-align: center; box-shadow: 1px 2px 3px #0004, inset 0 1px 0 #ffffff26; transition: filter .18s, box-shadow .18s; }
-.album-tab::before { content: ''; position: absolute; z-index: -1; right: 100%; top: 0; bottom: 0; width: calc(var(--tab-column, 0) * 28px); background: inherit; }
-.album-tab:hover:not(:disabled), .album-tab:focus-visible { filter: brightness(1.18); }
-.album-tab[aria-current=true] { filter: brightness(1.2); box-shadow: 1px 2px 4px #0005, inset -2px 0 0 #f4dfae; }
-.album-tab:nth-child(even) { border-bottom-right-radius: 8px; }
-.album-tab .chip-stop { display: block; position: absolute; left: 28px; top: 6px; width: 26px; color: #f5e6c8; font: 8px Georgia, serif; text-align: center; opacity: .82; }
-.album-tab .chip-count { display: block; text-align: center; position: absolute; left: 28px; bottom: 6px; width: 26px; font: 8px Arial, sans-serif; opacity: .85; }
-.album-tab .tab-name { writing-mode: vertical-rl; text-orientation: sideways; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-height: 68px; }
-.album-tab:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
-.album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs { left: calc(75% - var(--pad) / 2 - 18px); }
+/* More tabs beyond an end of the rail: a quiet fade, set by railEnds in trips.js. */
+.album-tabs:is([data-more-start], [data-more-end]) { -webkit-mask-image: linear-gradient(#0000, #000 var(--fade-start, 0px), #000 calc(100% - var(--fade-end, 0px)), #0000); mask-image: linear-gradient(#0000, #000 var(--fade-start, 0px), #000 calc(100% - var(--fade-end, 0px)), #0000); }
+.album-tabs[data-more-start] { --fade-start: 28px; }
+.album-tabs[data-more-end] { --fade-end: 28px; }
+/* One die-cut cloth divider. Its root runs behind the page edge and behind the columns in front of it. */
+.album-tab { --cloth: #6e2a22; position: absolute; z-index: var(--tab-order, 0); left: 0; top: calc(var(--tab-row, 0) * var(--tab-h, 100px)); width: calc(var(--tab-root, 28px) + (var(--tab-column, 0) + 1) * var(--tab-strip, 27px)); height: calc(var(--tab-h, 100px) - 2px); padding: 0; border: 0; border-radius: 0 10px 10px 0 / 0 14px 14px 0; background: linear-gradient(90deg, #0000 55%, #ffffff14), var(--paper-grain), var(--cloth); background-size: auto, 64px 64px, auto; background-blend-mode: normal, overlay, normal; color: #f8ecd0; text-align: center; box-shadow: 1px 1px 3px #0006, inset -1px 0 0 #f2dfae40, inset 0 1px 0 #ffffff24, inset 0 -1px 0 #00000038; transition: translate .22s var(--ease-out), filter .18s; }
+.album-tab:nth-child(6n+2) { --cloth: #3f5236; }
+.album-tab:nth-child(6n+3) { --cloth: #2f3f57; }
+.album-tab:nth-child(6n+4) { --cloth: #76561f; }
+.album-tab:nth-child(6n+5) { --cloth: #553350; }
+.album-tab:nth-child(6n+6) { --cloth: #5b4531; }
+.album-tab:hover:not(:disabled), .album-tab:focus-visible { translate: 3px 0; filter: brightness(1.14); }
+.album-tab[aria-current=true] { translate: 5px 0; filter: brightness(1.22) saturate(1.1); box-shadow: 2px 2px 6px #0007, inset -2px 0 0 #f2dfae, inset 0 1px 0 #ffffff2e, inset 0 -1px 0 #00000038; }
+.album-tab .tab-name, .album-tab .chip-stop { position: absolute; right: 0; width: var(--tab-strip, 27px); }
+.album-tab .tab-name { top: 7px; bottom: 19px; display: block; writing-mode: vertical-rl; text-orientation: sideways; overflow: hidden; font: 14px/var(--tab-strip, 27px) var(--lettering); letter-spacing: .05em; text-align: center; text-overflow: ellipsis; text-shadow: 0 1px 1px #0006; white-space: nowrap; }
+.album-tab .chip-stop { bottom: 5px; color: #f6e8c4; font: 10px/1.2 var(--serif); }
+/* Raised, or the ring is hidden behind the columns in front of it. */
+.album-tab:focus-visible { z-index: 1001; outline: 2px solid #f2dfae; outline-offset: -3px; }
+.album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs { left: calc(75% - var(--pad) / 2 - var(--tab-root, 28px)); }
+/* A shut book has no leaves showing, so its tabs start at the cover's own edge. */
+.album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs, .album-book .album-cover-scene.closed-book .album-tabs { clip-path: inset(0 0 0 calc(var(--tab-root, 28px) - 2px)); }
 .album-foot { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 4px 20px calc(14px + env(safe-area-inset-bottom)); transition: opacity .3s, transform .3s var(--ease-out); }
 .album-foot.away { transform: translateY(10px); }
 .album-turn { display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 1px solid #ffffff38; border-radius: 50%; background: #ffffff0f; color: var(--paper); transition: background-color .2s, transform .2s var(--ease-out), opacity .2s; }
@@ -292,7 +313,7 @@
 .album-turn:active:not(:disabled) { transform: scale(.92); }
 .album-turn:disabled { opacity: .25; }
 .album-where { display: flex; flex-direction: column; align-items: center; gap: 7px; min-width: 260px; }
-#album-position { min-height: 17px; color: var(--paper); font: 13px Georgia, serif; }
+#album-position { min-height: 17px; color: var(--paper); font: 13px var(--serif); }
 #album-scrub { width: 260px; height: 16px; accent-color: var(--gold); cursor: pointer; }
 .album #photo-message { position: fixed; z-index: 4; left: 50%; bottom: 92px; max-width: min(520px, calc(100vw - 32px)); margin: 0; padding: 9px 16px; border-radius: 18px; background: #2b2119f0; color: var(--paper); box-shadow: 0 10px 30px #0006; transform: translateX(-50%); animation: toast-in .35s var(--ease-out); }
 .album #photo-message.error { background: #7c211af2; color: #fff; }
@@ -302,7 +323,7 @@
 .album-book:is([data-mode=sheet], [data-mode=review])::before { opacity: 1; }
 .album-book:is([data-mode=sheet], [data-mode=review]) .album-sheet::after, .album-view-layer .album-sheet::after { content: ''; position: absolute; z-index: 4; pointer-events: none; top: 0; bottom: 0; left: 50%; width: 32px; transform: translateX(-50%); background: linear-gradient(90deg, #0000, #74563208 35%, #74563220 49%, #fff8e84a 52%, #74563208 67%, #0000); }
 .gallery-toolbar, .gallery-actions, .photo-bulk { flex: none; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 9px 22px; border-bottom: 1px solid #b7a68844; }
-.sheet-label { flex: 1; color: var(--muted); font: italic 15px Georgia, serif; }
+.sheet-label { flex: 1; color: var(--muted); font: italic 15px var(--serif); }
 .toolbar-button { flex: none; padding: 6px 4px; font-size: 13px; }
 .gallery-actions { background: var(--paper-low); animation: bar-in .3s var(--ease-out); }
 :is(#gallery-selection-count, .album-copy-gallery-selection-count) { color: var(--ink); font: 12px Arial, sans-serif; white-space: nowrap; }
@@ -314,7 +335,7 @@
 .photo-progress span { display: block; width: calc(var(--progress, 0) * 100%); height: 100%; background: var(--red); transition: width .3s var(--ease-out); }
 .photo-scroll { contain: layout paint; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 0 24px; scrollbar-width: thin; scrollbar-color: var(--paper-edge) transparent; }
 .gallery-city-heading { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 16px 22px 10px; background: var(--page); }
-.gallery-stop-number { align-self: flex-start; margin-top: 7px; color: var(--red); font: 10px Georgia, serif; }
+.gallery-stop-number { align-self: flex-start; margin-top: 7px; color: var(--red); font: 10px var(--serif); }
 .gallery-city-place { flex: 1; min-width: 0; }
 :is(#photo-gallery, .album-copy-photo-gallery) .gallery-city h3 { margin: 0; overflow: hidden; color: var(--ink); font: 26px/1.1 var(--hand); text-overflow: ellipsis; white-space: nowrap; }
 .gallery-city-country { margin: 2px 0 0; color: var(--muted); font: 10px/1.4 Arial, sans-serif; letter-spacing: .3px; }
@@ -366,7 +387,6 @@
 .review-photo .photo-image { position: relative; display: block; width: 100%; aspect-ratio: 4 / 3; padding: 0; border: 4px solid var(--mat); border-radius: 1px; overflow: hidden; background: var(--paper-low); box-shadow: 0 1px 2px #43372a40, 0 8px 14px -8px #43372a66; cursor: zoom-in; }
 .review-photo .photo-image img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .4s ease; }
 .review-photo .photo-image.loaded img { opacity: 1; }
-.review-photo:not(.selected) .photo-image img { opacity: .5; filter: grayscale(.3); }
 .photo-pick { position: absolute; z-index: 1; top: 0; left: 0; display: grid; place-items: center; width: 44px; height: 44px; cursor: pointer; }
 .photo-pick .photo-check { width: 22px; height: 22px; }
 .photo-pick input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
@@ -388,7 +408,7 @@
 .gps-badge svg { width: 13px; height: 13px; fill: none; stroke: var(--red); stroke-width: 1.4; }
 .photo-import-actions { flex: none; display: flex; align-items: center; gap: 14px; padding: 13px 22px; border-top: 1px solid #b7a68855; background: var(--paper-low); animation: bar-in .3s var(--ease-out); }
 :is(#cancel-photo-import, .album-copy-cancel-photo-import) { padding: 8px 0; font-size: 12px; }
-#photo-ready-count { flex: 1; color: #8b5a46; font: 11px/1.4 Arial, sans-serif; text-align: right; }
+:is(#photo-ready-count, .album-copy-photo-ready-count) { flex: 1; color: #7f5040; font: 11px/1.4 Arial, sans-serif; text-align: right; }
 #photo-drop-hint { position: absolute; z-index: 8; inset: var(--pad); display: grid; place-items: center; border: 2px dashed var(--gold); border-radius: 4px; background: #2b2119d9; color: var(--paper); font: 30px var(--hand); pointer-events: none; animation: fade-in .2s ease; }
 
 /* The viewer: one paper card that turns over to its postcard. */
@@ -398,22 +418,25 @@
 #photo-viewer.flip-motion { animation: card-lift .9s var(--ease-in-out); }
 #photo-viewer.changing-photo { transition: none; }
 #postcard-stage { width: fit-content; max-width: 100%; transform-style: preserve-3d; }
-#postcard-card { position: relative; width: fit-content; max-width: 100%; height: auto; transform-style: preserve-3d; }
+/* A narrow photo sits centred on the paper, so the card always has room for its toolbar and the back's buttons. */
+#postcard-card { position: relative; width: fit-content; min-width: min(240px, calc(90vw - 40px)); max-width: 100%; height: auto; transform-style: preserve-3d; }
 .postcard-face { overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 #postcard-front { position: relative; }
-#postcard-back { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 4%; border: 0; background: var(--paper); color: var(--ink); transform: rotateY(180deg); }
+/* Percentage padding follows the card's width, which on a wide panorama would eat the height the fields need. */
+#postcard-back { position: absolute; inset: 0; display: flex; flex-direction: column; padding: clamp(10px, 4%, 24px); border: 0; background: var(--paper); color: var(--ink); transform: rotateY(180deg); }
 #photo-viewer.flipped #postcard-error { transform: rotateY(180deg); }
 #postcard-error { max-width: 650px; margin: 8px 0 0; }
 .viewer-photo { position: relative; overflow: hidden; }
-#full-photo { display: block; width: auto; height: auto; max-width: calc(90vw - 40px); max-height: min(75svh, calc(90svh - 96px)); object-fit: contain; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: pan-y pinch-zoom; }
-.viewer-ghost { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+#full-photo { display: block; width: auto; height: auto; margin-inline: auto; max-width: calc(90vw - 40px); max-height: min(75svh, calc(90svh - 96px)); object-fit: contain; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: pan-y pinch-zoom; }
+.viewer-ghost { position: absolute; object-fit: contain; pointer-events: none; }
 .viewer-edge { position: absolute; z-index: 1; top: 0; bottom: 0; display: flex; align-items: center; width: 22%; max-width: 140px; padding: 0 12px; border: 0; background: none; opacity: 0; transition: opacity .45s cubic-bezier(.4,0,.2,1); cursor: pointer; touch-action: pan-y pinch-zoom; }
 .viewer-edge.previous { left: 0; justify-content: flex-start; }
 .viewer-edge.next { right: 0; justify-content: flex-end; }
 .viewer-edge svg { width: 36px; height: 36px; padding: 8px; border-radius: 50%; background: #1d1812a6; fill: none; stroke: #fff; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: transform .2s var(--ease-out); }
 .viewer-edge:hover svg { transform: scale(1.08); }
 .viewer-photo:not(.arrows-idle):hover .viewer-edge, .viewer-edge:focus-visible { opacity: 1; }
-.viewer-photo.arrows-idle .viewer-edge:not(:focus-visible) { opacity: 0; pointer-events: none; }
+/* Faded, not gone: a press here wakes the arrow, and its click must still browse rather than fall through and turn the card. */
+.viewer-photo.arrows-idle .viewer-edge:not(:focus-visible) { opacity: 0; }
 .viewer-edge:focus-visible { outline: none; }
 .viewer-edge:focus-visible svg { outline: 2px solid #fff; outline-offset: 2px; }
 @media (hover: none), (any-pointer: coarse) { .viewer-edge { width: 18%; padding: 0 8px; opacity: .8; } .viewer-edge svg { width: 30px; height: 30px; padding: 7px; } }
@@ -421,22 +444,22 @@
 .photo-viewer-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; width: 0; min-width: 100%; min-height: 42px; padding-top: 8px; }
 #caption-form { display: flex; align-items: center; width: 100%; gap: 8px; margin-top: 5px; animation: caption-drop .18s var(--ease-out); }
 #photo-note { display: inline; margin: 0; color: var(--ink); font: 18px/1.35 var(--hand); white-space: nowrap; writing-mode: horizontal-tb; }
-#photo-note::before { content: ' · '; white-space: pre; color: var(--line); font: 16px Georgia, serif; }
+#photo-note::before { content: ' · '; white-space: pre; color: var(--line); font: 16px var(--serif); }
 @keyframes caption-drop { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
-#caption-input { flex: 1; min-width: 0; padding: 7px 0; border: 0; border-bottom: 1px solid var(--line); outline: none; background: transparent; color: var(--page-ink); font: 16px Georgia, serif; }
+#caption-input { flex: 1; min-width: 0; padding: 7px 0; border: 0; border-bottom: 1px solid var(--line); outline: none; background: transparent; color: var(--page-ink); font: 16px var(--serif); }
 #caption-input:focus-visible { border-bottom-color: var(--red); }
 .photo-viewer-caption { position: relative; display: block; flex: 1 1 160px; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; writing-mode: horizontal-tb; word-break: normal; overflow-wrap: normal; border-radius: 2px; }
-#photo-caption { display: inline; margin: 0; font: 16px/1.3 Georgia, serif; transition: color .2s; }
+#photo-caption { display: inline; margin: 0; font: 16px/1.3 var(--serif); transition: color .2s; }
 .photo-viewer-tools { display: flex; flex: none; align-items: center; gap: 2px; }
 .viewer-tool { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 9px; border: 0; border-radius: 17px; background: transparent; color: var(--ink); font: 12px Arial, sans-serif; transition: background-color .2s, color .2s; }
 .viewer-tool svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
 .viewer-tool:hover:not(:disabled) { background: #b7a6882e; color: var(--red); }
-.postcard-heading { display: flex; justify-content: space-between; align-items: flex-start; min-height: 22%; font: small-caps 16px Georgia, serif; letter-spacing: 2px; }
+.postcard-heading { display: flex; justify-content: space-between; align-items: flex-start; min-height: 22%; font: small-caps 16px var(--serif); letter-spacing: 2px; }
 .postcard-stamp { display: block; flex: none; width: 45px; height: 54px; border: 1px dashed var(--line); opacity: .6; }
 .postcard-columns { display: grid; flex: 1; grid-template-columns: 1.1fr 1fr; gap: 5%; min-height: 0; }
 .postcard-address { display: flex; flex-direction: column; gap: 4%; min-width: 0; padding-left: 9%; border-left: 1px solid var(--line); }
-#postcard-back textarea, #postcard-back input { min-width: 0; padding: 0; border: 0; border-radius: 0; outline: none; background: transparent; color: var(--ink); font: 17px/1.65 Georgia, serif; font-size: clamp(12px, 1.6vw, 17px); resize: none; }
-#postcard-back textarea::placeholder, #postcard-back input::placeholder { color: #b0a28d; }
+#postcard-back textarea, #postcard-back input { min-width: 0; padding: 0; border: 0; border-radius: 0; outline: none; background: transparent; color: var(--ink); font: 17px/1.65 var(--serif); font-size: clamp(12px, 1.6vw, 17px); resize: none; }
+#postcard-back textarea::placeholder, #postcard-back input::placeholder { color: var(--muted); opacity: 1; }
 #postcard-back input:focus-visible, #postcard-back textarea:focus-visible { box-shadow: 0 1px #a3342b55; }
 #postcard-message { width: 100%; height: 100%; }
 #postcard-address { flex: 1; width: 100%; min-height: 0; background: repeating-linear-gradient(transparent, transparent calc(1.65em - 1px), #b7a68866 calc(1.65em - 1px), #b7a68866 1.65em) !important; }
@@ -449,10 +472,9 @@
 .postcard-actions button:hover:not(:disabled) { color: var(--red); }
 #unflip-postcard { margin-right: 0; white-space: nowrap; }
 #postcard-front:focus { outline: none; }
-#postcard-saved { margin-right: auto; color: var(--muted); font: 10px Arial, sans-serif; }
+#postcard-saved { min-width: 0; margin-right: auto; overflow: hidden; white-space: nowrap; color: var(--muted); font: 10px Arial, sans-serif; }
 
 @keyframes bar-in { from { opacity: 0; transform: translateY(-6px); } }
-@keyframes drop-in { from { opacity: 0; transform: translateY(-14px) rotate(calc(var(--tilt, 0deg) * 3)) scale(1.04); } }
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 10px); } }
 @keyframes card-lift { 50% { scale: .94; } }
@@ -460,10 +482,10 @@
 /* One page at a time: the same rule as twoPage() in trips.js. */
 @media (max-width: 599px), (max-width: 899px) and (orientation: portrait) {
   .album-stage { flex-direction: column; align-items: stretch; gap: 8px; padding: 4px 12px; }
-  .album-book { --tab-width: 124px; --turn-duration: 900ms; --turn-ease: cubic-bezier(.4,0,.2,1); --pad: 10px; width: calc(100% - var(--tab-width)); height: auto; flex: 1; min-height: 0; aspect-ratio: auto; }
-  .album-loading-cover { left: calc(var(--pad) + 2px); right: calc(var(--pad) + 2px); width: auto; }
-  .album-book .album-cover-scene .album-tabs, .album-book .album-cover-scene.closed-book .album-tabs { left: calc(100% - 18px); }
-  .album-tabs, .album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs { left: calc(100% - var(--pad) - 18px); }
+  .album-book { --turn-duration: 900ms; --turn-ease: cubic-bezier(.4,0,.2,1); --pad: 10px; width: calc(100% - var(--tab-gutter, var(--tab-width))); height: auto; flex: 1; min-height: 0; aspect-ratio: auto; }
+  .album-book .album-cover-scene .album-tabs, .album-book .album-cover-scene.closed-book .album-tabs { left: calc(100% + 2px - var(--tab-root, 28px)); }
+  .album-tabs, .album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs { left: calc(100% - var(--pad) - var(--tab-root, 28px)); }
+  .album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs, .album-book .album-cover-scene.closed-book .album-tabs { clip-path: inset(0 0 0 calc(var(--tab-root, 28px) - 3px)); }
   .album-page { padding: min(8%, 4svh) min(7%, 4svh) min(10%, 5svh); }
   .cover-title { font-size: clamp(15px, 9cqh, 28px); }
   .city-name { font-size: clamp(14px, min(max(22px, 6svh), (100cqi - 40px) / 6.5), 36px); }
@@ -484,6 +506,9 @@
   #album-scrub { width: 100%; }
   .album-foot { gap: 10px; padding-inline: 12px; }
   .gallery-toolbar, .gallery-actions, .photo-bulk { gap: 8px; padding-inline: 14px; }
+  /* The sheet clips what overflows, and a phone's only way out of Select is Done. */
+  .gallery-actions { flex-wrap: wrap; row-gap: 4px; }
+  .toolbar-spacer { display: none; }
   .gallery-city-heading { padding-inline: 14px; }
   :is(#photo-gallery, .album-copy-photo-gallery) .photo-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 20px; padding: 14px 20px 28px; }
   .photo-import-actions { gap: 10px; padding-inline: 14px; }
@@ -499,6 +524,12 @@
   .postcard-heading { font-size: 12px; letter-spacing: 1px; }
   .postcard-stamp { width: 28px; height: 33px; }
 }
+/* iOS zooms the page on focusing any field under 16px, and a fingertip needs more than a 19px button. */
+@media (hover: none), (any-pointer: coarse) {
+  #postcard-back textarea, #postcard-back input { font-size: 16px; }
+  #destination-form input, .trip-search input, .trip-rename-form input, .album select { font-size: 16px; }
+  .postcard-actions button:not(.viewer-tool) { min-width: 44px; min-height: 44px; }
+}
 /* Short landscape screens give the book every spare pixel: a tighter header, and the page label beside its slider. */
 @media (max-height: 520px) and (orientation: landscape) {
   .album-top { padding: calc(6px + env(safe-area-inset-top)) 18px 2px; }
@@ -507,12 +538,16 @@
   .album-turn { width: 34px; height: 34px; }
   .album-where { flex-direction: row; gap: 12px; min-width: 0; }
   #album-scrub { width: 180px; }
+  /* A sticky heading and a tall toolbar would leave less room than one print. */
+  .gallery-city-heading { position: static; padding: 6px 14px 4px; }
+  .gallery-toolbar, .gallery-actions, .photo-bulk { min-height: 36px; padding-block: 3px; }
+  :is(#photo-gallery, .album-copy-photo-gallery) .photo-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 12px; padding: 8px 14px 12px; }
 }
 /* Window reading view uses the entire spread. Only the far edge opens the index. */
 .album.expanded { inset: 0; width: 100%; height: 100dvh; }
 .album.expanded #album-display { position: relative; grid-template-rows: minmax(0, 1fr); overflow: hidden; background: #29221c; }
 .album.expanded :is(.album-foot, #photo-message:not(.error), .gallery-toolbar, .gallery-actions, .gallery-map-button, .photo-empty button, .photo-empty-hint, .postcard-badge) { display: none; }
-.album.expanded #photo-message.error { position: absolute; inset: auto 16px 16px; z-index: 5; background: var(--paper); }
+.album.expanded #photo-message.error { position: absolute; bottom: 16px; z-index: 5; }
 .album.expanded .album-stage { padding: clamp(4px, .65vmin, 8px); gap: 0; }
 .album.expanded .album-book { --pad: clamp(10px, 1.75vmin, 18px); flex: none; width: 100%; max-width: none; height: 100%; aspect-ratio: auto; }
 /* Fullscreen begins with a closed volume over the map; opening fills the window. */
@@ -526,34 +561,42 @@
   box-shadow: 0 1px 0 #b9a887, 0 3px 0 #e2d5b9, 0 4px 0 #ad9d82, -3px 0 #d5c8af, 3px 0 #c4b598, -5px 0 #efe4ca, 5px 0 #e6d9be;
 }
 #album-top-edge { position: absolute; z-index: 6; inset: 0 0 auto; height: max(18px, env(safe-area-inset-top)); padding: 0; border: 0; background: transparent; }
-#album-top-edge:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
+#album-top-edge:focus-visible { outline: 2px solid var(--paper); outline-offset: -2px; }
 .album.expanded .album-top {
   position: absolute; z-index: 7; inset: 0 0 auto; padding-bottom: 12px;
   background: #302820f7; box-shadow: 0 3px 12px #211b1938;
   visibility: hidden; transform: translateY(-105%); transition: transform .2s var(--ease-out), visibility 0s .2s;
 }
 #album-top-edge[aria-expanded=true] + .album-top { visibility: visible; transform: none; transition-delay: 0s; }
-/* Import review uses five prints across each paper leaf. */
+/* Import review shows an even number of prints across the sheet, so the spine falls between them, and only as many as stay big enough to judge and to tap. */
 .album { --sheet-columns: 10; --print-gap: clamp(6px, 1.3vmin, 18px); }
+@media (max-width: 1439px) { .album { --sheet-columns: 6; } }
 .album-book[data-mode=review] .photo-scroll { scrollbar-gutter: stable both-edges; }
 :is(#photo-review, .album-copy-photo-review) {
   grid-template-columns: repeat(var(--sheet-columns), minmax(0, 1fr));
   gap: var(--print-gap); padding-inline: clamp(8px, 1.6vmin, 24px);
 }
 .album-book[data-mode=review] .album-sheet::after { width: var(--print-gap); }
-@media (pointer: coarse) { #album-top-edge { height: max(24px, env(safe-area-inset-top)); } }
-@media (max-width: 599px), (max-width: 899px) and (orientation: portrait) {
-  .album { --sheet-columns: 5; }
-  .album.expanded .album-sheet::after, .album-book[data-mode=review] .album-sheet::after { left: 0; }
+/* Touch has no hover to discover window view's edges, so they show themselves. */
+@media (pointer: coarse) {
+  #album-top-edge { height: max(24px, env(safe-area-inset-top)); }
+  #album-top-edge::after { content: ''; position: absolute; left: 50%; top: 3px; width: 56px; height: 4px; border-radius: 2px; background: #f4dfae99; translate: -50% 0; }
+  #album-edge::after { content: ''; position: absolute; right: 3px; top: 50%; width: 4px; height: 56px; border-radius: 2px; background: #f4dfae99; translate: 0 -50%; }
 }
+/* One page has no spine down its middle: the crease sits at the binding, including on the copy a view turn carries. */
+@media (max-width: 599px), (max-width: 899px) and (orientation: portrait) {
+  .album { --sheet-columns: 2; }
+  .album.expanded .album-sheet::after, .album-book:is([data-mode=review], [data-mode=sheet]) .album-sheet::after, .album-view-layer.single .album-sheet::after { left: 0; }
+}
+@media (max-height: 520px) and (orientation: landscape) { .album { --sheet-columns: 4; } }
 /* The index stays on the binding. Window view uncovers it by moving the
    complete book, including its pages, cloth tabs and exit control, as one. */
 .album.expanded.index-open .album-book { translate: calc(-1 * var(--tab-width) - 14px) 0; }
-.album.expanded .album-tabs { max-height: calc(100% - 144px); }
+.album.expanded .album-tabs { bottom: 122px; }
 .album.expanded:not(.index-open):not(.cover-view) :is(.album-tabs, #album-drawer) { visibility: hidden; pointer-events: none; }
 #album-index { position: absolute; z-index: 5; inset: 0 0 0 auto; width: 18px; pointer-events: none; }
 #album-edge { position: absolute; inset: 0; width: 100%; padding: 0; border: 0; background: transparent; pointer-events: auto; }
-#album-edge:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
+#album-edge:focus-visible { outline: 2px solid var(--paper); outline-offset: -2px; }
 #album-drawer { position: absolute; z-index: 1; left: calc(100% - var(--pad) + 6px); bottom: 22px; width: calc(var(--tab-width) - 10px); display: none; }
 .album.expanded #album-drawer { display: block; }
 .album.expanded.cover-view #album-drawer { left: calc(75% - var(--pad) / 2 + 6px); }
@@ -563,7 +606,7 @@
   .album.expanded.cover-view .cover-title { font-size: clamp(18px, 5.5vw, 26px); }
   .album.expanded.cover-view #album-drawer { left: calc(100% - var(--pad) + 6px); }
 }
-#album-restore { width: 100%; padding: 8px 7px; border: 0; border-radius: 0 5px 5px 0; background: #382f27; color: var(--paper); font: 11px Georgia, serif; }
+#album-restore { width: 100%; padding: 8px 7px; border: 0; border-radius: 0 5px 5px 0; background: #382f27; color: var(--paper); font: 11px var(--serif); }
 #album-restore span { margin-left: 4px; }
 @media (pointer: coarse) { #album-index { width: 24px; } }
 @media (prefers-reduced-motion: reduce) { .album.expanded .album-top { transition: none; } }

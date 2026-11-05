@@ -3,7 +3,7 @@ import {mkdtemp,cp,rm,readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {account,assertDestination,assertAccount,verifyOwner} from './publish-target.mjs';
+import {account,assertDestination,assertAccount,verifyOwner,assertSourcePublished,assertCommitted,pushBuild} from './publish-target.mjs';
 
 // Uses a disposable checkout; the source checkout and its branch are untouched.
 const root=resolve(fileURLToPath(new URL('../',import.meta.url)));
@@ -11,6 +11,7 @@ const git=(args,cwd=root)=>execFileSync('git',args,{cwd,encoding:'utf8',stdio:['
 const remote=git(['remote','get-url','origin']);
 assertDestination(remote);
 await verifyOwner();
+assertSourcePublished(git);
 // Ask the normal credential helper for this specific account. Keep credentials
 // only in memory, never in command arguments, files, or console output.
 let credentialText;
@@ -24,6 +25,7 @@ credentials.password='';
 assertAccount((await identity.json()).login);
 execFileSync(process.execPath,['--test',...(await readdir(join(root,'test'))).filter(name=>name.endsWith('.test.mjs')).map(name=>`test/${name}`)],{cwd:root,stdio:'inherit'});
 await import('./build-static.mjs');
+assertCommitted(git);
 const temp=await mkdtemp(join(tmpdir(),'redline-publish-'));
 try {
   git(['init','-b','gh-pages'],temp);
@@ -35,10 +37,6 @@ try {
   if(existing){git(['fetch','--depth=1','origin','gh-pages'],temp);git(['checkout','-B','gh-pages','FETCH_HEAD'],temp);}
   for(const entry of await readdir(temp))if(entry!=='.git')await rm(join(temp,entry),{recursive:true,force:true});
   await cp(join(root,'dist'),temp,{recursive:true});
-  git(['add','-A'],temp);
-  if(git(['status','--porcelain'],temp)){
-    git(['commit','-m',`Publish Redline ${git(['rev-parse','--short','HEAD'])}`],temp);
-    git(['push','origin','gh-pages'],temp);
-  }
-  console.log('Published build pushed to gh-pages. GitHub Pages will serve it after its build finishes.');
+  const pushed=pushBuild(git,temp,`Publish Redline ${git(['rev-parse','--short','HEAD'])}`);
+  console.log(pushed?'Published build pushed to gh-pages. GitHub Pages will serve it after its build finishes.':'gh-pages already matches this build; nothing pushed.');
 } finally { await rm(temp,{recursive:true,force:true}); }

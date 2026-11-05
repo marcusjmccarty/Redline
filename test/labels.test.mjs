@@ -145,3 +145,17 @@ test('indistinguishable pins show the active name and separate into individually
   assert.ok(result.every(Boolean));assertClear(local,result,view);
   result.forEach((slot,i)=>{if(slot.leader)for(const [j,other] of result.entries())if(i!==j)assert.ok(!crosses(slot.leader,other.box));});
 });
+
+test('a hub ringed by its own route keeps its name, across a line only when no clear slot is left',()=>{
+  const hub={x:400,y:300},spoke=angle=>[[hub.x,hub.y],[hub.x+Math.cos(angle)*600,hub.y+Math.sin(angle)*600]];
+  const ring=Array.from({length:24},(_,i)=>spoke(i/24*Math.PI*2));
+  const [named]=place([item('LONDON',hub.x,hub.y,0)],{width:1440,height:900,segments:ring});
+  assert.ok(named,'Zero times is not once');
+  assert.ok(ring.some(line=>crosses(line,named.box,5)),'It had to cross the red line');
+  const [clear]=place([item('LONDON',hub.x,hub.y,0)],{width:1440,height:900,segments:ring.slice(0,3)});
+  assert.equal(ring.slice(0,3).some(line=>crosses(line,clear.box,5)),false,'With a clear slot it takes that');
+  const crowded=place([item('LONDON',hub.x,hub.y,-1),item('PARIS',hub.x+6,hub.y+30,0)],{width:1440,height:900,segments:ring});
+  assert.ok(crowded[0],'The active port wins');
+  if(crowded[1])assert.equal(overlaps(crowded[0].box,crowded[1].box,5),false,'Names crossing the line still clear each other');
+  assert.equal(place([item('LONDON',hub.x,hub.y,0)],{width:1440,height:900,obstacles:[{x:0,y:0,w:1440,h:900}]})[0],null,'A name never goes under the dock to be seen');
+});

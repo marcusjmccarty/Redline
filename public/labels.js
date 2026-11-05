@@ -1,7 +1,7 @@
 /* Route city labels: stable placement around dots, nearby names, and the drawn route. */
 (() => {
   'use strict';
-  // Text anchor offsets from the dot for 13px Courier capitals; right-above is the original default.
+  // Text anchor offsets from the dot for 13 px lettered capitals; right-above is the original default.
   const slots=Object.freeze([
     ['right-above',10,-12,'start'],['right-below',10,20,'start'],['left-above',-10,-12,'end'],
     ['left-below',-10,20,'end'],['above',0,-12,'middle'],['below',0,20,'middle'],
@@ -11,7 +11,7 @@
     ['lower-left',-16,53,'end'],['lower-right',16,53,'start']
   ].map(([name,x,y,anchor])=>Object.freeze({name,x,y,anchor})));
   const HEIGHT=14,DESCENT=3,HALO=3,DOT=4.5;
-  // Courier New is monospace: 0.6em advance at 13px plus 0.5px letter-spacing.
+  // The fallback and floor for 13 px lettered capitals, before a name can be measured.
   const estimate=text=>String(text).length*8.3;
   const overlaps=(a,b,gap=0)=>a.x<b.x+b.w+gap&&a.x+a.w+gap>b.x&&a.y<b.y+b.h+gap&&a.y+a.h+gap>b.y;
   function box(item,slot){
@@ -62,21 +62,21 @@
       if(!clusterDistance||!representatives.some(j=>Math.hypot(items[i].x-items[j].x,items[i].y-items[j].y)<clusterDistance))representatives.push(i);
     }
     const eligible=new Set(representatives);
-    const choices=items.map((item,i)=>{
-      if(!eligible.has(i))return [];
-      const kept=before(item.id??i),neighbours=items.filter((other,j)=>j!==i&&Math.hypot(item.x-other.x,item.y-other.y)<100);
+    const candidates=(i,clearOfRoutes)=>{
+      const item=items[i],kept=before(item.id??i),neighbours=items.filter((other,j)=>j!==i&&Math.hypot(item.x-other.x,item.y-other.y)<100);
       return slots.flatMap((slot,index)=>{
         const rect=box(item,slot),right=rect.x+rect.w,bottom=rect.y+rect.h;
         // Reject invisible and blocked candidates before scoring neighbours.
         if(rect.x<edge||rect.y<edge||right>width-edge||bottom>height-edge
-          ||obstacles.some(t=>overlaps(rect,t,gap))||dots.some((d,j)=>j!==i&&overlaps(rect,d,gap))||routes.hits(rect,5))return [];
+          ||obstacles.some(t=>overlaps(rect,t,gap))||dots.some((d,j)=>j!==i&&overlaps(rect,d,gap))||clearOfRoutes&&routes.hits(rect,5))return [];
         const own=distance(item,rect);
         const score=(index>=8?Math.max(0,own-14)*1.5:0)+neighbours.reduce((total,other)=>total+Math.max(0,own+10-distance(other,rect))**2,0)+index+(slot.name===kept?-16:0);
         const leader=own>21?[[item.x,item.y],[Math.max(rect.x,Math.min(right,item.x)),Math.max(rect.y,Math.min(bottom,item.y))]]:null;
         return [{...slot,box:rect,leader,score}];
       })
         .sort((a,b)=>a.score-b.score);
-    });
+    };
+    const choices=items.map((item,i)=>eligible.has(i)?candidates(i,true):[]);
     const conflict=(a,b)=>overlaps(a.box,b.box,gap)||(a.leader&&crosses(a.leader,b.box,2))||(b.leader&&crosses(b.leader,a.box,2));
     const blockers=(candidate,except)=>result.flatMap((placed,i)=>i!==except&&placed&&conflict(candidate,placed)?[i]:[]);
     for(const i of representatives){
@@ -90,6 +90,8 @@
         if(alternate){result[j]=alternate;result[i]=candidate;break;}
       }
     }
+    // A hub's spokes can cover every slot. Better a name across the red line, where its halo keeps it readable, than no name at all.
+    for(const i of representatives)if(!result[i])result[i]=candidates(i,false).find(candidate=>!blockers(candidate,i).length)||null;
     return result;
   }
   globalThis.RedlineLabels=Object.freeze({place,estimate,overlaps,slots,crosses,indexLines,projectIndex});

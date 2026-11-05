@@ -1,6 +1,6 @@
 (() => {
-// Keep only JPEG image-coding segments. Drop every APP segment and comment,
-// including EXIF, XMP, ICC and embedded previews, plus bytes after the end marker.
+// Keep only the segments a JPEG decoder needs (frame, Huffman, arithmetic, scan, quantization, restart).
+// Every other segment goes, including EXIF, XMP, ICC and embedded previews, plus bytes after the end marker.
 function stripJpegMetadata(input) {
   const bytes=input instanceof Uint8Array?input:new Uint8Array(input);
   if(bytes.length<4||bytes[0]!==255||bytes[1]!==216)throw Error('Only processed JPEG images can be saved.');
@@ -16,7 +16,7 @@ function stripJpegMetadata(input) {
     const length=(bytes[pos]<<8)|bytes[pos+1];
     if(length<2||pos+length>bytes.length)throw Error('Incomplete JPEG image.');
     const end=pos+length;
-    if(!((marker>=224&&marker<=239)||marker===254))chunks.push(bytes.subarray(start,end));
+    if((marker>=192&&marker<=207&&marker!==200)||marker===218||marker===219||marker===221)chunks.push(bytes.subarray(start,end));
     pos=end;
     if(marker===218){
       seenScan=true;const entropyStart=pos;
