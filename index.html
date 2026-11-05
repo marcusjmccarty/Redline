@@ -6,24 +6,24 @@
   <meta name="theme-color" content="#efe5d2">
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
-  <link rel="stylesheet" href="style.css?v=97178d7d771c">
-  <link rel="stylesheet" href="gallery.css?v=0c8a24810264">
+  <link rel="stylesheet" href="style.css?v=d56ce62380ee">
+  <link rel="stylesheet" href="gallery.css?v=065c169ee053">
   <script src="map-intro.js?v=42c0f59787e3"></script>
   <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
   <script src="map-layout.js?v=eb31b38a5551" defer></script>
   <script src="atlas-geography.js?v=5a63514c3186" defer></script>
-  <script src="trace.js?v=0be96d61192a" defer></script>
+  <script src="trace.js?v=4129de85d028" defer></script>
   <script src="labels.js?v=0e761c11f184" defer></script>
   <script src="relief/index.js?v=b019ce04df05" defer></script>
   <script src="map-paint.js?v=e577c147a68d" defer></script>
-  <script src="app.js?v=a7e3c9dbc636" defer></script>
+  <script src="app.js?v=ac692d45458a" defer></script>
   <script src="postcard-export.js?v=048b39ce6827" defer></script>
   <script src="postcards.js?v=bb3aca0cbd97" defer></script>
   <script src="jpeg.js?v=c37b5b32449f" defer></script>
   <script src="archive.js?v=bc17aed962a3" defer></script>
   <script src="storage.js?v=ebd36216a640" defer></script>
   <script src="album-motion.js?v=427d599dad6d" defer></script>
-  <script src="trips.js?v=e84bb7d3a591" defer></script>
+  <script src="trips.js?v=f38c085e240d" defer></script>
 </head>
 <body>
   <main aria-label="Travel map">
@@ -54,10 +54,9 @@
           <text x="171" y="390" class="ocean">Pacific Ocean</text>
           <text x="1035" y="438" class="ocean">Indian Ocean</text>
         </g>
-        <g id="route-lines"></g>
         </g>
       </svg>
-      <svg id="place-labels" role="group" aria-label="Route stops"><g id="background-labels" aria-hidden="true"></g><g id="route-stops"></g></svg>
+      <svg id="place-labels" role="group" aria-label="Route stops"><g id="route-lines" aria-hidden="true"></g><g id="background-labels" aria-hidden="true"></g><g id="route-stops"></g></svg>
     </div>
     <div class="atlas-frame" aria-hidden="true"></div>
     <div class="zoom-controls" aria-label="Map controls">
@@ -146,13 +145,14 @@
             </div>
             <div id="photo-drop-hint" aria-hidden="true" hidden><span>Drop photos to add them</span></div>
             <nav id="gallery-filter" class="album-tabs" aria-label="Go to a city"></nav>
-          </div>
-        </div>
-        <div id="album-index" hidden>
-          <button id="album-edge" type="button" aria-label="Show album controls and city tabs" aria-controls="album-drawer" aria-expanded="false"></button>
           <div id="album-drawer" inert>
             <button id="album-restore" type="button">Exit window view <span aria-hidden="true">↙</span></button>
           </div>
+          </div>
+        </div>
+        <div id="album-index" hidden>
+          <button id="album-edge" type="button" aria-label="Show album controls and city tabs" aria-controls="gallery-filter album-drawer" aria-expanded="false"></button>
+
         </div>
         <div id="album-foot" class="album-foot">
           <button id="album-previous" class="album-turn" type="button" aria-label="Previous page" title="Previous page (←)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button>
