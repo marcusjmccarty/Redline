@@ -5,6 +5,8 @@
   const idValid = id => typeof id === 'string' && /^[a-zA-Z0-9_-]{8,80}$/.test(id);
   const now = () => new Date().toISOString();
   const timestamp = value => typeof value==='string' && value.length<50 && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : now();
+  // Restoring creates independent IDs without shuffling photos saved in the same millisecond.
+  const photoOrder = (a,b) => a.createdAt.localeCompare(b.createdAt)||(a.orderKey||a.id).localeCompare(b.orderKey||b.id)||a.id.localeCompare(b.id);
   let opening;
   const urls = new Map(), thumbs = new Map(), backupReceipts = new WeakMap();
   const request = operation => new Promise((resolve,reject) => {
@@ -150,7 +152,7 @@
     if (parts[0]==='trips' && parts.length===2) {
       if (method==='GET') {
         const result=await transaction(['trips','photos','photoNotes'],'readonly',async stores=>({trip:await ownTrip(stores.trips,parts[1]),photos:await withNotes(stores,await request(stores.photos.index('tripId').getAll(parts[1])))}));
-        result.photos=result.photos.sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.id.localeCompare(b.id)).map(photoDto);
+        result.photos=result.photos.sort(photoOrder).map(photoDto);
         return result;
       }
       if (method==='PUT') {
@@ -263,14 +265,17 @@
     for (const record of records) {
       const data=tripData(record.trip),trip={...data,id:crypto.randomUUID(),revision:1,createdAt:timestamp(record.trip.createdAt),updatedAt:now(),backedUpAt:now(),backupSource:'import'};
       trips.push(trip);
-      for (const entry of record.photos) {
+      for (const [index,entry] of record.photos.entries()) {
         const p=entry.photo;
+        // Older backups stored ties in manifest order, before they carried this key.
+        const orderKey=p.orderKey??`import-${String(index).padStart(10,'0')}`;
+        if (!idValid(orderKey)) fail('The backup contains an invalid photo order.');
         if (p.stopId!=null && !idValid(p.stopId)) fail('The backup contains an invalid photo location.');
         const snapshot=p.city==null?null:city(p.city);
         if (snapshot && snapshot.id!==p.stopId) fail('The backup contains an invalid photo location.');
         const blob=await cleanPhoto(entry.blob);
         const width=dimension(p.width),height=dimension(p.height);
-        photos.push({id:crypto.randomUUID(),tripId:trip.id,stopId:p.stopId||null,city:snapshot,blob,...(width&&height?{width,height}:{}),createdAt:timestamp(p.createdAt),postcard:postcard(p.postcard),postcardRevision:1,caption:caption(p.caption),captionRevision:1});
+        photos.push({id:crypto.randomUUID(),orderKey,tripId:trip.id,stopId:p.stopId||null,city:snapshot,blob,...(width&&height?{width,height}:{}),createdAt:timestamp(p.createdAt),postcard:postcard(p.postcard),postcardRevision:1,caption:caption(p.caption),captionRevision:1});
       }
     }
     if (!trips.length) fail('This backup has no trips.');

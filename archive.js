@@ -11,7 +11,7 @@
       trip: {id:trip.id, title:trip.title, stops:trip.stops, createdAt:trip.createdAt},
       photos: photos.map(({photo, blob}) => {
         blobs.push(blob);
-        return {stopId:photo.stopId, city:photo.city, postcard:photo.postcard || {}, caption:photo.caption||'', createdAt:photo.createdAt, width:photo.width, height:photo.height, bytes:blob.size};
+        return {stopId:photo.stopId, city:photo.city, postcard:photo.postcard || {}, caption:photo.caption||'', createdAt:photo.createdAt, orderKey:photo.orderKey||photo.id, width:photo.width, height:photo.height, bytes:blob.size};
       })
     }));
     const manifest = new TextEncoder().encode(JSON.stringify({version:1, trips}));
@@ -32,7 +32,7 @@
     if (!length || length > MAX_MANIFEST || offset > file.size) invalid();
     let manifest;
     try { manifest = JSON.parse(await file.slice(head.length, offset).text()); } catch { invalid(); }
-    if (manifest.version !== 1 || !Array.isArray(manifest.trips) || manifest.trips.length > 200) invalid();
+    if (!manifest || manifest.version !== 1 || !Array.isArray(manifest.trips) || manifest.trips.length > 200) invalid();
     const records = [];
     for (const record of manifest.trips) {
       if (!record?.trip || !Array.isArray(record.photos)) invalid();

@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const $=id=>document.getElementById(id),app=window.RedlineApp,SVG='http://www.w3.org/2000/svg';
-  let current=null,photos=[],pending=[],busy=false,dirty=false,suppress=false,resumePhotos=false,cityIndex=null,exifReady=null,photoPanelRequest=0,photosRequested=false;
+  let current=null,photos=[],pending=[],busy=false,dirty=false,suppress=false,resumePhotos=false,cityIndex=null,cityIndexRequest=null,exifReady=null,photoPanelRequest=0,photosRequested=false;
   let activeCity='',galleryItems=[],importing=false,photoMode='',dragDepth=0,selecting=false,thumbQueue=Promise.resolve();
   const reviewPageSize=70;
   let reviewPage=0,reviewTurn=null;
@@ -511,8 +511,38 @@
     $(button).click();
   });
 
-  function loadExif(){if(window.exifr)return Promise.resolve();if(!exifReady)exifReady=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='vendor/exifr.js';script.onload=resolve;script.onerror=()=>{exifReady=null;reject(Error('Could not load photo metadata reader.'));};document.head.append(script);});return exifReady;}
-  async function loadCityIndex(){if(cityIndex)return cityIndex;const response=await fetch('photo-cities.json');if(!response.ok)throw Error('Could not load city locations.');cityIndex=await response.json();return cityIndex;}
+  function loadExif(){
+    if(window.exifr)return Promise.resolve();
+    if(!exifReady)exifReady=new Promise((resolve,reject)=>{
+      const script=document.createElement('script');let settled=false;
+      const finish=()=>{
+        if(settled)return;settled=true;clearTimeout(timer);script.onload=script.onerror=null;
+        if(window.exifr)resolve();
+        else{script.remove();exifReady=null;reject(Error('Could not load photo metadata reader.'));}
+      };
+      // Metadata is optional: a stalled request must still allow manual city assignment.
+      const timer=setTimeout(finish,3000);
+      script.src='vendor/exifr.js';script.onload=script.onerror=finish;document.head.append(script);
+    });
+    return exifReady;
+  }
+  async function loadCityIndex(){
+    if(cityIndex)return cityIndex;
+    if(!cityIndexRequest)cityIndexRequest=(async()=>{
+      const controller=new AbortController();let timer;
+      try{
+        const download=fetch('photo-cities.json',{signal:controller.signal}).then(response=>{
+          if(!response.ok)throw Error('Could not load city locations.');return response.json();
+        });
+        const index=await Promise.race([download,new Promise((resolve,reject)=>{
+          timer=setTimeout(()=>{controller.abort();reject(Error('Could not load city locations.'));},3000);
+        })]);
+        if(!Array.isArray(index))throw Error('Could not load city locations.');
+        return cityIndex=index;
+      }finally{clearTimeout(timer);}
+    })();
+    return cityIndexRequest;
+  }
   async function matchCity(gps){
     if(!gps||!Number.isFinite(gps.latitude)||!Number.isFinite(gps.longitude)||Math.abs(gps.latitude)>90||Math.abs(gps.longitude)>180)return null;
     let best=null,distance=Infinity;
@@ -567,6 +597,8 @@
   function setProgress(done,total){const bar=$('photo-progress');bar.hidden=!total;bar.style.setProperty('--progress',total?String(done/total):'0');bar.setAttribute('aria-valuenow',String(done));bar.setAttribute('aria-valuemax',String(total||1));}
   async function importPhotos(files){
     if(!files.length||busy||!current)return;
+    // Retry unavailable geography once per batch, rather than waiting on every photo.
+    if(!cityIndex)cityIndexRequest=null;
     finishReviewTurn();
     setSelecting(false);busy=true;importing=true;photoPanelRequest++;photosRequested=false;update();let failed=0,lastError='';
     try{
