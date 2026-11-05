@@ -27,6 +27,7 @@
       operation.onsuccess = () => {
         const db = operation.result;
         db.onversionchange = () => { db.close(); opening = null; };
+        db.onclose = () => { opening = null; };
         resolve(db);
       };
       operation.onerror = () => { opening=null; reject(operation.error); };
@@ -35,7 +36,10 @@
     return opening;
   }
   async function transaction(names, mode, action) {
-    const db = await open(), tx = db.transaction(names, mode);
+    // The browser can close a connection at any time; the next save opens a fresh one.
+    let db = await open(), tx;
+    try { tx = db.transaction(names, mode); }
+    catch (error) { if (error.name !== 'InvalidStateError') throw error; opening = null; db = await open(); tx = db.transaction(names, mode); }
     const done = new Promise((resolve,reject) => {
       tx.oncomplete = resolve;
       tx.onabort = () => reject(tx.error || Error('The save was interrupted. Please try again.'));
@@ -98,7 +102,12 @@
     if (!trip) fail('Trip not found.',404);
     return trip;
   };
-  async function persist() { try { return await navigator.storage?.persist?.(); } catch { return false; } }
+  // Browsers may grant later what they first declined, so each session asks once, on a real save.
+  let persistAsked = false;
+  async function persist() {
+    if (persistAsked) return; persistAsked = true;
+    try { if (!await navigator.storage?.persisted?.()) await navigator.storage?.persist?.(); } catch {}
+  }
   async function cleanPhoto(blob, max=MAX_PHOTO) {
     if (!blob || blob.type!=='image/jpeg' || !blob.size || blob.size>max) fail(max===MAX_PHOTO?'Use a processed JPEG smaller than 4 MB.':'The photo preview is too large.');
     return new Blob([window.RedlineJPEG.stripJpegMetadata(await blob.arrayBuffer())],{type:'image/jpeg'});
@@ -122,22 +131,30 @@
     return photos;
   }
 
+  // Edits live in photoNotes, because re-putting a stored image Blob can fail in WebKit. A backfilled
+  // preview gets its own record, so later note saves never carry a Blob either.
   async function withNotes(stores,photos){
-    return Promise.all(photos.map(async photo=>({...photo,...await request(stores.photoNotes.get(photo.id))})));
+    return Promise.all(photos.map(async photo=>{
+      const notes=await request(stores.photoNotes.get(photo.id)),side=notes?.sideThumb?await request(stores.photoNotes.get(`${photo.id}.thumb`)):null;
+      return {...photo,...notes,...(side?{thumb:side.thumb}:{})};
+    }));
   }
+  const deleteNotes=async(store,id)=>{await request(store.delete(id));await request(store.delete(`${id}.thumb`));};
+  // Photo and note edits leave the route's revision alone, but a backup made before them is out of date.
+  const touch=async(store,id)=>{const trip=await request(store.get(id));if(trip)await request(store.put({...trip,changedAt:now()}));};
 
   async function api(path, options={}) {
     const parts=path.split('/').filter(Boolean),method=options.method||'GET';
     let body=options.body;
     if (typeof body==='string') { try { body=JSON.parse(body); } catch { fail('Invalid trip data.'); } }
     if (parts[0]==='trips' && parts.length===1) {
-      if (method==='GET') return transaction(['trips','photos'],'readonly',async stores=>{
+      if (method==='GET') return transaction(['trips','photos','photoNotes'],'readonly',async stores=>{
         const trips=await request(stores.trips.getAll()),index=stores.photos.index('tripId');
         // Count through the index and fetch one stable cover per trip. Listing
         // the logbook must not deserialize the library's full photo collection.
         return {trips:await Promise.all(trips.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).map(async ({stops,...trip})=>{
           const [photoCount,cover]=await Promise.all([request(index.count(trip.id)),request(index.get(trip.id))]);
-          return {...trip,stopCount:stops.length,photoCount,points:stops.map(stop=>[Math.round(stop.longitude*100)/100,Math.round(stop.latitude*100)/100]),coverUrl:cover?coverUrl(cover):null};
+          return {...trip,stopCount:stops.length,photoCount,points:stops.map(stop=>[Math.round(stop.longitude*100)/100,Math.round(stop.latitude*100)/100]),coverUrl:cover?coverUrl((await withNotes(stores,[cover]))[0]):null};
         }))};
       });
       if (method==='POST') {
@@ -156,10 +173,10 @@
         return result;
       }
       if (method==='PUT') {
-        const data=tripData(body);
+        const data=tripData(body); persist();
         return transaction(['trips'],'readwrite',async ({trips})=>{
           const before=await ownTrip(trips,parts[1]);
-          if (!Number.isInteger(body.revision) || body.revision!==before.revision) fail('This trip was updated in another tab. Reopen it before saving.',409);
+          if (!Number.isInteger(body.revision) || body.revision!==before.revision) fail('This trip was updated in another tab. Choose it in the logbook to load the latest version, which discards edits here.',409);
           const trip={...before,...data,revision:before.revision+1,updatedAt:now()};
           await request(trips.put(trip)); return {trip};
         });
@@ -167,19 +184,19 @@
       if (method==='DELETE') {
         const ids=await transaction(['trips','photos','photoNotes'],'readwrite',async stores=>{
           const trip=await ownTrip(stores.trips,parts[1]),keys=await request(stores.photos.index('tripId').getAllKeys(trip.id));
-          for(const key of keys){await request(stores.photos.delete(key));await request(stores.photoNotes.delete(key));}
+          for(const key of keys){await request(stores.photos.delete(key));await deleteNotes(stores.photoNotes,key);}
           await request(stores.trips.delete(trip.id)); return keys;
         });
         ids.forEach(forget); return {deleted:true,photoCount:ids.length};
       }
     }
     if (parts[0]==='trips' && parts.length===3 && parts[2]==='photos' && method==='POST') {
-      const blob=await cleanPhoto(body?.get?.('photo')),stopId=body.get('stopId'),more=await extras(body);
+      const blob=await cleanPhoto(body?.get?.('photo')),stopId=body.get('stopId'),more=await extras(body); persist();
       const record=await transaction(['trips','photos'],'readwrite',async stores=>{
         const trip=await ownTrip(stores.trips,parts[1]),stop=trip.stops.find(s=>s.id===stopId);
         if (!stop) fail('Save this city in your trip before adding its photos.');
         const photo={id:crypto.randomUUID(),tripId:trip.id,stopId:stop.id,city:stop,blob,...more,createdAt:now(),postcard:{},postcardRevision:1};
-        await request(stores.photos.add(photo)); return photo;
+        await request(stores.photos.add(photo)); await request(stores.trips.put({...trip,changedAt:now()})); return photo;
       });
       return {photo:photoDto(record)};
     }
@@ -189,7 +206,7 @@
       if (!title || title.length>80) fail('Give the trip a name (up to 80 characters).');
       return transaction(['trips'],'readwrite',async ({trips})=>{
         const before=await ownTrip(trips,parts[1]);
-        if (!Number.isInteger(body.revision) || body.revision!==before.revision) fail('This trip was updated in another tab. Reopen it before renaming.',409);
+        if (!Number.isInteger(body.revision) || body.revision!==before.revision) fail('This trip was updated in another tab. Choose it in the logbook to load the latest version, then rename it.',409);
         const trip={...before,title,revision:before.revision+1,updatedAt:now()};
         await request(trips.put(trip)); const {stops,...summary}=trip; return {trip:summary};
       });
@@ -201,7 +218,8 @@
         const trip=await ownTrip(stores.trips,parts[1]),stop=trip.stops.find(s=>s.id===body.stopId);
         if (!stop) fail('Save this city in your trip before moving photos there.');
         const photos=await tripPhotos(stores,trip,ids);
-        for (const photo of photos) { photo.stopId=stop.id; photo.city=stop; await request(stores.photos.put(photo)); }
+        for (const photo of photos) { const notes=await request(stores.photoNotes.get(photo.id))||{id:photo.id}; await request(stores.photoNotes.put({...notes,stopId:stop.id,city:stop})); }
+        await request(stores.trips.put({...trip,changedAt:now()}));
         return withNotes(stores,photos);
       });
       return {photos:records.map(photoDto)};
@@ -210,7 +228,8 @@
       const ids=photoIds(body);
       await transaction(['trips','photos','photoNotes'],'readwrite',async stores=>{
         const trip=await ownTrip(stores.trips,parts[1]);await tripPhotos(stores,trip,ids);
-        for(const id of ids){await request(stores.photos.delete(id));await request(stores.photoNotes.delete(id));}
+        for(const id of ids){await request(stores.photos.delete(id));await deleteNotes(stores.photoNotes,id);}
+        await request(stores.trips.put({...trip,changedAt:now()}));
       });
       ids.forEach(forget); return {deleted:ids.length};
     }
@@ -219,7 +238,8 @@
       const record=await transaction(['photos','photoNotes'],'readwrite',async ({photos,photoNotes})=>{
         const photo=idValid(parts[1])?await request(photos.get(parts[1])):null;
         if (!photo) fail('Photo not found.',404);
-        Object.assign(photo,more);await request(photos.put(photo));return {...photo,...await request(photoNotes.get(photo.id))};
+        const {thumb,...size}=more,notes=await request(photoNotes.get(photo.id))||{id:photo.id},saved={...notes,...size,sideThumb:true};
+        await request(photoNotes.put({id:`${photo.id}.thumb`,thumb}));await request(photoNotes.put(saved));return {...photo,...saved,thumb};
       });
       // Only the preview changes; the full photo URL may still be on screen.
       if (thumbs.has(record.id)) { URL.revokeObjectURL(thumbs.get(record.id)); thumbs.delete(record.id); }
@@ -227,29 +247,31 @@
     }
     if(parts[0]==='photos'&&parts.length===3&&['caption','postcard'].includes(parts[2])&&method==='PUT'){
       const field=parts[2],data=field==='caption'?caption(body?.caption):postcard(body?.postcard),revisionKey=`${field}Revision`;
-      return transaction(['photos','photoNotes'],'readwrite',async ({photos,photoNotes})=>{
+      return transaction(['trips','photos','photoNotes'],'readwrite',async ({trips,photos,photoNotes})=>{
         const photo=idValid(parts[1])?await request(photos.get(parts[1])):null;
         if(!photo)fail('Photo not found.',404);
         const notes=await request(photoNotes.get(photo.id))||{id:photo.id},revision=notes[revisionKey]??photo[revisionKey]??1;
         if(!Number.isInteger(body.revision)||body.revision!==revision)fail(`This ${field} changed in another tab. Copy your draft, then reload before saving.`,409);
         notes[field]=data;notes[revisionKey]=revision+1;
-        await request(photoNotes.put(notes));return {[field]:data,revision:notes[revisionKey]};
+        await request(photoNotes.put(notes));await touch(trips,photo.tripId);return {[field]:data,revision:notes[revisionKey]};
       });
     }
     fail('Not found.',404);
   }
 
-  async function exportArchive(tripId=null) {
+  // One file per part, in order. A library that fits one file (nearly every library) has one part.
+  async function exportParts(tripId=null) {
     const records=await transaction(['trips','photos','photoNotes'],'readonly',async stores=>{
       const trips=tripId?[await ownTrip(stores.trips,tripId)]:await request(stores.trips.getAll());
       if (!trips.length) fail('Save a trip before exporting a backup.');
       const photos=await withNotes(stores,await request(tripId?stores.photos.index('tripId').getAll(tripId):stores.photos.getAll()));
       return trips.map(trip=>({trip,photos:photos.filter(photo=>photo.tripId===trip.id).map(photo=>({photo,blob:photo.blob}))}));
     });
-    const blob=window.RedlineArchive.pack(records);
-    backupReceipts.set(blob,{ids:records.map(record=>record.trip.id),at:now()});return blob;
+    const parts=window.RedlineArchive.split(records).map(part=>window.RedlineArchive.pack(part));
+    // The last part carries the receipt: a backup only counts once every part has gone out.
+    backupReceipts.set(parts.at(-1),{ids:records.map(record=>record.trip.id),at:now()});return parts;
   }
-  // Called only after the browser has accepted the download. Creating a blob is not a backup.
+  // Called once the last part is handed to the browser. The browser gives no signal that the file arrived, so this records the attempt.
   async function recordBackup(blob){
     const receipt=backupReceipts.get(blob);if(!receipt)fail('Unknown backup.');
     await transaction(['trips'],'readwrite',async ({trips})=>{
@@ -286,5 +308,5 @@
     });
     persist(); return {tripCount:trips.length,photoCount:photos.length};
   }
-  window.RedlineStorage={api,exportArchive,recordBackup,importArchive,persist};
+  window.RedlineStorage={api,exportParts,recordBackup,importArchive};
 })();

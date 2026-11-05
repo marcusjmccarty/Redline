@@ -6,62 +6,31 @@
   <meta name="theme-color" content="#efe5d2">
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
-  <link rel="preload" as="image" href="atlas-tones.png?v=3be8a22dfe09" fetchpriority="high">
-  <link rel="preload" as="image" href="relief/overview.webp?v=ac4122ed741c" type="image/webp">
-  <link rel="stylesheet" href="style.css?v=daac6fe21966">
-  <link rel="stylesheet" href="gallery.css?v=535a7abd18a3">
-  <script src="map-intro.js?v=70abca5a38e8"></script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14.5' fill='%23efe5d2' stroke='%233a2c20' stroke-width='2'/%3E%3Cpath d='M16 3.5l3 9.5 9.5 3-9.5 3-3 9.5-3-9.5-9.5-3 9.5-3z' fill='%238f2f25'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css?v=f68e4902ef7b">
+  <link rel="stylesheet" href="gallery.css?v=a9faed84acc7">
+  <script src="map-intro.js?v=ea34a1af6a65"></script>
   <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
-  <script src="map-layout.js?v=eb31b38a5551" defer></script>
-  <script src="atlas-geography.js?v=5a63514c3186" defer></script>
-  <script src="trace.js?v=cf42a4433575" defer></script>
-  <script src="labels.js?v=3a0e0f05b1b8" defer></script>
-  <script src="relief/index.js?v=b019ce04df05" defer></script>
-  <script src="map-paint.js?v=61744e1270ef" defer></script>
-  <script src="app.js?v=ef084588ec80" defer></script>
+  <script src="map-layout.js?v=8b7e0c00ea40" defer></script>
+  <script src="atlas-geography.js?v=613c6439287c" defer></script>
+  <script src="trace.js?v=b0e8dbc8b88b" defer></script>
+  <script src="labels.js?v=54cfa65a113e" defer></script>
+  <script src="atlas-names.js?v=5aa0b5e0e4a3" defer></script>
+  <script src="atlas-view.js?v=74f9c0b89784" defer></script>
+  <script id="atlas-assets" type="application/json">{"reliefVersion":"d187936bd7cf","worker":"atlas-worker.js?v=ecc65f777d8a","painter":"atlas-painter.js?v=e78c1664b905","reliefIndex":"relief/index.js?v=47b0a09c73cc","near":"atlas/geo0.bin?v=b70a77dcd1fd","far":"atlas/geo1.bin?v=cb9176e8907d","land":"atlas/land.jpg?v=ecca4f0287bf","landSmall":"atlas/land-small.jpg?v=cb4f5911b8e6","sea":"atlas/sea.jpg?v=d56536eb8836"}</script>
+  <script src="app.js?v=9c88205e683d" defer></script>
   <script src="postcard-export.js?v=048b39ce6827" defer></script>
-  <script src="postcards.js?v=bb3aca0cbd97" defer></script>
-  <script src="jpeg.js?v=c37b5b32449f" defer></script>
-  <script src="archive.js?v=da8038227250" defer></script>
-  <script src="storage.js?v=3cce0fd32f7e" defer></script>
-  <script src="album-motion.js?v=427d599dad6d" defer></script>
-  <script src="trips.js?v=7b2217c50dcd" defer></script>
+  <script src="postcards.js?v=5ca7a6299787" defer></script>
+  <script src="jpeg.js?v=5732e6d6ead7" defer></script>
+  <script src="archive.js?v=620ee28b6af9" defer></script>
+  <script src="storage.js?v=644ca96cbfdc" defer></script>
+  <script src="album-motion.js?v=528818e2ba7e" defer></script>
+  <script src="trips.js?v=71177cea2e87" defer></script>
 </head>
 <body>
   <main aria-label="Travel map">
-    <div class="map-shell" id="map-shell">
-      <svg id="map" viewBox="0 0 1440 720" preserveAspectRatio="none" aria-label="World map showing your travel route" role="img" tabindex="-1">
-        <g id="map-artwork">
-        <rect width="1440" height="720" fill="var(--ocean)" aria-hidden="true"/>
-        <g id="land"></g>
-        <g id="antarctica" aria-hidden="true"></g>
-        <image id="atlas-tones" href="atlas-tones.png?v=3be8a22dfe09" width="1440" height="720" preserveAspectRatio="none" pointer-events="none" aria-hidden="true"/>
-        <image id="atlas-overview" href="relief/overview.webp?v=ac4122ed741c" width="1440" height="720" preserveAspectRatio="none" pointer-events="none" aria-hidden="true"/>
-        <g id="atlas-relief" pointer-events="none" aria-hidden="true"></g>
-        <g id="graticule" aria-hidden="true">
-          <path class="graticule-line" d="M120 0V720M240 0V720M360 0V720M480 0V720M600 0V720M840 0V720M960 0V720M1080 0V720M1200 0V720M1320 0V720M0 120H1440M0 240H1440M0 480H1440M0 600H1440"/>
-          <path class="crease-soft" d="M720 0V720M0 360H1440" vector-effect="non-scaling-stroke"/>
-          <path class="crease-edge" d="M720 0V720M0 360H1440" vector-effect="non-scaling-stroke"/>
-          <path class="crease-light" d="M720 0V720M0 360H1440" vector-effect="non-scaling-stroke"/>
-        </g>
-        <g id="country-borders" aria-hidden="true"></g>
-        <g id="regions" aria-hidden="true"></g>
-        <g id="map-labels" aria-hidden="true">
-          <text x="280" y="166" class="continent">NORTH AMERICA</text>
-          <text x="475" y="440" class="continent" transform="rotate(22 475 440)">SOUTH AMERICA</text>
-          <text x="784" y="150" class="continent">EUROPE</text>
-          <text x="800" y="350" class="continent">AFRICA</text>
-          <text x="1080" y="195" class="continent">ASIA</text>
-          <text x="1255" y="470" class="continent">AUSTRALIA</text>
-          <text x="590" y="300" class="ocean" transform="rotate(-18 590 300)">Atlantic Ocean</text>
-          <text x="171" y="390" class="ocean">Pacific Ocean</text>
-          <text x="1035" y="438" class="ocean">Indian Ocean</text>
-        </g>
-        </g>
-      </svg>
-      <svg id="place-labels" role="group" aria-label="Route stops"><g id="route-lines" aria-hidden="true"></g><g id="background-labels" aria-hidden="true"></g><g id="route-stops"></g></svg>
-    </div>
-    <div class="zoom-controls" aria-label="Map controls">
+    <!-- The map comes last in the tab order: a hundred stops must not stand between the keyboard and the planner. -->
+    <div class="zoom-controls" role="group" aria-label="Map controls">
       <button id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
       <button id="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
       <button id="reset-view" title="Show the world" aria-label="Show the world"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><ellipse cx="10" cy="10" rx="3" ry="6.5"/><path d="M3.5 10h13"/></svg></button>
@@ -90,23 +59,21 @@
     </section>
       <div id="trip-panel" class="logbook route-log" hidden role="region" aria-labelledby="trips-heading" tabindex="-1">
         <div class="logbook-inner"><div class="logbook-scroll">
-          <div class="logbook-head"><h2 id="trips-heading">Logbook</h2><p id="trips-summary"></p><button class="close-panel icon-button" data-close="trip-panel" aria-label="Close the logbook" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>
+          <div class="logbook-head"><h2 id="trips-heading">Logbook</h2><button class="close-panel icon-button" data-close="trip-panel" aria-label="Close the logbook" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>
           <div class="trip-navigation">
+          <!-- Before the list in tab order, though it sits at the top right: an open list may hold 200 trips. -->
+          <div class="current-actions"><button id="new-trip" class="text-button" type="button">+ New trip</button><button id="export-trip" class="text-button" type="button">Export trip</button></div>
           <details id="trip-switcher" class="trip-switcher"><summary>Switch trip <span aria-hidden="true">⌄</span></summary>
-          <div class="trip-list-heading"><h3>Saved trips</h3><label id="trip-search-label" class="trip-search" hidden><span class="sr-only">Find a trip</span><input id="trip-search" type="search" placeholder="Find a trip" autocomplete="off"></label></div>
+          <div class="trip-list-heading"><label id="trip-search-label" class="trip-search" hidden><span class="sr-only">Find a trip</span><input id="trip-search" type="search" placeholder="Find a trip" autocomplete="off"></label></div>
           <ul id="trip-list" class="trip-grid" aria-label="Saved trips"></ul>
           </details>
-          <div class="current-actions"><button id="new-trip" class="text-button" type="button">+ New trip</button><button id="export-trip" class="text-button" type="button">Export trip</button></div>
           </div>
           <section class="current-trip" aria-labelledby="current-trip-label">
-            <div id="current-trip-map" hidden class="trip-map current-map" aria-hidden="true"></div>
-            <div class="current-trip-info">
-              <p id="current-trip-label" class="eyebrow">Trip</p>
-              <form id="trip-name-form"><label for="trip-name" class="sr-only">Trip name</label><input id="trip-name" placeholder="Trip name" maxlength="80" required autocomplete="off"><button type="submit">Save</button></form>
-              <p id="trip-state" class="trip-state"></p>
-            </div>
+            <p id="current-trip-label" class="eyebrow">Trip</p>
+            <form id="trip-name-form"><label for="trip-name" class="sr-only">Trip name</label><input id="trip-name" placeholder="Trip name" maxlength="80" required autocomplete="off"><button type="submit">Save</button></form>
+            <p id="trip-state" class="trip-state"></p>
           </section>
-          <div class="log-route-heading"><span>Stops</span><button id="undo-route" class="text-button" type="button" title="Undo route edit (Ctrl / ⌘ + Z)" aria-keyshortcuts="Control+Z Meta+Z" disabled>↶ Undo</button><button id="clear" class="text-button" type="button">Clear route</button><button id="toggle-stops" type="button" aria-controls="route-stops-panel" aria-expanded="true" hidden></button></div>
+          <div class="log-route-heading"><span>Stops</span><button id="undo-route" class="text-button" type="button" title="Undo route edit (Ctrl / ⌘ + Z)" aria-keyshortcuts="Control+Z Meta+Z" disabled>↶ Undo</button><button id="clear" class="text-button" type="button">Clear route</button></div>
           <div id="route-stops-panel"><ol id="stop-list" aria-label="Stops in travel order"></ol><p id="empty-hint" hidden>Add a destination to begin.</p></div>
           <p id="trip-message" class="panel-message" role="status"></p>
           <details id="saved-trips"><summary>Backed-up trips</summary>
@@ -115,6 +82,11 @@
           <div class="logbook-foot"><p class="storage-note">Kept in this browser only.</p><button id="backup-trips" class="text-button" type="button">Back up all</button><button id="import-trips" class="text-button" type="button">Import backup</button><input id="trip-backup-file" type="file" accept=".redline,application/octet-stream" hidden></div>
         </div></div>
       </div>
+    <div class="map-shell" id="map-shell">
+      <canvas id="map" role="img" aria-label="World map showing your travel route" tabindex="-1"></canvas>
+      <svg id="place-labels" role="group" aria-label="Route stops"><g id="route-lines" aria-hidden="true"></g><g id="route-stops"></g></svg>
+      <svg class="atlas-source" width="0" height="0" aria-hidden="true"><defs><g id="land"></g></defs></svg>
+    </div>
     <dialog id="photo-panel" class="album" aria-labelledby="photos-heading" tabindex="-1">
       <div id="album-display">
         <button id="album-top-edge" type="button" hidden aria-controls="album-toolbar" aria-expanded="false" aria-label="Show photo toolbar"></button>
@@ -140,7 +112,7 @@
               </nav>
               <div id="photo-progress" class="photo-progress" role="progressbar" aria-label="Processing photos" aria-valuemin="0" hidden><span></span></div>
               <div id="photo-scroll" class="photo-scroll">
-                <div id="photo-review" class="import-list" hidden aria-label="Photos to import"></div>
+                <div id="photo-review" hidden aria-label="Photos to import"></div>
                 <div id="photo-gallery"></div>
               </div>
               <div id="photo-import-actions" class="photo-import-actions" hidden><button id="cancel-photo-import" class="text-button" type="button">Cancel</button><span id="photo-ready-count"></span><button id="upload-photos" class="small-button primary-button" type="button">Save photos</button></div>
@@ -162,6 +134,7 @@
           <button id="album-next" class="album-turn" type="button" aria-label="Next page" title="Next page (→)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m8 5 5 5-5 5"/></svg></button>
         </div>
         <p id="photo-message" class="panel-message" role="status" aria-live="polite"></p>
+        <span id="album-live" class="sr-only" role="status" aria-live="polite"></span>
         <dialog id="photo-viewer" aria-label="Photo and postcard" tabindex="-1">
           <span id="postcard-save-status" class="sr-only" role="status"></span>
           <div id="postcard-stage"><div id="postcard-card">
@@ -191,14 +164,15 @@
     <dialog id="info-dialog" aria-labelledby="info-title">
       <div class="panel-top"><h2 id="info-title">A few bearings</h2><button id="close-info" class="close-panel" aria-label="Close information" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>
       <dl class="info-shortcuts">
-        <dt>Plan a trip</dt><dd>Type a destination and press Enter. Use ↑ ↓ to choose a search result. In the logbook, drag a city’s name to reorder it, or focus it and use Alt + arrow keys. Use × beside a stop to remove it. Undo or Ctrl + Z (⌘ + Z on Mac) restores route edits, including a cleared route; Ctrl / ⌘ + Shift + Z redoes them.</dd>
-        <dt>Trace route</dt><dd>Press Return or Space to start or resume the trace, and hold either for 2× speed. The Trace route button pauses. A full trip finishes at the world overview. Zoom during travel to follow the line at your chosen level.</dd>
+        <dt>Plan a trip</dt><dd>Type a destination and press Enter. Use ↑ ↓ to choose a search result. In the logbook, drag a city’s name to reorder it (on a touch screen, drag its number), or focus it and use Alt + arrow keys. Use × beside a stop to remove it. Undo or Ctrl + Z (⌘ + Z on Mac) restores route edits, including a cleared route; Ctrl / ⌘ + Shift + Z redoes them.</dd>
+        <dt>Trace route</dt><dd>Press Return or Space to start or resume the trace, and hold either for 2.5× speed. The Trace route button pauses. A full trip finishes at the world overview. Zoom before or during travel to follow the line at your chosen level.</dd>
         <dt>One city at a time</dt><dd>Click a city to look at it within the whole trip. The arrows beside Trace route, or your arrow keys, then travel from that city to the next or previous one; press again during travel to arrive at once. Backspace (Delete on a Mac), Home, or the globe glides back to the overview.</dd>
         <dt>Just the map</dt><dd>Press H to hide the controls. H, Escape, or a double-click on the map brings them back.</dd>
-        <dt>The logbook</dt><dd>S saves the trip. L opens a lined logbook on the left: name the trip, drag stops to reorder them, or remove them. Switch trip at the top opens your other trips and their rename, export, and delete controls. Backed-up trips lists trips exported or imported since backup tracking began. Trips, photos, and postcards stay in this browser with no account; use Back up all regularly and Import backup to restore or move devices. Clearing website data or private browsing can erase them, and backups contain your photos and notes, so keep them private.</dd>
-        <dt>The album</dt><dd>A opens the album to your last page. Press F to fill the window or return to the regular view. Click outside or press Escape to close the book. Turn pages with the arrows, ← →, the page corners, a swipe, or the slider; Home and End close it on either cover. The contents page and the tabs on its edge jump to a city, and the pin beside a city’s name finds it on the map. All photos shows every photo at once; press Select, then click photos (Shift-click selects a run) to move or delete them. Add photos, or drag them anywhere onto the page; photos with location data find their city. City locations: <a href="https://www.geonames.org/" target="_blank" rel="noreferrer">GeoNames</a>.</dd>
+        <dt>The logbook</dt><dd>S saves the trip. L opens a lined logbook on the left: name the trip, drag stops to reorder them, or remove them. Switch trip at the top opens your other trips and their rename, export, and delete controls. Backed-up trips lists trips exported or imported since backup tracking began. Trips, photos, and postcards stay in this browser with no account; use Back up all regularly and Import backup to restore or move devices. Clearing website data or private browsing can erase them, and backups contain your photos and notes, so keep them private. Text you type into the destination box (two or more letters) is sent to Open-Meteo to find places, even when the place is also bundled.</dd>
+        <dt>The album</dt><dd>A opens the album to your last page. Press F to fill the window or return to the regular view; there, the window’s top edge brings up the toolbar and its right edge the city tabs. Click outside or press Escape to close the book. Turn pages with the arrows, ← →, the page corners, a swipe, or the slider; Home and End close it on either cover. The contents page and the tabs on its edge jump to a city, and the pin beside a city’s name finds it on the map. All photos shows every photo at once; press Select, then click photos (Shift-click selects a run) to move or delete them. Add photos, or drag them anywhere onto the page; photos with location data find their city. City locations: <a href="https://www.geonames.org/" target="_blank" rel="noreferrer">GeoNames</a>.</dd>
         <dt>Photos and postcards</dt><dd>Click a print to open it; browse its city with ← →, a swipe, or the arrows at the photo’s edges. Use Caption on the photo’s front to write the caption shown in the album. Captions save separately from postcard messages and are included in backups. Use the bin to delete a photo; All photos → Select also lets you move photos. Choose Postcard, press F, or click the photo to turn it over and write on the back; it saves automatically, and Save commits your changes immediately. Click outside or press Escape to close. Print or Ctrl + P (⌘ + P on Mac) prints both sides, and Share sends an image of both sides.</dd>
-        <dt>The map</dt><dd>Scroll or use + / − to zoom. Drag to pan when zoomed in. Country, city, and regional detail appears as you zoom.</dd>
+        <dt>The map</dt><dd>Scroll, pinch, or use + / − to zoom. Double-click to zoom in, Shift + double-click to zoom out. Drag to pan when zoomed in; a flick coasts to a stop. Country, city, and regional detail appears as you zoom.</dd>
+        <dt>Credits</dt><dd>Coasts, rivers and regions from <a href="https://www.naturalearthdata.com/" target="_blank" rel="noreferrer">Natural Earth</a>. A photo’s city comes from <a href="https://www.geonames.org/" target="_blank" rel="noreferrer">GeoNames</a>, under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>. Set in IM Fell English and Dancing Script, under the SIL Open Font License.</dd>
       </dl>
     </dialog>
   </main>

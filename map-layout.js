@@ -2,9 +2,11 @@
 (() => {
   const project=([longitude,latitude])=>[(longitude+180)*4,(90-latitude)*4];
   function route(interpolate){
+    // Points by arc length: a short hop has no curve worth 240 segments, and every segment costs label layout.
+    const steps=Math.max(8,Math.min(240,Math.ceil((interpolate.distance??Math.PI)/Math.PI*240)));
     let path='',previous=null;
-    for(let i=0;i<=240;i++){
-      const point=project(interpolate(i/240));
+    for(let i=0;i<=steps;i++){
+      const point=project(interpolate(i/steps));
       if(previous&&Math.abs(point[0]-previous[0])>720){
         // Split at the date line so the tracer never draws across the entire sheet.
         const right=previous[0]>720,edge=right?1440:0;

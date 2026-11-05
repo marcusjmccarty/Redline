@@ -3,8 +3,10 @@
   'use strict';
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
   const maxZoom=240,autoZoomLimit=36;
-  const duration=length=>Math.max(1600,Math.min(3600,length*6));
+  const duration=length=>length<1?150:Math.max(560,Math.min(1500,length*2.2));
   const ease=value=>{const t=clamp(value,0,1);return t*t*t*(t*(t*6-15)+10);};
+  // Leaves at once and settles softly: camera moves answer the moment they are asked for.
+  const snap=value=>{const t=clamp(value,0,1),u=1-t;return 1-u*u*u*(1+.6*t);};
   // Ramp velocity smoothly over the first and last 30% of a move. The
   // constant-speed middle avoids a sudden rush on a multi-octave zoom.
   function cameraPhase(t){
@@ -21,12 +23,12 @@
   function trackingCamera(start,space,world,maxZoom){
     const fx=(space.left+space.right)/2/space.width,fy=(space.top+space.bottom)/2/space.height;
     let zoom={value:Math.log(world.w/start.w),velocity:0},x={value:start.x+fx*start.w,velocity:0},y={value:start.y+fy*start.h,velocity:0};
-    return {step(point,level,milliseconds){
+    return {jump(point){x={value:point[0],velocity:0};y={value:point[1],velocity:0};},step(point,level,milliseconds){
       const seconds=Math.max(0,milliseconds)/1000;
-      zoom=spring(zoom,Math.log(level),seconds,18);
+      zoom=spring(zoom,Math.log(level),seconds,26);
       if(zoom.value<0||zoom.value>Math.log(maxZoom))zoom={value:clamp(zoom.value,0,Math.log(maxZoom)),velocity:0};
       const w=world.w/Math.exp(zoom.value),h=w*world.h/world.w;
-      x=spring(x,point[0],seconds,15);y=spring(y,point[1],seconds,15);
+      x=spring(x,point[0],seconds,24);y=spring(y,point[1],seconds,24);
       const frame={x:clamp(x.value-fx*w,0,world.w-w),y:clamp(y.value-fy*h,0,world.h-h),w,h};
       if(frame.x!==x.value-fx*w)x={value:frame.x+fx*w,velocity:0};
       if(frame.y!==y.value-fy*h)y={value:frame.y+fy*h,velocity:0};
@@ -35,12 +37,12 @@
   }
 
   function measure(path){
-    const points=[],segments=[];let prefix='',moves=0;
+    const points=[],segments=[];let moves=0;
     for(const match of path.matchAll(/([ML])([\d.e+-]+),([\d.e+-]+)/gi)){
       const x=Number(match[2]),y=Number(match[3]),previous=points.at(-1),move=match[1]==='M';
       const distance=previous&&!move?Math.hypot(x-previous.x,y-previous.y):0;
-      prefix+=match[0];if(move)moves++;
-      points.push({x,y,move,distance:(previous?.distance||0)+distance,end:prefix.length});
+      if(move)moves++;
+      points.push({x,y,move,distance:(previous?.distance||0)+distance});
       if(distance)segments.push({a:[previous.x,previous.y],b:[x,y],start:previous.distance,end:previous.distance+distance});
     }
     const length=points.at(-1)?.distance||0;
@@ -52,11 +54,6 @@
       const from=points[low],to=points[low+1]||from;
       const t=(distance-from.distance)/Math.max(1e-9,to.distance-from.distance);
       return {index:low,point:[from.x+(to.x-from.x)*t,from.y+(to.y-from.y)*t]};
-    }
-    function pathAt(amount){
-      if(amount>=1||!points.length)return path;
-      const {index,point}=locate(amount);
-      return prefix.slice(0,points[index].end)+'L'+point.join(',');
     }
     // Draw the red ink in CSS pixels, alongside the fixed-size city pins.
     // No zoomed SVG stroke or round cap can briefly rasterize at world scale.
@@ -81,7 +78,7 @@
     }
     const xs=points.map(p=>p.x),ys=points.map(p=>p.y);
     const bounds=points.length?{left:Math.min(...xs),right:Math.max(...xs),top:Math.min(...ys),bottom:Math.max(...ys)}:{left:0,right:0,top:0,bottom:0};
-    return {length,path,pathAt,screenPathAt,pointAt,segmentsAt,bounds,points:points.map(p=>[p.x,p.y]),crossesSeam:moves>1};
+    return {length,path,screenPathAt,pointAt,segmentsAt,bounds,crossesSeam:moves>1};
   }
 
   function pointFrame(point,space,world,zoom){
@@ -101,8 +98,10 @@
   }
   function camera(geometry,space,world,destination,zoom=null,before=null,after=null){
     if(zoom){const follow=point=>pointFrame(point,space,world,zoom);return {follow,arrival:follow(destination)};}
+    // A leg that goes nowhere has nothing to frame: it holds its neighbours' composition, and they ignore it.
+    if(before?.length<.01)before=null;if(after?.length<.01)after=null;
     const {left,right,top,bottom}=geometry.bounds,center=[(left+right)/2,(top+bottom)/2];
-    let level=fitLevel(geometry.bounds,space,world);
+    let level=geometry.length<.01?Math.max(1,...[before,after].filter(Boolean).map(leg=>fitLevel(leg.bounds,space,world))):fitLevel(geometry.bounds,space,world);
     // Limit a solitary close-up between wider legs, while preserving detail
     // throughout a local itinerary. Work in zoom ratios, in either direction.
     if(before&&after){
@@ -142,33 +141,44 @@
     return Object.fromEntries(['x','y','w','h'].map(key=>[key,start[key]+(target[key]-start[key])*share]));
   }
 
-  const zoomDuration=ratio=>1050*Math.abs(Math.log2(ratio));
+  const zoomDuration=ratio=>310*Math.abs(Math.log2(ratio));
   // Prepare once per leg. Playback spends time according to the ink's screen
   // distance AND the camera's zoom, rather than speeding up the ink as a zoom
   // finishes. A shared clock keeps hold-to-accelerate and pause/resume in sync.
   function journey({geometry,space,start,plan,from=0,to=1}){
     const count=256,times=new Float64Array(count+1),positions=new Float64Array(count+1);
     const ratio=plan.arrival.w/start.w,logRatio=Math.abs(Math.log(ratio));
-    const nominal=Math.max(1200,Math.abs(to-from)*duration(geometry.length));
-    const pixelsPerSecond=clamp(Math.hypot(space.right-space.left,space.bottom-space.top)*.24,150,300);
+    // Scaled by what is left, so a leg resumed near its port does not stall there.
+    const nominal=Math.abs(to-from)*(geometry.length<.01?duration(0):Math.max(420,duration(geometry.length)));
+    const pixelsPerSecond=clamp(Math.hypot(space.right-space.left,space.bottom-space.top)*.62,420,1000);
     const travel=u=>{
       const ramp=.1;
       const rounded=u<ramp?u*u/(2*ramp*(1-ramp)):u>1-ramp?1-(1-u)**2/(2*ramp*(1-ramp)):(u-ramp/2)/(1-ramp);
       const fit=Math.exp(-logRatio*(1-framingPhase(u)));
       return from+(to-from)*rounded*(ratio>=1?fit:.35+.65*fit);
     };
+    const seen=(p,frame)=>{const x=(p[0]-frame.x)*space.width/frame.w,y=(p[1]-frame.y)*space.height/frame.h;return x>=0&&x<=space.width&&y>=0&&y<=space.height;};
     let previous=start,point=geometry.pointAt(from);
     positions[0]=from;
     for(let i=1;i<=count;i++){
-      const u=i/count,position=travel(u),nextPoint=geometry.pointAt(position),frame=cameraView(start,plan,nextPoint,u);
+      const u=i/count;let position=travel(u),nextPoint=geometry.pointAt(position);
+      const frame=cameraView(start,plan,nextPoint,u),over=p=>Math.abs(p[0]-point[0])>720,clear=p=>seen(p,frame)&&!over(p);
+      // The ink waits at the window's edge, or at the date line until the far side is in frame too, rather than drawing where nobody can see it. The last sample always lands.
+      if(i<count&&!clear(nextPoint)){
+        let low=positions[i-1],high=position;
+        if(seen(point,frame))for(let step=0;step<20;step++){const mid=(low+high)/2;if(clear(geometry.pointAt(mid)))low=mid;else high=mid;}
+        if(!over(nextPoint)||!seen(nextPoint,frame)||!seen(geometry.pointAt(high),frame)){position=low;nextPoint=geometry.pointAt(low);}
+      }
       const w=(previous.w+frame.w)/2,h=(previous.h+frame.h)/2;
       const dx=nextPoint[0]-point[0],dy=nextPoint[1]-point[1];
-      const ink=Math.abs(dx)>720?geometry.length*Math.abs(position-positions[i-1])*Math.hypot(space.width/w,space.height/h)/Math.SQRT2:Math.hypot(dx*space.width/w,dy*space.height/h);
+      // Speed limits are for what can be seen: a tip off screen at both ends of a step weighs nothing.
+      const hidden=!seen(point,previous)&&!seen(nextPoint,frame);
+      const ink=hidden?0:Math.abs(dx)>720?geometry.length*Math.abs(position-positions[i-1])*Math.hypot(space.width/w,space.height/h)/Math.SQRT2:Math.hypot(dx*space.width/w,dy*space.height/h);
       const before=[(point[0]-previous.x)*space.width/previous.w,(point[1]-previous.y)*space.height/previous.h];
       const after=[(nextPoint[0]-frame.x)*space.width/frame.w,(nextPoint[1]-frame.y)*space.height/frame.h];
-      const movement=Math.abs(dx)>720?0:Math.hypot(after[0]-before[0],after[1]-before[1]);
+      const movement=hidden||Math.abs(dx)>720?0:Math.hypot(after[0]-before[0],after[1]-before[1]);
       const zoom=Math.abs(Math.log2(frame.w/previous.w));
-      times[i]=times[i-1]+Math.max(nominal/count,ink/pixelsPerSecond*1000,zoom/1.05*1000,movement/(pixelsPerSecond*1.3)*1000);
+      times[i]=times[i-1]+Math.max(nominal/count,ink/pixelsPerSecond*1000,zoom/3.2*1000,movement/(pixelsPerSecond*1.4)*1000);
       positions[i]=position;previous=frame;point=nextPoint;
     }
     const total=times[count];let elapsed=0;
@@ -181,27 +191,15 @@
       return {time:(low+share)/count,position:positions[low]+(positions[high]-positions[low])*share,arrived:false,done:false};
     }};
   }
-  function timeline({from,to,duration,widthRatio=1,easeStops=false}){
+  // The hand-zoomed camera's clock: the ink at a steady rate, whatever the tracker does.
+  function timeline({from,to,duration}){
     let elapsed=0;
-    const total=Math.max(Math.abs(to-from)*duration,zoomDuration(widthRatio)/.8);
-    const ramp=easeStops&&total?Math.min(.12,180/total):0;
-    const shoulder=t=>t*t/(2*ramp*(1-ramp));
+    const total=Math.abs(to-from)*duration;
     return {advance(delta){
       elapsed=clamp(elapsed+Math.max(0,delta),0,total);
       const time=total?elapsed/total:1;
-      // A long leg emerging from a close view can only reveal the fraction
-      // that fits. On a short leg keep some ink moving as the camera comes in.
-      const fit=Math.exp(-Math.abs(Math.log(widthRatio))*(1-framingPhase(time)));
-      // Round the start and end of the ink stroke without pausing at a city.
-      let travel=time;
-      if(ramp){
-        if(time<ramp)travel=shoulder(time);
-        else if(time>1-ramp)travel=1-shoulder(1-time);
-        else travel=(time-ramp/2)/(1-ramp);
-      }
-      const drawn=travel*(widthRatio>=1?fit:.35+.65*fit);
-      return {time,position:from+(to-from)*drawn,arrived:elapsed>=total,done:elapsed>=total};
+      return {time,position:from+(to-from)*time,arrived:elapsed>=total,done:elapsed>=total};
     }};
   }
-  globalThis.RedlineTrace=Object.freeze({maxZoom,measure,duration,zoomDuration,timeline,journey,ease,camera,cameraView,pointFrame,spring,trackingCamera});
+  globalThis.RedlineTrace=Object.freeze({maxZoom,measure,duration,zoomDuration,timeline,journey,ease,snap,camera,cameraView,pointFrame,spring,trackingCamera});
 })();

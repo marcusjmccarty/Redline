@@ -29,15 +29,14 @@
     frame=requestAnimationFrame(()=>{if(active)frame=requestAnimationFrame(finish);});
   }
   function element(className,parent){const node=document.createElement('div');node.className=className;parent.append(node);return node;}
-  function quarter(parent,x,y,bottom,bounds){
+  function quarter(parent,x,y,bottom,bounds,sheet){
     const panel=element(`unfold-quarter${bottom?' unfold-bottom':''}`,parent),face=element('unfold-face',panel);
-    face.style.setProperty('--paper-offset',`${-x*bounds.width/1440}px ${-y*bounds.height/720}px`);
-    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),use=document.createElementNS(svg.namespaceURI,'use');
+    // Each panel shows its quarter of the live painted sheet, so nothing changes when the panels leave.
+    const canvas=document.createElement('canvas');canvas.width=Math.ceil(sheet.width/2);canvas.height=Math.ceil(sheet.height/2);
+    canvas.getContext('2d')?.drawImage(sheet,x/1440*sheet.width,y/720*sheet.height,sheet.width/2,sheet.height/2,0,0,canvas.width,canvas.height);
+    face.append(canvas);
+    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
     svg.setAttribute('viewBox',`${x} ${y} 720 360`);svg.setAttribute('preserveAspectRatio','none');
-    // Reference, rather than clone, the actual map: colours, labels and saved
-    // routes remain identical when the temporary panels are removed.
-    use.setAttribute('href','#map-artwork');
-    svg.append(use);
     // Ink and pins share the same screen-space transform from the first fold.
     for(const id of ['route-lines','route-stops']){
       const ink=document.createElementNS(svg.namespaceURI,'use');
@@ -54,14 +53,14 @@
     // Attach rejection handling immediately, including partially built sequences.
     motion.finished.catch(()=>{});motions.push(motion);return motion;
   }
-  function unfold(){
+  function unfold(sheet){
     if(!active)return;
     const map=document.getElementById('map'),bounds=map?.getBoundingClientRect();
-    if(!bounds?.width||!bounds?.height||!document.getElementById('map-artwork')){finish();return;}
+    if(!bounds?.width||!bounds?.height||!sheet){finish();return;}
     try{
       stage=element('map-unfold',document.querySelector('main'));stage.setAttribute('aria-hidden','true');
-      const paper=element('unfold-paper',stage),leftTop=quarter(paper,0,0,false,bounds),leftBottom=quarter(paper,0,360,true,bounds);
-      const right=element('unfold-right',paper),rightTop=quarter(right,720,0,false,bounds),rightBottom=quarter(right,720,360,true,bounds);
+      const paper=element('unfold-paper',stage),leftTop=quarter(paper,0,0,false,bounds,sheet),leftBottom=quarter(paper,0,360,true,bounds,sheet);
+      const right=element('unfold-right',paper),rightTop=quarter(right,720,0,false,bounds,sheet),rightBottom=quarter(right,720,360,true,bounds,sheet);
       // Let the folded sheet register, open one hinge, pause, then open the
       // other. Translation follows each hinge instead of racing ahead of it.
       const arrival=100,acrossDuration=640,pause=70,downDuration=740,settle=150;
@@ -85,17 +84,13 @@
       Promise.all(motions.map(motion=>motion.finished)).then(handoff,finish);
     }catch{finish();}
   }
-  async function start(){
-    if(!active||started)return;started=true;guard(650);
+  async function start(atlas){
+    if(!active||started)return;started=true;guard(1500);
     try{
-      const href=document.getElementById('atlas-tones')?.getAttribute('href');
-      if(!href){finish();return;}
-      const images=[href,document.getElementById('atlas-overview')?.getAttribute('href')].filter(Boolean).map(src=>{const image=new Image();image.src=src;return image;});
-      if(images.some(image=>typeof image.decode!=='function')){finish();return;}
-      await Promise.all(images.map(image=>image.decode()));
-      if(!active)return;
-      if(images.some(image=>!image.naturalWidth)){finish();return;}
-      frame=requestAnimationFrame(unfold);
+      if(!await atlas?.ready||!active){finish();return;}
+      const sheet=atlas.snapshot();
+      if(!sheet){finish();return;}
+      frame=requestAnimationFrame(()=>unfold(sheet));
     }catch{finish();}
   }
   window.RedlineMapIntro={start};

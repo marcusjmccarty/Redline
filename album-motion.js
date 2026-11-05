@@ -34,6 +34,10 @@
     }
     pumpPreviews();return Promise.all(work);
   }
+  // Full-size images are too large to keep once the reader has moved on.
+  function release(urls){
+    for(const url of urls){const entry=previews.get(url);if(!entry)continue;previews.delete(url);entry.finish(false);entry.image.removeAttribute('src');}
+  }
   function clearPreloads(){
     const entries=[...previews.values()];previews.clear();previewQueue.length=0;
     for(const entry of entries){entry.finish(false);entry.image.removeAttribute('src');}
@@ -223,7 +227,7 @@
     const resumePreviews=holdPreviews();
     const arrival=make('album-arrival'),scene=make('album-cover-scene'),hinge=make('album-cover-hinge'),leaf=make('album-cover-leaf'),front=make('album-cover-front'),back=make('album-cover-back');
     const tabs=document.getElementById('gallery-filter'),tabParent=tabs.parentElement,tabNext=tabs.nextSibling;
-    const tabHeight=tabs.getBoundingClientRect().height,tabMaxHeight=tabs.style.maxHeight,tabScroll=[tabs.scrollTop,tabs.scrollLeft];
+    const tabHeight=tabs.getBoundingClientRect().height,tabSavedHeight=tabs.style.height,tabScroll=[tabs.scrollTop,tabs.scrollLeft];
     book.dataset.coverPreparing='true';
     const width=source.getBoundingClientRect().width||source.clientWidth||book.clientWidth;
     const size=book.getBoundingClientRect(),savedSize=[book.style.width,book.style.height,book.style.flex];
@@ -261,9 +265,9 @@
       .then(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))
       .then(()=>{
         if(disposed)return;
-        if(tabHeight)tabs.style.maxHeight=`${tabHeight}px`;
+        if(tabHeight)tabs.style.height=`${tabHeight}px`;
         scene.append(tabs);[tabs.scrollTop,tabs.scrollLeft]=tabScroll;book.dataset.coverMotion='true';
-        book.querySelector('.album-loading-cover')?.remove();delete book.dataset.preparing;
+        delete book.dataset.preparing;
         scene.style.visibility='';
       });
     // Every channel shares one clock. Reversing this exact timeline also
@@ -295,7 +299,7 @@
       dispose(){
         disposed=true;
         tabParent.insertBefore(tabs,tabNext?.parentElement===tabParent?tabNext:null);
-        tabs.style.maxHeight=tabMaxHeight;[tabs.scrollTop,tabs.scrollLeft]=tabScroll;
+        tabs.style.height=tabSavedHeight;[tabs.scrollTop,tabs.scrollLeft]=tabScroll;
         arrival.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.coverMotion;delete book.dataset.coverPreparing;
         [book.style.width,book.style.height,book.style.flex]=savedSize;
         resumePreviews();
@@ -380,11 +384,10 @@
         // Retire the outgoing stationary half first, while the finished leaf
         // still covers its side. The live destination has never been hidden.
         for(const page of [oldLeft,oldRight])if(page?.parentNode===layer)page.remove();
-        layer.dataset.handoff='true';
         await Promise.race([cancelled,new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))]);
       },
       dispose(){disposed=true;clearTimeout(readyTimer);cancelReady();tabs.style.translate=tabTranslate;layer.remove();animations.forEach(animation=>animation.cancel());delete book.dataset.viewMotion;[book.style.width,book.style.height,book.style.flex]=savedSize;resumePreviews();}
     };
   }
-  window.RedlineAlbumMotion={create,changeView,turnLeaf,preload,clearPreloads,idle,prepareImages};
+  window.RedlineAlbumMotion={create,changeView,turnLeaf,preload,release,clearPreloads,idle,prepareImages};
 })();
