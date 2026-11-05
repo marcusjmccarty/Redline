@@ -1457,7 +1457,9 @@ test('window reading view keeps the current spread, opens full photos and leaves
   button.click();
   assert.ok($('photo-panel').classList.contains('expanded'));assert.equal(nativeCalls,0);
   assert.equal($('album-position').textContent,page);assert.equal($('album-drawer').inert,true);
-  assert.equal($('gallery-filter').parentElement,$('album-drawer'));
+  assert.equal($('gallery-filter').parentElement,$('album-book'),'Tabs stay attached to the same book in window view');
+  assert.equal($('album-drawer').parentElement,$('album-book'));
+  assert.equal($('gallery-filter').inert,true);
   prints()[0].click();assert.ok($('photo-viewer').open);
   assert.equal(prints()[0].querySelector('img').src,$('full-photo').src);
   $('photo-viewer').dispatchEvent(new w.Event('cancel',{cancelable:true}));
@@ -1471,7 +1473,12 @@ test('window reading view keeps the current spread, opens full photos and leaves
 test('the window edge reveals city tabs, dismisses on leave, and provides a touch exit',async t=>{
   const {w,$,tab}=await setup(t),edge=$('album-edge'),drawer=$('album-drawer'),button=$('album-fullscreen');
   button.click();edge.dispatchEvent(new w.Event('pointerenter'));assert.equal(drawer.inert,false);
+  assert.equal($('photo-panel').classList.contains('index-open'),true);
+  assert.equal($('gallery-filter').inert,false);
+  edge.dispatchEvent(new w.MouseEvent('pointerleave',{relatedTarget:tab(madrid.id)}));
+  assert.equal($('photo-panel').classList.contains('index-open'),true,'Crossing from the edge onto an attached tab keeps the book shifted');
   $('album-index').dispatchEvent(new w.Event('pointerleave'));assert.equal(drawer.inert,true);
+  assert.equal($('photo-panel').classList.contains('index-open'),false);
   edge.click();assert.equal(edge.getAttribute('aria-expanded'),'true');tab(madrid.id).click();
   assert.match($('album-position').textContent,/Madrid/);assert.equal(drawer.inert,true);
   edge.click();$('album-restore').click();assert.equal(button.getAttribute('aria-pressed'),'false');
@@ -1511,6 +1518,12 @@ test('rapid next-city taps keep the 9px city markers outside the zooming world v
   for(let i=0;i<12;i++){
     $('next-city').click();
     const layer=$('route-stops');assert.equal(layer.ownerSVGElement,$('place-labels'));
+    const ink=$('route-lines');assert.equal(ink.ownerSVGElement,$('place-labels'),'The red line and its round caps cannot scale during camera jumps');
+    for(const [j,path] of [...ink.children].entries()){
+      if(path.style.visibility==='hidden'||!path.getAttribute('d'))continue;
+      const end=path.getAttribute('d').match(/[-\d.]+/g).map(Number).slice(-2),pin=layer.children[j+1].getAttribute('transform').slice(10,-1).split(' ').map(Number);
+      assert.ok(Math.hypot(end[0]-pin[0],end[1]-pin[1])<.02,'The complete stroke lands on the fixed-size city pin');
+    }
     assert.equal(layer.ownerSVGElement.hasAttribute('viewBox'),false,'The overlay uses CSS pixel coordinates');
     for(const pin of layer.children){
       assert.equal(pin.querySelector('circle').getAttribute('r'),'4.5');
@@ -1518,4 +1531,26 @@ test('rapid next-city taps keep the 9px city markers outside the zooming world v
     }
   }
   assert.equal(w.document.querySelectorAll('#route-stops [role=button]').length,3);
+});
+
+test('Backspace returns to the overview faster while preserving its exact final framing',async t=>{
+  const route=[paris,{...paris,id:'near-paris',name:'Saint-Denis',latitude:48.9362,longitude:2.3574},madrid];
+  const {w,$,press}=await setup(t,{realMap:true,route,seed:false});
+  press('Escape');await tick();
+  const frames=new Map();let id=10000,now=1000;
+  Object.defineProperty(w.performance,'now',{value:()=>now});
+  w.requestAnimationFrame=callback=>{frames.set(++id,callback);return id;};w.cancelAnimationFrame=key=>frames.delete(key);
+  const world=$('map').getAttribute('viewBox');
+  const returning=key=>{
+    $('next-city').click();$('next-city').click();$('next-city').click();
+    assert.notEqual($('map').getAttribute('viewBox'),world);
+    const start=now;press(key);
+    assert.notEqual($('map').getAttribute('viewBox'),world,'The shortcut still glides instead of jumping');
+    while($('map').getAttribute('viewBox')!==world&&now-start<12000){
+      now+=16;for(const [key,callback] of [...frames]){frames.delete(key);callback(now);}
+    }
+    assert.equal($('map').getAttribute('viewBox'),world);return now-start;
+  };
+  const normal=returning('Home'),quick=returning('Backspace');
+  assert.ok(quick>normal*.7&&quick<normal*.78,`${quick}ms versus ${normal}ms`);
 });

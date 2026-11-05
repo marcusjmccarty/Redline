@@ -14,6 +14,22 @@ const {project,route:routePath}=globalThis.RedlineLayout;
 
 function route(from,to){return routePath(geo.geoInterpolate(from,to));}
 
+test('screen-space ink retains its exact arc, arrival and date-line breaks at every zoom',()=>{
+  for(const pair of [[[2,48],[2.02,48.01]],[[-74,41],[31,30]],[[175,20],[-175,20]]]){
+    const leg=measure(route(...pair));
+    for(const zoom of [1,8,72,240]){
+      const matrix={a:zoom,d:zoom*1.4,e:-710*zoom,f:-300*zoom};
+      assert.equal(leg.screenPathAt(0,matrix),'');
+      for(const amount of [.01,.5,1]){
+        const screen=measure(leg.screenPathAt(amount,matrix)),end=screen.pointAt(1),point=leg.pointAt(amount);
+        assert.ok(Math.abs(end[0]-(point[0]*matrix.a+matrix.e))<.011);
+        assert.ok(Math.abs(end[1]-(point[1]*matrix.d+matrix.f))<.011);
+        if(amount===1)assert.equal(screen.crossesSeam,leg.crossesSeam);
+      }
+    }
+  }
+});
+
 test('trace has time for a gentle camera move and starts without a delay',()=>{
   assert.equal(duration(10),1600);assert.equal(duration(300),1800);assert.equal(duration(1000),3600);
   const run=timeline({from:0,to:1,duration:2000});

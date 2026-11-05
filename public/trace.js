@@ -40,7 +40,7 @@
       const x=Number(match[2]),y=Number(match[3]),previous=points.at(-1),move=match[1]==='M';
       const distance=previous&&!move?Math.hypot(x-previous.x,y-previous.y):0;
       prefix+=match[0];if(move)moves++;
-      points.push({x,y,distance:(previous?.distance||0)+distance,end:prefix.length});
+      points.push({x,y,move,distance:(previous?.distance||0)+distance,end:prefix.length});
       if(distance)segments.push({a:[previous.x,previous.y],b:[x,y],start:previous.distance,end:previous.distance+distance});
     }
     const length=points.at(-1)?.distance||0;
@@ -58,6 +58,17 @@
       const {index,point}=locate(amount);
       return prefix.slice(0,points[index].end)+'L'+point.join(',');
     }
+    // Draw the red ink in CSS pixels, alongside the fixed-size city pins.
+    // No zoomed SVG stroke or round cap can briefly rasterize at world scale.
+    function screenPathAt(amount,matrix){
+      if(amount<=0||!points.length)return '';
+      const {index,point}=locate(amount);
+      const pair=(x,y)=>`${(x*matrix.a+matrix.e).toFixed(2)},${(y*matrix.d+matrix.f).toFixed(2)}`;
+      let result='';
+      for(let i=0;i<=index;i++){const p=points[i];result+=(p.move?'M':'L')+pair(p.x,p.y);}
+      if(amount<1)result+='L'+pair(...point);
+      return result;
+    }
     const pointAt=amount=>locate(amount).point;
     function segmentsAt(amount){
       const limit=clamp(amount,0,1)*length,result=[];
@@ -70,7 +81,7 @@
     }
     const xs=points.map(p=>p.x),ys=points.map(p=>p.y);
     const bounds=points.length?{left:Math.min(...xs),right:Math.max(...xs),top:Math.min(...ys),bottom:Math.max(...ys)}:{left:0,right:0,top:0,bottom:0};
-    return {length,path,pathAt,pointAt,segmentsAt,bounds,points:points.map(p=>[p.x,p.y]),crossesSeam:moves>1};
+    return {length,path,pathAt,screenPathAt,pointAt,segmentsAt,bounds,points:points.map(p=>[p.x,p.y]),crossesSeam:moves>1};
   }
 
   function pointFrame(point,space,world,zoom){

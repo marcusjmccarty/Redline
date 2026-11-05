@@ -82,10 +82,11 @@
     (back?.isConnected&&back!==document.body&&!back.closest('[hidden],[inert]')?back:$(triggers[id])).focus({preventScroll:true});
   }
   const albumPanel=$('photo-panel'),fullscreenButton=$('album-fullscreen');
-  const index=$('album-index'),drawer=$('album-drawer'),edge=$('album-edge');
+  const index=$('album-index'),drawer=$('album-drawer'),edge=$('album-edge'),tabs=$('gallery-filter');
   const reading=()=>albumPanel.classList.contains('expanded');
   function showIndex(open){
-    drawer.inert=!open;
+    drawer.inert=!open;tabs.inert=tabs.classList.contains('away')||reading()&&!open;
+    albumPanel.classList.toggle('index-open',reading()&&open);
     edge.setAttribute('aria-expanded',String(open));
     if(open)markTab();
   }
@@ -102,7 +103,7 @@
   toolbar.addEventListener('focusout',event=>{if(reading()&&!toolbar.contains(event.relatedTarget))showToolbar(false);});
   function windowView(expanded,restoreFocus=true){
     if(expanded===reading())return;
-    const nav=$('gallery-filter');
+    if(expanded&&tabs.contains(document.activeElement))albumPanel.focus({preventScroll:true});
     albumPanel.classList.toggle('expanded',expanded);
     fullscreenButton.setAttribute('aria-pressed',String(expanded));
     finishReviewTurn();
@@ -110,7 +111,6 @@
     showToolbar(false);
     fullscreenButton.setAttribute('aria-label',expanded?'Exit window view':'Fill window with album');
     fullscreenButton.title=expanded?'Exit window view (F or Esc)':'Fill window (F) · Top edge for toolbar · Right edge for city tabs';
-    (expanded?drawer:$('album-book')).append(nav);
     showIndex(false);
     if(mode()==='album')renderGallery();
     if(expanded&&mode()==='album')preload(albumPage+step());
@@ -121,14 +121,25 @@
   edge.addEventListener('pointerenter',event=>{if(event.pointerType!=='touch')showIndex(true);});
   edge.addEventListener('click',()=>{
     showIndex(true);
-    (drawer.querySelector('[aria-current="true"]')||$('album-restore')).focus({preventScroll:true});
+    (tabs.querySelector('[aria-current="true"]')||tabs.firstElementChild||$('album-restore')).focus({preventScroll:true});
   });
-  index.addEventListener('pointerleave',event=>{
-    if(event.pointerType!=='touch'&&!drawer.contains(document.activeElement))showIndex(false);
+  const onIndex=node=>node&&(index.contains(node)||drawer.contains(node)||tabs.contains(node));
+  const indexFocused=()=>onIndex(document.activeElement);
+  for(const rail of [index,drawer,tabs]){
+    rail.addEventListener('pointerleave',event=>{
+      if(reading()&&event.pointerType!=='touch'&&!onIndex(event.relatedTarget)&&!indexFocused())showIndex(false);
+    });
+    rail.addEventListener('focusout',event=>{if(reading()&&!onIndex(event.relatedTarget))showIndex(false);});
+  }
+  tabs.addEventListener('focusin',()=>{if(reading())showIndex(true);});
+  albumPanel.addEventListener('pointermove',event=>{
+    if(reading()&&event.pointerType!=='touch'&&albumPanel.classList.contains('index-open')&&!onIndex(event.target)&&!indexFocused()){
+      // Keep a small bridge between the fixed screen edge and the moving tabs.
+      if(event.clientX<innerWidth-170)showIndex(false);
+    }
   });
-  index.addEventListener('focusout',event=>{if(!index.contains(event.relatedTarget))showIndex(false);});
   albumPanel.addEventListener('pointerdown',event=>{
-    if(reading()&&!index.contains(event.target))showIndex(false);
+    if(reading()&&!onIndex(event.target))showIndex(false);
     if(reading()&&event.target!==topEdge&&!toolbar.contains(event.target))showToolbar(false);
   });
   $('gallery-filter').addEventListener('click',event=>{
@@ -575,7 +586,7 @@
     $('photo-bulk').hidden=!pending.length;$('photo-import-actions').hidden=!pending.length;
     $('album-view').setAttribute('aria-pressed',String(view==='album'));$('sheet-view').setAttribute('aria-pressed',String(view==='sheet'));
     $('album-view').disabled=$('sheet-view').disabled=reviewing;$('album-modes').classList.toggle('away',reviewing);
-    $('gallery-filter').classList.toggle('away',reviewing||!photos.length);$('gallery-filter').inert=reviewing||!photos.length;
+    $('gallery-filter').classList.toggle('away',reviewing||!photos.length);$('gallery-filter').inert=reviewing||!photos.length||reading()&&!albumPanel.classList.contains('index-open');
     $('photo-panel').classList.toggle('selecting',selecting&&!reviewing);
   }
   function warmPreviews(){
@@ -796,7 +807,7 @@
     const key=JSON.stringify([busy,groups.map(group=>[group.id,group.name,group.items.length,chapters.findIndex(page=>page.type==='city'&&page.first&&page.group.id===group.id)])]);
     if(key===tabsKey){markTab();return;}tabsKey=key;
     nav.replaceChildren(...groups.map((group,i)=>{
-      const tab=document.createElement('button');tab.type='button';tab.className='album-tab';tab.dataset.filter=group.id;tab.style.setProperty('--tab',String(i%6));tab.disabled=busy;
+      const tab=document.createElement('button');tab.type='button';tab.className='album-tab';tab.dataset.filter=group.id;tab.style.setProperty('--tab',String(i%6));tab.style.setProperty('--tab-order',String(i));tab.disabled=busy;
       const page=folioOf(chapters.findIndex(page=>page.type==='city'&&page.first&&page.group.id===group.id));
       const number=document.createElement('span');number.className='chip-stop';number.textContent=String(page).padStart(2,'0');number.title=`Page ${page}`;tab.append(number);
       const name=document.createElement('span'),count=document.createElement('span');name.className='tab-name';name.textContent=group.name;count.className='chip-count';count.textContent=String(group.items.length);tab.append(name,count);
@@ -812,13 +823,8 @@
     const tab=nav.querySelector('[aria-current="true"]');if(!tab)return;
     // Scroll only the tab rail. scrollIntoView can move the book's hidden
     // overflow ancestors and expose the stems through its 3D pages.
-    if(reading()){
-      if(tab.offsetTop<nav.scrollTop)nav.scrollTop=tab.offsetTop;
-      else if(tab.offsetTop+tab.offsetHeight>nav.scrollTop+nav.clientHeight)nav.scrollTop=tab.offsetTop+tab.offsetHeight-nav.clientHeight;
-    }else{
-      if(tab.offsetLeft<nav.scrollLeft)nav.scrollLeft=tab.offsetLeft;
-      else if(tab.offsetLeft+tab.offsetWidth>nav.scrollLeft+nav.clientWidth)nav.scrollLeft=tab.offsetLeft+tab.offsetWidth-nav.clientWidth;
-    }
+    if(tab.offsetTop<nav.scrollTop)nav.scrollTop=tab.offsetTop;
+    else if(tab.offsetTop+tab.offsetHeight>nav.scrollTop+nav.clientHeight)nav.scrollTop=tab.offsetTop+tab.offsetHeight-nav.clientHeight;
   }
 
   function goToCity(id,{instant=false}={}){

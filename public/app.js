@@ -76,7 +76,7 @@
   const project=p=>RedlineLayout.project([p.longitude,p.latitude]);
   const backgroundPoints=window.MAP_CITIES.map(project);
   const paintRelief=RedlineAtlas.relief($('atlas-relief'),window.REDLINE_RELIEF);
-  let hiddenMapCities=new Set(),stopPeers=[],routeIndex=null,routeIndexGeometry=null,routeIndexKey='';
+  let hiddenMapCities=new Set(),stopPeers=[],routeIndex=null,routeIndexGeometry=null,routeIndexKey='',routeMatrix=null,routeMatrixKey='';
   function rebuildGeometry(){
     const names=stops.map(stop=>normalize(stop.name));
     stopPeers=stops.map((a,index)=>stops.flatMap((b,i)=>Math.abs(a.latitude-b.latitude)<.15&&Math.abs(a.longitude-b.longitude)<.15&&names[index]===names[i]?[i]:[]));
@@ -85,7 +85,7 @@
       const interpolate=RedlineGeo.geoInterpolate([stops[i].longitude,stops[i].latitude],[place.longitude,place.latitude]);
       return RedlineTrace.measure(RedlineLayout.route(interpolate));
     });
-    lines.forEach((path,i)=>{path._amount=null;path.setAttribute('d',geometry[i].path);});
+    lines.forEach(path=>{path._amount=null;path.removeAttribute('d');});
   }
   function setPlayState(value) {
     running=value;$('play-label').textContent=value?'Pause':'Trace route';$('route-dock').classList.toggle('sailing',value);
@@ -101,10 +101,10 @@
     lines.forEach((path,i)=>{
       const amount=progress===null?1:Math.max(0,Math.min(1,progress-i));
       // Reveal the cached arc by screen distance for a steady drawing speed.
-      if(path._amount!==amount){
-        path.style.visibility=amount===0?'hidden':'';
-        path.setAttribute('d',geometry[i].pathAt(amount));
-        path._amount=amount;
+      if(path._amount!==amount||path._matrix!==routeMatrixKey){
+        path.style.visibility=amount===0||!routeMatrix?'hidden':'';
+        path.setAttribute('d',routeMatrix?geometry[i].screenPathAt(amount,routeMatrix):'');
+        path._amount=amount;path._matrix=routeMatrixKey;
       }
     });
     [...$('route-stops').children].forEach((node,i)=>{
@@ -418,6 +418,8 @@
     if(mapOccluded)return;
     const bounds=map.getBoundingClientRect();if(!bounds.width||!bounds.height)return;viewportBounds=bounds;
     const matrix=mapMatrix(bounds);
+    routeMatrix={a:matrix.a,d:matrix.d,e:matrix.e-bounds.left,f:matrix.f-bounds.top};
+    routeMatrixKey=[routeMatrix.a,routeMatrix.d,routeMatrix.e,routeMatrix.f].join(',');
     // All geometry reads precede writes. Asking SVG for its CTM after changing
     // viewBox used to force layout on every zoom / trace frame.
     const local=(el,pad)=>{const r=el.getBoundingClientRect();return {x:r.left-bounds.left-pad,y:r.top-bounds.top-pad,w:r.width+pad*2,h:r.height+pad*2};};
@@ -550,14 +552,14 @@
     }};
   }
   function showWorld(){progress=null;activeLeg=null;activeStopId=null;traceZoom=null;focused=null;updateActiveStop();}
-  function animateView(target,{overview=false,hold=0}={}){
+  function animateView(target,{overview=false,hold=0,speed=1}={}){
     stopAnimation();cancelAnimationFrame(viewFrame);viewFrame=0;
     const finish=()=>{stopAnimation();view={...target};if(overview)showWorld();paintView();};
     const path=zoomPath(constrainView(view),target);
     if(matchMedia('(prefers-reduced-motion: reduce)').matches||path.length<1e-4){finish();return;}
     // Arrow keys during an overview move finish it instantly.
     if(overview)playback={phase:'overview'};
-    const duration=overview?Math.max(path.duration,RedlineTrace.zoomDuration(target.w/view.w)):path.duration;
+    const duration=(overview?Math.max(path.duration,RedlineTrace.zoomDuration(target.w/view.w)):path.duration)/speed;
     const began=performance.now();
     const tick=now=>{
       const amount=Math.max(0,Math.min(1,(now-began-hold)/duration));
@@ -568,7 +570,7 @@
   }
   function returnToWorld(){animateView({...baseView},{overview:true,hold:320});if(playback)setPlayState(true);}
   // Enter, Home, and the globe: the complete route, with the camera easing back to the world.
-  function showOverview(){stopAnimation();showWorld();paintProgress();animateView({...baseView},{overview:true});}
+  function showOverview(speed=1){stopAnimation();showWorld();paintProgress();animateView({...baseView},{overview:true,speed});}
   // A clicked city is seen within the whole drawn trip; the arrows or play then continue from it.
   function jumpToCity(index){
     if(!stops[index])return;
@@ -658,7 +660,7 @@
       if(!event.repeat){if(event.target.id==='play')trace();else startTrace();}return;
     }
     // Backspace (Delete on a Mac keyboard) glides back to the whole-trip overview.
-    if(event.key==='Backspace'||event.key==='Delete'){event.preventDefault();if(!event.repeat)showOverview();return;}
+    if(event.key==='Backspace'||event.key==='Delete'){event.preventDefault();if(!event.repeat)showOverview(1.35);return;}
     if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home'].includes(event.key)){
       event.preventDefault();if(event.repeat)return;
       if(event.key==='Home')showOverview();else stepTrip(['ArrowRight','ArrowDown'].includes(event.key)?1:-1);

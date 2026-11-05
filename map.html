@@ -54,10 +54,9 @@
           <text x="171" y="390" class="ocean">Pacific Ocean</text>
           <text x="1035" y="438" class="ocean">Indian Ocean</text>
         </g>
-        <g id="route-lines"></g>
         </g>
       </svg>
-      <svg id="place-labels" role="group" aria-label="Route stops"><g id="background-labels" aria-hidden="true"></g><g id="route-stops"></g></svg>
+      <svg id="place-labels" role="group" aria-label="Route stops"><g id="route-lines" aria-hidden="true"></g><g id="background-labels" aria-hidden="true"></g><g id="route-stops"></g></svg>
     </div>
     <div class="atlas-frame" aria-hidden="true"></div>
     <div class="zoom-controls" aria-label="Map controls">
@@ -146,13 +145,14 @@
             </div>
             <div id="photo-drop-hint" aria-hidden="true" hidden><span>Drop photos to add them</span></div>
             <nav id="gallery-filter" class="album-tabs" aria-label="Go to a city"></nav>
-          </div>
-        </div>
-        <div id="album-index" hidden>
-          <button id="album-edge" type="button" aria-label="Show album controls and city tabs" aria-controls="album-drawer" aria-expanded="false"></button>
           <div id="album-drawer" inert>
             <button id="album-restore" type="button">Exit window view <span aria-hidden="true">↙</span></button>
           </div>
+          </div>
+        </div>
+        <div id="album-index" hidden>
+          <button id="album-edge" type="button" aria-label="Show album controls and city tabs" aria-controls="gallery-filter album-drawer" aria-expanded="false"></button>
+
         </div>
         <div id="album-foot" class="album-foot">
           <button id="album-previous" class="album-turn" type="button" aria-label="Previous page" title="Previous page (←)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5"/></svg></button>
