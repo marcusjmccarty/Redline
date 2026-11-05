@@ -1449,6 +1449,40 @@ test('review arrows queue during a turn, work on checkboxes, and leave city pick
   assert.equal($('album-book').inert,false);
 });
 
+test('the fullscreen front cover keeps its index usable until the book opens',async t=>{
+  const {w,$,press,tab}=await setup(t),panel=$('photo-panel'),book=$('album-book');
+  press('Home');press('f');
+  assert.ok(panel.classList.contains('cover-view'));
+  assert.equal($('gallery-filter').inert,false);assert.equal($('album-drawer').inert,false);
+  assert.equal(tab(paris.id).querySelector('.chip-stop').title,'Page 3');
+  assert.equal(tab(paris.id).querySelector('.chip-count').title,'2 photos');
+  $('album-edge').dispatchEvent(new w.Event('pointerenter'));
+  assert.equal(panel.classList.contains('index-open'),false,'The cover index needs no sliding reveal');
+  tab(paris.id).click();
+  assert.equal(book.classList.contains('closed-front'),false);
+  assert.equal(panel.classList.contains('cover-view'),false);assert.equal($('gallery-filter').inert,true);
+  press('Home');assert.ok(panel.classList.contains('cover-view'));assert.equal($('gallery-filter').inert,false);
+  press('f');assert.equal(panel.classList.contains('cover-view'),false);assert.equal($('gallery-filter').inert,false);
+});
+
+test('fullscreen resizes reverse cleanly and settle a page turn before changing size',async t=>{
+  const {w,$,press}=await setup(t),panel=$('photo-panel'),book=$('album-book'),motion=controlledMotion(w);
+  book.getBoundingClientRect=()=>panel.classList.contains('expanded')?{left:4,top:4,width:1200,height:800}:{left:160,top:90,width:880,height:560};
+  press('f');const first=[...motion.running].find(item=>item.element===book);
+  assert.ok(first);assert.match(first.frames[0].transform,/scale\(0\.733/);
+  assert.equal(book.dataset.windowMotion,'true');
+  press('f');const second=[...motion.running].find(item=>item.element===book);
+  assert.ok(second&&second!==first);assert.equal(motion.running.has(first),false);
+  await tick();assert.equal(book.dataset.windowMotion,'true','A cancelled resize cannot clear its replacement');
+  await motion.finish();assert.equal(book.dataset.windowMotion,undefined);assert.equal(panel.classList.contains('expanded'),false);
+  press('ArrowRight');assert.ok(motion.running.size>0);
+  press('f');assert.ok(panel.classList.contains('expanded'));
+  assert.match($('album-position').textContent,/Paris/);
+  assert.ok([...motion.running].every(item=>item.element===book),'Resize settles all old turning leaves');
+  await motion.finish();assert.equal(book.dataset.windowMotion,undefined);assert.equal(book.inert,false);
+  w.matchMedia=()=>({matches:true});press('f');assert.equal(motion.running.size,0,'Reduced motion changes size immediately');
+});
+
 test('window reading view keeps the current spread, opens full photos and leaves browser fullscreen alone',async t=>{
   const {w,$,press,tab,prints}=await setup(t),button=$('album-fullscreen'),display=$('album-display');
   let nativeCalls=0;display.requestFullscreen=display.webkitRequestFullscreen=()=>{nativeCalls++;};

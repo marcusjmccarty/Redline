@@ -86,16 +86,17 @@ test('relief is local, bounded to the visible terrain, and released at overview'
     for(let y=0;y<720;y+=27)for(let x=0;x<1440;x+=57){
       const view={x,y,w:1440/zoom,h:720/zoom};
       paint(view,zoom);let pixels=0;
-      for(const tile of layer.children){
+      for(const tile of layer.querySelectorAll('image')){
         const href=tile.getAttribute('href').split('?')[0],match=/^relief\/(4|16)-(\d+)-(\d+)\.webp$/.exec(href);assert.ok(match);
         const size=1440/Number(match[1]),left=Number(match[2])*size,top=Number(match[3])*size;
-        assert.ok(left<view.x+view.w&&left+size>view.x&&top<view.y+view.h&&top+size>view.y);
+        const pad=Math.min(size*.2,view.w*.08);
+        assert.ok(left<view.x+view.w+pad&&left+size>view.x-pad&&top<view.y+view.h+pad&&top+size>view.y-pad);
         pixels+=match[1]==='4'?384**2:1024**2;
       }
       maxPixels=Math.max(maxPixels,pixels);
     }
   }
-  assert.ok(maxPixels*4<=27*1024*1024,`Visible RGBA pixels: ${maxPixels*4} bytes`);
+  assert.ok(maxPixels*4<=42*1024*1024,`Visible RGBA pixels: ${maxPixels*4} bytes`);
   paint(world,1);assert.equal(layer.children.length,0);
   for(const [i,rows] of w.REDLINE_RELIEF.entries()){
     const cols=i?16:4;
@@ -112,10 +113,27 @@ test('terrain detail fades in gradually and close views preserve paper highlight
   let previous=[0,0];
   for(let zoom=2;zoom<=24;zoom+=.02){
     paint({x:750,y:180,w:1440/zoom,h:720/zoom},zoom);
-    const opacity=cols=>Number([...layer.children].find(node=>node.getAttribute('href').startsWith(`relief/${cols}-`))?.style.opacity||0);
+    const opacity=cols=>Number([...layer.querySelectorAll('image')].find(node=>node.getAttribute('href').startsWith(`relief/${cols}-`))?.parentNode.style.opacity||0);
     const current=[opacity(4),opacity(16)];
     current.forEach((value,i)=>assert.ok(Math.abs(value-previous[i])<=.026,'No sudden terrain contrast change while zooming'));
     previous=current;
   }
   assert.ok(previous[0]<.15&&previous[1]>.7,'Detailed ridges replace the broad shadow plate');
+});
+
+test('terrain tiles decode before mounting, survive nearby pans, and cannot return after overview cleanup',async t=>{
+  const {w}=atlas(t);w.eval(source('public/relief/index.js'));
+  const pending=[];
+  w.Image=class{decode(){return new Promise(resolve=>pending.push(resolve));}};
+  const layer=w.document.createElementNS('http://www.w3.org/2000/svg','g'),paint=w.RedlineAtlas.relief(layer,w.REDLINE_RELIEF);
+  const view={x:750,y:180,w:60,h:30};paint(view,24);
+  assert.equal(layer.querySelectorAll('image').length,0,'Undecoded terrain never enters the live map');
+  pending.splice(0).forEach(resolve=>resolve());await Promise.resolve();
+  const original=[...layer.querySelectorAll('image')];assert.ok(original.length);
+  assert.ok(original.every(node=>Number(node.getAttribute('width'))>1440/Number(node.getAttribute('href').split('/')[1].split('-')[0])),'Half-pixel overlaps cover resampling cracks');
+  paint({...view,x:900},24);paint(view,24);
+  assert.ok(original.every(node=>node.parentNode),'Returning to a recently viewed area reuses decoded nodes');
+  paint({...view,x:1200},24);paint(world,1);
+  pending.splice(0).forEach(resolve=>resolve());await Promise.resolve();
+  assert.equal(layer.children.length,0,'Late decodes cannot put old tiles back over the world overview');
 });

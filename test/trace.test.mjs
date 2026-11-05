@@ -141,9 +141,9 @@ test('nearby legs retain context and regional routes fill a useful part of the v
   }
   const short=frame([-78.424,-1.396],[-78.062,-1.505]),regional=frame([-78.062,-1.505],[-78.145,.04]);
   assert.ok(short.level>regional.level&&regional.level>10);
-  assert.ok(short.separation>90&&short.level<=84,'A small hop stays legible without an extreme close-up');
-  assert.ok(regional.separation>250,'Regional journeys are not lost in empty space');
-  assert.ok(frame([-80.19,25.76],[-78.47,-.18]).separation>300);
+  assert.ok(short.separation>40&&short.level<=36,'A small hop stays legible without an extreme close-up');
+  assert.ok(regional.separation>180,'Regional journeys are not lost in empty space');
+  assert.ok(frame([-80.19,25.76],[-78.47,-.18]).separation>240,'Longer legs still occupy at least 40% of the available height');
 });
 
 test('the ink stays on screen and zoom changes at a bounded rate across long and short legs',()=>{
@@ -174,7 +174,7 @@ test('an isolated local leg eases the zoom peak while successive nearby legs ret
   const space={width:1200,height:800,left:40,right:1160,top:40,bottom:640};
   const frame=(before,after)=>camera(local,space,worldFrame,local.pointAt(1),null,before,after).arrival;
   const natural=frame(null,null),isolated=frame(wide,wide);
-  assert.ok(isolated.w>=natural.w*1.2&&isolated.w<=worldFrame.w/24+.001,'An isolated tiny hop limits the zoom peak while preserving at least 24× local detail');
+  assert.ok(isolated.w>=natural.w*1.2&&isolated.w<=worldFrame.w/16+.001,'An isolated tiny hop limits the zoom peak while preserving at least 16× local detail');
   assert.deepEqual(frame(local,wide),natural);assert.deepEqual(frame(wide,local),natural);
   for(const [from,to] of [[0,1],[1,0]]){
     const run=timeline({from,to,duration:2000,easeStops:true}),start=run.advance(50).position;
@@ -204,12 +204,12 @@ test('automatic framing adapts to portrait space, keeps regional detail, and sto
     for(const pair of [[[0,0],[3,1]],[[0,0],[1,3]],[[10,10],[10.0001,10.0001]],[[0,0],[0,0]]]){
       const geometry=measure(route(...pair)),plan=camera(geometry,space,worldFrame,project(pair[1]));
       assert.ok(Object.values(plan.arrival).every(Number.isFinite));
-      assert.ok(worldFrame.w/plan.arrival.w<=72,'Automatic close-ups retain context');
+      assert.ok(worldFrame.w/plan.arrival.w<=36,'Automatic close-ups retain context');
       for(const amount of [0,.25,.5,.75,1])assert.deepEqual(plan.follow(geometry.pointAt(amount)),plan.arrival,'The settled composition is fixed');
       if(geometry.length>1){
         const {left,right,top,bottom}=geometry.bounds;
         const fill=Math.max((right-left)*width/plan.arrival.w/(space.right-space.left),(bottom-top)*height/plan.arrival.h/(space.bottom-space.top));
-        assert.ok(fill>.4&&fill<.61,'A regional arc occupies a useful share of the free screen');
+        assert.ok(fill>.28&&fill<.5,`A regional arc stays readable with more surrounding geography (${fill})`);
       }
     }
   }
@@ -228,7 +228,7 @@ test('the camera settles before arrival and a tiny stopover does not cause an is
   const before=measure('M650,300L700,300'),hop=measure('M700,300L701,300'),after=measure('M701,300L760,300');
   const plan=camera(hop,space,worldFrame,[701,300],null,before,after);
   const regional=camera(before,space,worldFrame,[700,300]);
-  assert.ok(worldFrame.w/plan.arrival.w<=worldFrame.w/regional.arrival.w*1.8+1e-8);
+  assert.ok(worldFrame.w/plan.arrival.w<=worldFrame.w/regional.arrival.w*1.6+1e-8);
   for(const time of [.8,.9,.99,1])assert.deepEqual(cameraView(worldFrame,plan,hop.pointAt(time),time),plan.arrival);
   const run=journey({geometry:hop,space,start:worldFrame,plan});let state;
   do{state=run.advance(16);}while(state.time<.8);

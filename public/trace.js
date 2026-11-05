@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
-  const maxZoom=240,autoZoomLimit=72;
+  const maxZoom=240,autoZoomLimit=36;
   const duration=length=>Math.max(1600,Math.min(3600,length*6));
   const ease=value=>{const t=clamp(value,0,1);return t*t*t*(t*(t*6-15)+10);};
   // Ramp velocity smoothly over the first and last 30% of a move. The
@@ -94,7 +94,7 @@
     // world. Regional journeys use the same readable scale on narrow screens.
     const fit=Math.min((space.right-space.left)*world.w/(spanX*space.width),
       (space.bottom-space.top)*world.h/(spanY*space.height));
-    const desired=fit*.58;
+    const desired=fit*.47;
     // A soft ceiling preserves geographic context on tiny hops without a
     // sudden change of behaviour at a particular distance. Manual zoom is free.
     return Math.max(1,desired/(1+(desired/autoZoomLimit)**4)**.25);
@@ -107,7 +107,7 @@
     // throughout a local itinerary. Work in zoom ratios, in either direction.
     if(before&&after){
       const neighbor=Math.max(fitLevel(before.bounds,space,world),fitLevel(after.bounds,space,world));
-      level=Math.min(level,Math.max(24,neighbor*1.8));
+      level=Math.min(level,Math.max(16,neighbor*1.6));
     }
     // Similar neighboring legs share their wider composition. This removes
     // small in/out breaths as a route works through a region.

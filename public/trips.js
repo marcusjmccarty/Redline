@@ -84,10 +84,35 @@
   const albumPanel=$('photo-panel'),fullscreenButton=$('album-fullscreen');
   const index=$('album-index'),drawer=$('album-drawer'),edge=$('album-edge'),tabs=$('gallery-filter');
   const reading=()=>albumPanel.classList.contains('expanded');
-  let indexCloseTimer=0;
+  const coverReading=()=>reading()&&$('album-book').dataset.mode==='album'&&$('album-book').classList.contains('closed-front');
+  let indexCloseTimer=0,windowMotion=null;
+  function stopWindowMotion(){
+    windowMotion?.cancel();windowMotion=null;delete $('album-book').dataset.windowMotion;
+  }
+  function beginBookResize(){
+    const book=$('album-book'),before=book.getBoundingClientRect();
+    stopWindowMotion();book.dataset.windowMotion='true';return before;
+  }
+  function finishBookResize(before,duration=520){
+    const book=$('album-book'),after=book.getBoundingClientRect();
+    if(!before?.width||!after.width||!canAnimate(book)||Math.abs(before.width-after.width)+Math.abs(before.height-after.height)+Math.abs(before.left-after.left)+Math.abs(before.top-after.top)<1){stopWindowMotion();return;}
+    const motion=book.animate([
+      {transformOrigin:'0 0',transform:`translate(${before.left-after.left}px, ${before.top-after.top}px) scale(${before.width/after.width}, ${before.height/after.height})`},
+      {transformOrigin:'0 0',transform:'none'}
+    ],{duration,easing:'cubic-bezier(.22,.75,.2,1)',fill:'both'});
+    windowMotion=motion;
+    motion.finished.catch(()=>{}).then(()=>{if(windowMotion===motion){windowMotion=null;motion.cancel();delete book.dataset.windowMotion;}});
+  }
+  function syncWindowCover(){
+    const cover=coverReading(),changed=albumPanel.classList.contains('cover-view')!==cover;
+    albumPanel.classList.toggle('cover-view',cover);
+    if(changed)showIndex(false);
+    else tabs.inert=tabs.classList.contains('away')||reading()&&!cover&&!albumPanel.classList.contains('index-open');
+  }
   function showIndex(open){
     clearTimeout(indexCloseTimer);indexCloseTimer=0;
-    drawer.inert=!open;tabs.inert=tabs.classList.contains('away')||reading()&&!open;
+    if(coverReading())open=false;
+    drawer.inert=!open&&!coverReading();tabs.inert=tabs.classList.contains('away')||reading()&&!coverReading()&&!open;
     albumPanel.classList.toggle('index-open',reading()&&open);
     edge.setAttribute('aria-expanded',String(open));
     if(open)markTab();
@@ -105,18 +130,23 @@
   toolbar.addEventListener('focusout',event=>{if(reading()&&!toolbar.contains(event.relatedTarget))showToolbar(false);});
   function windowView(expanded,restoreFocus=true){
     if(expanded===reading())return;
+    finishReviewTurn();settleView();
+    if(turning)renderAlbum();
+    const before=restoreFocus?beginBookResize():null;
+    if(!restoreFocus)stopWindowMotion();
     if(expanded&&tabs.contains(document.activeElement))albumPanel.focus({preventScroll:true});
     albumPanel.classList.toggle('expanded',expanded);
     fullscreenButton.setAttribute('aria-pressed',String(expanded));
-    finishReviewTurn();
     index.hidden=topEdge.hidden=!expanded;
     showToolbar(false);
     fullscreenButton.setAttribute('aria-label',expanded?'Exit window view':'Fill window with album');
     fullscreenButton.title=expanded?'Exit window view (F or Esc)':'Fill window (F) · Top edge for toolbar · Right edge for city tabs';
     showIndex(false);
     if(mode()==='album')renderGallery();
+    syncWindowCover();
     if(expanded&&mode()==='album')preload(albumPage+step());
     if(expanded||restoreFocus)(expanded?albumPanel:fullscreenButton).focus({preventScroll:true});
+    if(before)finishBookResize(before);
   }
   fullscreenButton.addEventListener('click',()=>windowView(!reading()));
   $('album-restore').addEventListener('click',()=>windowView(false));
@@ -154,6 +184,7 @@
     if(reading()&&event.target.closest('.album-tab')){showIndex(false);albumPanel.focus({preventScroll:true});}
   });
   function finishAlbumClose(focus){
+    stopWindowMotion();clearTimeout(indexCloseTimer);
     clearTimeout(sheetWarmTimer);
     window.RedlineAlbumMotion.clearPreloads();
     $('photos-button').setAttribute('aria-expanded','false');
@@ -392,7 +423,7 @@
   $('new-trip').addEventListener('click',()=>{if(!canSwitch())return;discardPending();setSelecting(false);current=null;photos=[];activeCity='';albumPage=0;suppress=true;app.setStops([]);suppress=false;dirty=false;remember();update();renderGallery();closePanel('trip-panel');$('destination').focus();});
   document.querySelectorAll('[data-close]').forEach(button=>button.addEventListener('click',event=>closePanel(button.dataset.close,{focus:event.detail?'map':true})));
   document.addEventListener('pointerdown',event=>{if(!event.target.closest?.('.trip-menu,.trip-more'))closeTripMenus();},true);
-  window.addEventListener('resize',()=>{if(!$('photo-panel').open||resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;finishReviewTurn();if(albumMotion){albumMotion.refresh=true;return;}settleView();if(view!=='album'){if(reading())renderGallery();return;}const had=$('album-pages').contains(document.activeElement)||!!turning?.had;renderAlbum();keepAlbumFocus(had);});});
+  window.addEventListener('resize',()=>{stopWindowMotion();if(!$('photo-panel').open||resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;finishReviewTurn();if(albumMotion){albumMotion.refresh=true;return;}settleView();if(view!=='album'){if(reading())renderGallery();return;}const had=$('album-pages').contains(document.activeElement)||!!turning?.had;renderAlbum();keepAlbumFocus(had);});});
   window.addEventListener('redline:routechange',()=>{if(suppress)return;dirty=current?fingerprint()!==current.hash:app.getStops().length>0;update();if(isOpen('trip-panel'))drawCurrentMap();if($('photo-panel').open){renderReview();renderGallery();}});
   window.addEventListener('beforeunload',event=>{if(pending.length||dirty){event.preventDefault();event.returnValue='';}});
 
@@ -594,7 +625,7 @@
     $('photo-bulk').hidden=!pending.length;$('photo-import-actions').hidden=!pending.length;
     $('album-view').setAttribute('aria-pressed',String(view==='album'));$('sheet-view').setAttribute('aria-pressed',String(view==='sheet'));
     $('album-view').disabled=$('sheet-view').disabled=reviewing;$('album-modes').classList.toggle('away',reviewing);
-    $('gallery-filter').classList.toggle('away',reviewing||!photos.length);$('gallery-filter').inert=reviewing||!photos.length||reading()&&!albumPanel.classList.contains('index-open');
+    $('gallery-filter').classList.toggle('away',reviewing||!photos.length);syncWindowCover();
     $('photo-panel').classList.toggle('selecting',selecting&&!reviewing);
   }
   function warmPreviews(){
@@ -813,7 +844,7 @@
   function renderTabs(groups){
     const chapters=albumPages(),nav=$('gallery-filter'),focused=nav.contains(document.activeElement)?document.activeElement.dataset.filter:null;
     const rows=Math.max(1,Math.min(groups.length,Math.max(4,Math.ceil(groups.length/4)))),columns=Math.max(1,Math.ceil(groups.length/rows));
-    $('album-book').style.setProperty('--tab-width',`${columns*28+12}px`);
+    $('album-book').style.setProperty('--tab-width',`${Math.max(72,columns*28+12)}px`);
     nav.style.setProperty('--tab-rows',String(rows));
     const key=JSON.stringify([busy,groups.map(group=>[group.id,group.name,group.items.length,chapters.findIndex(page=>page.type==='city'&&page.first&&page.group.id===group.id)])]);
     if(key===tabsKey){markTab();return;}tabsKey=key;
@@ -821,7 +852,7 @@
       const column=Math.floor(i/rows),tab=document.createElement('button');tab.type='button';tab.className='album-tab';tab.dataset.filter=group.id;tab.style.setProperty('--tab',String(column%6));tab.style.setProperty('--tab-order',String(100-column));tab.style.setProperty('--tab-column',String(column));tab.disabled=busy;
       const page=folioOf(chapters.findIndex(page=>page.type==='city'&&page.first&&page.group.id===group.id));
       const number=document.createElement('span');number.className='chip-stop';number.textContent=String(page).padStart(2,'0');number.title=`Page ${page}`;tab.append(number);
-      const name=document.createElement('span'),count=document.createElement('span');name.className='tab-name';name.textContent=group.name;count.className='chip-count';count.textContent=String(group.items.length);tab.append(name,count);
+      const name=document.createElement('span'),count=document.createElement('span');name.className='tab-name';name.textContent=group.name;count.className='chip-count';count.textContent=String(group.items.length);count.title=photoLabel(group.items.length);tab.append(name,count);
       tab.title=`${group.name} · page ${page} · ${photoLabel(group.items.length)}`;tab.setAttribute('aria-label',tab.title);tab.addEventListener('click',()=>goToCity(group.id));
       return tab;
     }));
@@ -982,6 +1013,7 @@
   function stateClasses(index){
     const book=$('album-book'),last=lastPage();
     book.classList.toggle('closed-front',index===0);book.classList.toggle('closed-back',index===last);
+    syncWindowCover();
     // The page block thickens on the side already read.
     const read=last?index/last:0;$('album-pages').style.setProperty('--read',read.toFixed(3));
   }
@@ -1043,6 +1075,7 @@
     const from=albumPage,forward=target>from,root=$('album-pages');
     if(instant||!canAnimate(root)||!$('photo-panel').open){albumPage=target;renderAlbum();keepAlbumFocus(had);preload(target+(forward?1:-1)*step());return;}
     const coverTurn=[from,target].some(index=>index===0||index===lastPage());
+    const resize=reading()&&(from===0)!==(target===0)?beginBookResize():null;
     const timing={duration:duration??(coverTurn?900:Math.min(1000,720+Math.abs(target-from)*12)),easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'};
     $('album-book').style.setProperty('--turn-duration',`${timing.duration}ms`);
     const token={target,animations:[],had};turning=token;
@@ -1069,6 +1102,7 @@
       root.replaceChildren(bound(below),face);stateClasses(target);updateAlbumNav(target);
       token.animations.push(...RedlineAlbumMotion.turnLeaf({leaf:face,forward,two:false,duration:duration??560}));
     }
+    if(resize)finishBookResize(resize,timing.duration);
     await Promise.all(token.animations.map(animation=>animation.finished)).catch(()=>{});
     if(turning!==token)return;albumPage=target;if(!settle)return;turning=null;renderGallery();keepAlbumFocus(had);preload(target+(forward?1:-1)*step());
   }

@@ -46,7 +46,7 @@
 /* The album: a leather-bound book over the dimmed map. */
 .album { width: 100vw; height: 100svh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; overflow: hidden; background: transparent; color: var(--paper); }
 .album[open] { display: block; }
-#album-display { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: 100%; height: 100%; }
+#album-display { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: 100%; height: 100%; transition: background-color .5s ease; }
 .album:focus { outline: none; }
 .album-top { display: flex; align-items: center; gap: 14px; padding: 16px 22px 6px; }
 .album-title { flex: 1; min-width: 0; }
@@ -279,8 +279,11 @@
 .album-tab:hover:not(:disabled), .album-tab:focus-visible { filter: brightness(1.18); }
 .album-tab[aria-current=true] { filter: brightness(1.2); box-shadow: 1px 2px 4px #0005, inset -2px 0 0 #f4dfae; }
 .album-tab:nth-child(even) { border-bottom-right-radius: 8px; }
-.album-tab .chip-stop, .album-tab .chip-count { display: none; }
-.album-tab .tab-name { writing-mode: vertical-rl; text-orientation: sideways; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-height: 92px; }
+.album-tab .chip-stop { display: block; position: absolute; left: 28px; top: 6px; width: 26px; color: #f5e6c8; font: 8px Georgia, serif; text-align: center; opacity: .82; }
+.album-tab .chip-stop::before { content: 'p. '; }
+.album-tab .chip-count { display: flex; align-items: center; justify-content: center; gap: 3px; position: absolute; left: 28px; bottom: 6px; width: 26px; font: 8px Arial, sans-serif; opacity: .85; }
+.album-tab .chip-count::before { content: ''; width: 8px; height: 6px; border: 1px solid currentColor; border-radius: 1px; background: linear-gradient(135deg, transparent 50%, currentColor 51% 58%, transparent 59%); }
+.album-tab .tab-name { writing-mode: vertical-rl; text-orientation: sideways; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-height: 68px; }
 .album-tab:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
 .album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs { left: calc(75% - var(--pad) / 2 - 18px); }
 .album-foot { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 4px 20px calc(14px + env(safe-area-inset-bottom)); transition: opacity .3s, transform .3s var(--ease-out); }
@@ -514,6 +517,11 @@
 .album.expanded #photo-message.error { position: absolute; inset: auto 16px 16px; z-index: 5; background: var(--paper); }
 .album.expanded .album-stage { padding: clamp(4px, .65vmin, 8px); gap: 0; }
 .album.expanded .album-book { --pad: clamp(10px, 1.75vmin, 18px); flex: none; width: 100%; max-width: none; height: 100%; aspect-ratio: auto; }
+/* Fullscreen begins with a closed volume over the map; opening fills the window. */
+.album.expanded.cover-view::backdrop { background-color: #1d17127a; }
+.album.expanded.cover-view #album-display { background: transparent; }
+.album.expanded.cover-view .album-book { width: auto; height: min(calc(100dvh - 64px), calc((100vw - 2 * var(--tab-width) - 32px) / 1.5)); aspect-ratio: 1.5; }
+.album-book[data-window-motion], .album-book[data-window-motion] > .album-tabs { transition: none; }
 .album.expanded .album-page[data-type=city] { padding: clamp(12px, 3vh, 34px) clamp(12px, 2vw, 40px) clamp(22px, 4vh, 46px); }
 .album.expanded .prints { gap: 3% 4%; }
 .album.expanded .page-corner { opacity: 0; }
@@ -544,13 +552,20 @@
 /* The index stays on the binding. Window view uncovers it by moving the
    complete book, including its pages, cloth tabs and exit control, as one. */
 .album.expanded.index-open .album-book { translate: calc(-1 * var(--tab-width) - 14px) 0; }
-.album.expanded .album-tabs { max-height: calc(100% - 110px); }
-.album.expanded:not(.index-open) :is(.album-tabs, #album-drawer) { visibility: hidden; pointer-events: none; }
+.album.expanded .album-tabs { max-height: calc(100% - 144px); }
+.album.expanded:not(.index-open):not(.cover-view) :is(.album-tabs, #album-drawer) { visibility: hidden; pointer-events: none; }
 #album-index { position: absolute; z-index: 5; inset: 0 0 0 auto; width: 18px; pointer-events: none; }
 #album-edge { position: absolute; inset: 0; width: 100%; padding: 0; border: 0; background: transparent; pointer-events: auto; }
 #album-edge:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
 #album-drawer { position: absolute; z-index: 1; left: calc(100% - var(--pad) + 6px); bottom: 22px; width: calc(var(--tab-width) - 10px); display: none; }
 .album.expanded #album-drawer { display: block; }
+.album.expanded.cover-view #album-drawer { left: calc(75% - var(--pad) / 2 + 6px); }
+@media (max-width: 599px), (max-width: 899px) and (orientation: portrait) {
+  .album.expanded.cover-view .album-book { width: calc(100% - var(--tab-width) - 28px); height: min(calc(100dvh - 96px), max(440px, calc((100vw - var(--tab-width) - 28px) / .75))); aspect-ratio: .75; }
+  .album.expanded.cover-view .cover-plate { width: 80%; padding-inline: 10px; }
+  .album.expanded.cover-view .cover-title { font-size: clamp(18px, 5.5vw, 26px); }
+  .album.expanded.cover-view #album-drawer { left: calc(100% - var(--pad) + 6px); }
+}
 #album-restore { width: 100%; padding: 8px 7px; border: 0; border-radius: 0 5px 5px 0; background: #382f27; color: var(--paper); font: 11px Georgia, serif; }
 #album-restore span { margin-left: 4px; }
 @media (pointer: coarse) { #album-index { width: 24px; } }
