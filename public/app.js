@@ -75,7 +75,7 @@
   persist();
   const project=p=>RedlineLayout.project([p.longitude,p.latitude]);
   const backgroundPoints=window.MAP_CITIES.map(project);
-  const paintRelief=RedlineAtlas.relief($('atlas-relief'),window.REDLINE_RELIEF);
+  const paintRelief=RedlineAtlas.relief($('atlas-relief'),window.REDLINE_RELIEF,$('atlas-overview'));
   let hiddenMapCities=new Set(),stopPeers=[],routeIndex=null,routeIndexGeometry=null,routeIndexKey='',routeMatrix=null,routeMatrixKey='';
   function rebuildGeometry(){
     const names=stops.map(stop=>normalize(stop.name));

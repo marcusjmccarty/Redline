@@ -1208,7 +1208,7 @@ test('the atlas paints connected landmasses once and keeps country borders out o
   assert.ok(land.every((path,i)=>path.getAttribute('d')===w.ATLAS_LAND[i]));
   assert.equal($('country-borders').children.length,w.ATLAS_BORDERS.length);
   assert.ok(land.every(path=>!path.style.fill),'Plain vector fills never invoke an image-backed pattern for each landmass');
-  assert.equal($('map').querySelectorAll('image').length,1,'One shared colour image serves the entire map');
+  assert.equal($('map').querySelectorAll('image').length,2,'Two small shared plates carry colour and world relief without runtime filters');
   assert.equal($('atlas-tones').getAttribute('href'),'atlas-tones.png');
   const colour=readFileSync(new URL('../public/atlas-tones.png',import.meta.url));
   assert.ok(colour.length<256*1024,'The complete map shading stays below 256 KB');

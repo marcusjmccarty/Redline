@@ -48,6 +48,21 @@ def landscape_wash(source):
         paper += (np.array(pigment) - paper) * amount[..., None]
     return Image.fromarray(np.rint(paper).astype('uint8'))
 
+def overview():
+    """One small, continuous terrain plate for the world view and opening fold."""
+    plate = Image.new('RGB', (1536, 768), 'white')
+    for y in range(2):
+        for x in range(4):
+            tile = out / f'4-{x}-{y}.webp'
+            if tile.exists():
+                with Image.open(tile) as image:
+                    plate.paste(image, (x * 384, y * 384))
+    plate.resize((1024, 512), Image.Resampling.LANCZOS).save(out / 'overview.webp', quality=72, method=6)
+
+if len(sys.argv) > 1 and sys.argv[1] == '--overview':
+    overview()
+    sys.exit(0)
+
 with Image.open(sys.argv[1]) as source:
     if source.size != (21600, 10800) or source.mode != 'L':
         raise ValueError('Expected the 1 arc-minute SR_HR grayscale world plate')
@@ -78,3 +93,5 @@ with Image.open(sys.argv[1]) as source:
         levels.append(coverage)
     (out / 'index.js').write_text('/* Visible land in each row of the baked relief atlas. */\n'
                                   + 'window.REDLINE_RELIEF = ' + json.dumps(levels) + ';\n')
+
+overview()

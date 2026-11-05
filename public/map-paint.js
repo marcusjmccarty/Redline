@@ -34,7 +34,7 @@
   // Keep a small decoded tile cache and prepare just beyond the viewport.
   // Each level is one opacity group; adjacent opaque tiles overlap by half a
   // source pixel so Chrome cannot expose hairline seams while resampling.
-  function relief(layer,coverage){
+  function relief(layer,coverage,overview){
     const svg=name=>document.createElementNS('http://www.w3.org/2000/svg',name);
     const levels=[4,16].map((cols,i)=>({cols,rows:coverage?.[i]||[],tiles:new Map(),group:svg('g'),key:''}));
     const smoothStep=(start,end,value)=>{const t=Math.max(0,Math.min(1,(value-start)/(end-start)));return t*t*(3-2*t);};
@@ -47,6 +47,10 @@
       }
     }
     return function paint(view,zoom){
+      if(overview&&zoom>0){
+        const opacity=Math.round(.64*(1-smoothStep(1.6,4,zoom))*1000)/1000;
+        if(overview.style.opacity!==String(opacity))overview.style.opacity=String(opacity);
+      }
       if(zoom<=2.2){if(levels.some(level=>level.tiles.size))clear();return;}
       clock++;
       for(const level of levels){

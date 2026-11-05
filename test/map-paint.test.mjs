@@ -137,3 +137,15 @@ test('terrain tiles decode before mounting, survive nearby pans, and cannot retu
   pending.splice(0).forEach(resolve=>resolve());await Promise.resolve();
   assert.equal(layer.children.length,0,'Late decodes cannot put old tiles back over the world overview');
 });
+
+test('world relief fades continuously into regional tiles and stays still behind the album',t=>{
+  const {w}=atlas(t);w.eval(source('public/relief/index.js'));
+  const layer=w.document.createElementNS('http://www.w3.org/2000/svg','g'),overview=w.document.createElementNS(layer.namespaceURI,'image');
+  const paint=w.RedlineAtlas.relief(layer,w.REDLINE_RELIEF,overview);let previous=.64;
+  for(let zoom=1;zoom<=5;zoom+=.05){
+    paint({...world,w:1440/zoom,h:720/zoom},zoom);const opacity=Number(overview.style.opacity);
+    assert.ok(opacity<=previous&&previous-opacity<.025);previous=opacity;
+  }
+  assert.equal(previous,0);paint(world,1);assert.equal(overview.style.opacity,'0.64');assert.equal(layer.children.length,0);
+  paint(world,0);assert.equal(overview.style.opacity,'0.64','Opening an album leaves its static map backdrop unchanged');assert.equal(layer.children.length,0);
+});

@@ -1,10 +1,13 @@
 import {readFile,writeFile} from 'node:fs/promises';
 import vm from 'node:vm';
+import {createHash} from 'node:crypto';
 import {atlasTones,paperGrain} from './atlas-tones.mjs';
 const root=new URL('../',import.meta.url),context={window:{}};
 vm.runInNewContext(await readFile(new URL('public/atlas-geography.js',root),'utf8'),context);
 const image=atlasTones(context.window);
 await writeFile(new URL('public/atlas-tones.png',root),image.png);
+const grain=paperGrain(),grainVersion=createHash('sha256').update(grain).digest('hex').slice(0,12);
+await writeFile(new URL('public/map-paper.png',root),grain);
 const style=new URL('public/style.css',root),css=await readFile(style,'utf8');
-await writeFile(style,css.replace(/--map-grain: url\("data:image\/png;base64,[^"]+"\);/,`--map-grain: url("data:image/png;base64,${paperGrain().toString('base64')}");`));
+await writeFile(style,css.replace(/--map-grain: url\("[^"\n]+"\);/,`--map-grain: url("map-paper.png?v=${grainVersion}");`));
 console.log(`Atlas colour: ${image.width} × ${image.height}, ${Math.round(image.png.length/1024)} KB; no runtime filters.`);

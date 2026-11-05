@@ -26,21 +26,16 @@ function chunk(type,data){
   const header=Buffer.alloc(4),tail=Buffer.alloc(4);header.writeUInt32BE(data.length);tail.writeUInt32BE((crc^0xffffffff)>>>0);
   return Buffer.concat([header,payload,tail]);
 }
-function png(width,height,pixels){
-  const stride=width*4,raw=Buffer.alloc((stride+1)*height);
-  for(let y=0;y<height;y++){
-    const row=y*(stride+1);raw[row]=1;
-    for(let x=0;x<stride;x++)raw[row+x+1]=(pixels[y*stride+x]-(x>=4?pixels[y*stride+x-4]:0))&255;
-  }
-  const header=Buffer.alloc(13);header.writeUInt32BE(width);header.writeUInt32BE(height,4);header[8]=8;header[9]=6;
-  return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('IDAT',deflateSync(raw,{level:9})),chunk('IEND',Buffer.alloc(0))]);
+function indexedPng(width,height,raw,palette,alpha){
+  const header=Buffer.alloc(13);header.writeUInt32BE(width);header.writeUInt32BE(height,4);header[8]=8;header[9]=3;
+  return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('PLTE',palette),chunk('tRNS',alpha),chunk('IDAT',deflateSync(raw,{level:9})),chunk('IEND',Buffer.alloc(0))]);
 }
 // A seamless, reusable rag-paper plate. All fibres and pigment granulation
 // are baked once; the page only repeats this small bitmap at screen scale.
 export function paperGrain(size=192){
   const raw=Buffer.alloc((size+1)*size),palette=Buffer.alloc(26*3),alpha=Buffer.alloc(26);
   for(let i=0;i<26;i++){
-    palette.set(i<13?[105,89,60]:[255,251,235],i*3);alpha[i]=(i%13)*3;
+    palette.set(i<13?[105,89,60]:[255,251,235],i*3);alpha[i]=(i%13)*4;
   }
   const periodic=(x,y,cols,rows,seed)=>{
     const ix=Math.floor(x),iy=Math.floor(y),u=fade(x-ix),v=fade(y-iy);
@@ -49,13 +44,13 @@ export function paperGrain(size=192){
   };
   for(let y=0;y<size;y++)for(let x=0;x<size;x++){
     const cloud=periodic(x/size*8,y/size*8,8,8,613)-.5;
-    const fibre=periodic(x/size*8,y/size*48,8,48,419)-.5;
-    const grain=random(x,y,827)-.5,ink=grain*.75+cloud*.7+fibre*.32;
+    const fibre=periodic(x/size*96,y/size*12,96,12,419)-.5;
+    const cross=periodic(x/size*6,y/size*48,6,48,137)-.5;
+    const grain=random(x,y,827)-.5,ink=grain*.85+cloud*.40+fibre*.42+cross*.18;
     raw[y*(size+1)+x+1]=(ink>0?0:13)+Math.min(12,Math.round(Math.abs(ink)*58/3));
   }
   // Indexed alpha keeps the full-size tile smaller than an RGBA noise image.
-  const header=Buffer.alloc(13);header.writeUInt32BE(size);header.writeUInt32BE(size,4);header[8]=8;header[9]=3;
-  return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('PLTE',palette),chunk('tRNS',alpha),chunk('IDAT',deflateSync(raw,{level:9})),chunk('IEND',Buffer.alloc(0))]);
+  return indexedPng(size,size,raw,palette,alpha);
 }
 // Scan conversion happens at build time. Country borders never participate in
 // the wash; only the original coastlines distinguish warm land from blue water.
@@ -91,14 +86,23 @@ export function atlasTones(data,width=1024,height=512){
   for(let y=height-1;y>=0;y--)for(let x=width-1;x>=0;x--){
     const i=y*width+x;distance[i]=Math.min(distance[i],x+1<width?distance[i+1]+1:255,y+1<height?distance[i+width]+1:255);
   }
-  const pixels=new Uint8Array(width*height*4);
-  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
-    const i=y*width+x,land=mask[i],tone=wash(x/width*2,y/height,land?0x2d7289:0x629138);
-    const dark=land?[176,184,139]:[147,181,198],middle=land?[249,230,184]:[194,214,222],light=land?[255,249,222]:[239,242,227];
-    // A continuous three-colour curve keeps the golden cream and blue lively,
-    // with no stop boundaries between the shadows, middle tones, and highlights.
-    for(let c=0;c<3;c++)pixels[i*4+c]=Math.round(dark[c]*(1-tone)**2+middle[c]*2*tone*(1-tone)+light[c]*tone**2);
-    pixels[i*4+3]=Math.round(fade(clamp(distance[i]/3))*164);
+  // Forty pigment steps and three shoreline alpha levels fit into one byte.
+  // Fine paper grain masks the sub-two-channel-value colour increments.
+  const steps=40,palette=Buffer.alloc((1+steps*6)*3),alpha=Buffer.alloc(1+steps*6);
+  for(let land=0;land<2;land++)for(let edge=1;edge<=3;edge++)for(let step=0;step<steps;step++){
+    const tone=step/(steps-1),index=1+land*steps*3+(edge-1)*steps+step;
+    const dark=land?[157,140,96]:[155,177,166],middle=land?[231,202,146]:[205,213,188],light=land?[252,237,195]:[239,230,197];
+    for(let c=0;c<3;c++)palette[index*3+c]=Math.round(dark[c]*(1-tone)**2+middle[c]*2*tone*(1-tone)+light[c]*tone**2);
+    alpha[index]=Math.round(fade(edge/3)*164);
   }
-  return {png:png(width,height,pixels),pixels,mask,width,height};
+  const pixels=new Uint8Array(width*height*4),raw=Buffer.alloc((width+1)*height);
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+    const i=y*width+x,land=mask[i],edge=Math.min(3,distance[i]);
+    const tone=Math.round(wash(x/width*2,y/height,land?0x2d7289:0x629138)*(steps-1));
+    const index=edge?1+land*steps*3+(edge-1)*steps+tone:0;
+    raw[y*(width+1)+x+1]=index;
+    for(let c=0;c<3;c++)pixels[i*4+c]=palette[index*3+c];
+    pixels[i*4+3]=alpha[index];
+  }
+  return {png:indexedPng(width,height,raw,palette,alpha),pixels,mask,width,height};
 }

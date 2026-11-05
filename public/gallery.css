@@ -280,9 +280,7 @@
 .album-tab[aria-current=true] { filter: brightness(1.2); box-shadow: 1px 2px 4px #0005, inset -2px 0 0 #f4dfae; }
 .album-tab:nth-child(even) { border-bottom-right-radius: 8px; }
 .album-tab .chip-stop { display: block; position: absolute; left: 28px; top: 6px; width: 26px; color: #f5e6c8; font: 8px Georgia, serif; text-align: center; opacity: .82; }
-.album-tab .chip-stop::before { content: 'p. '; }
-.album-tab .chip-count { display: flex; align-items: center; justify-content: center; gap: 3px; position: absolute; left: 28px; bottom: 6px; width: 26px; font: 8px Arial, sans-serif; opacity: .85; }
-.album-tab .chip-count::before { content: ''; width: 8px; height: 6px; border: 1px solid currentColor; border-radius: 1px; background: linear-gradient(135deg, transparent 50%, currentColor 51% 58%, transparent 59%); }
+.album-tab .chip-count { display: block; text-align: center; position: absolute; left: 28px; bottom: 6px; width: 26px; font: 8px Arial, sans-serif; opacity: .85; }
 .album-tab .tab-name { writing-mode: vertical-rl; text-orientation: sideways; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-height: 68px; }
 .album-tab:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
 .album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs { left: calc(75% - var(--pad) / 2 - 18px); }

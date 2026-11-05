@@ -37,10 +37,15 @@
     // Reference, rather than clone, the actual map: colours, labels and saved
     // routes remain identical when the temporary panels are removed.
     use.setAttribute('href','#map-artwork');
-    const pins=document.createElementNS(svg.namespaceURI,'use');
-    pins.setAttribute('href','#route-stops');
-    pins.setAttribute('transform',`scale(${1440/bounds.width} ${720/bounds.height})`);
-    svg.append(use,pins);face.append(svg);
+    svg.append(use);
+    // Ink and pins share the same screen-space transform from the first fold.
+    for(const id of ['route-lines','route-stops']){
+      const ink=document.createElementNS(svg.namespaceURI,'use');
+      ink.setAttribute('href',`#${id}`);
+      ink.setAttribute('transform',`scale(${1440/bounds.width} ${720/bounds.height})`);
+      svg.append(ink);
+    }
+    face.append(svg);
     element('unfold-back',panel);const shade=element('unfold-shade',face);
     return {panel,shade};
   }
@@ -59,7 +64,7 @@
       const right=element('unfold-right',paper),rightTop=quarter(right,720,0,false,bounds),rightBottom=quarter(right,720,360,true,bounds);
       // Let the folded sheet register, open one hinge, pause, then open the
       // other. Translation follows each hinge instead of racing ahead of it.
-      const arrival=180,acrossDuration=820,pause=100,downDuration=950,settle=220;
+      const arrival=100,acrossDuration=640,pause=70,downDuration=740,settle=150;
       const acrossEnd=arrival+acrossDuration,downStart=acrossEnd+pause,flat=downStart+downDuration,total=flat+settle;
       const folded='translate(30%, 30%) scale(.8)',half='translate(7%, 28.5%) scale(.86)',flatSheet='translate(3%, 3%) scale(.94)',open='translate(0, 0) scale(1)';
       animate(stage,[{opacity:0},{opacity:1}],{duration:140});
@@ -85,11 +90,11 @@
     try{
       const href=document.getElementById('atlas-tones')?.getAttribute('href');
       if(!href){finish();return;}
-      const image=new Image();image.src=href;
-      if(typeof image.decode!=='function'){finish();return;}
-      await image.decode();
+      const images=[href,document.getElementById('atlas-overview')?.getAttribute('href')].filter(Boolean).map(src=>{const image=new Image();image.src=src;return image;});
+      if(images.some(image=>typeof image.decode!=='function')){finish();return;}
+      await Promise.all(images.map(image=>image.decode()));
       if(!active)return;
-      if(!image.naturalWidth){finish();return;}
+      if(images.some(image=>!image.naturalWidth)){finish();return;}
       frame=requestAnimationFrame(unfold);
     }catch{finish();}
   }

@@ -61,16 +61,20 @@
     for(const i of order){
       if(!clusterDistance||!representatives.some(j=>Math.hypot(items[i].x-items[j].x,items[i].y-items[j].y)<clusterDistance))representatives.push(i);
     }
+    const eligible=new Set(representatives);
     const choices=items.map((item,i)=>{
+      if(!eligible.has(i))return [];
       const kept=before(item.id??i),neighbours=items.filter((other,j)=>j!==i&&Math.hypot(item.x-other.x,item.y-other.y)<100);
-      return slots.map((slot,index)=>{
-        const rect=box(item,slot),own=distance(item,rect);
+      return slots.flatMap((slot,index)=>{
+        const rect=box(item,slot),right=rect.x+rect.w,bottom=rect.y+rect.h;
+        // Reject invisible and blocked candidates before scoring neighbours.
+        if(rect.x<edge||rect.y<edge||right>width-edge||bottom>height-edge
+          ||obstacles.some(t=>overlaps(rect,t,gap))||dots.some((d,j)=>j!==i&&overlaps(rect,d,gap))||routes.hits(rect,5))return [];
+        const own=distance(item,rect);
         const score=(index>=8?Math.max(0,own-14)*1.5:0)+neighbours.reduce((total,other)=>total+Math.max(0,own+10-distance(other,rect))**2,0)+index+(slot.name===kept?-16:0);
-        const right=rect.x+rect.w,bottom=rect.y+rect.h;
         const leader=own>21?[[item.x,item.y],[Math.max(rect.x,Math.min(right,item.x)),Math.max(rect.y,Math.min(bottom,item.y))]]:null;
-        return {...slot,box:rect,leader,score};
-      }).filter(({box:b})=>b.x>=edge&&b.y>=edge&&b.x+b.w<=width-edge&&b.y+b.h<=height-edge
-        &&!obstacles.some(t=>overlaps(b,t,gap))&&!dots.some((d,j)=>j!==i&&overlaps(b,d,gap))&&!routes.hits(b,5))
+        return [{...slot,box:rect,leader,score}];
+      })
         .sort((a,b)=>a.score-b.score);
     });
     const conflict=(a,b)=>overlaps(a.box,b.box,gap)||(a.leader&&crosses(a.leader,b.box,2))||(b.leader&&crosses(b.leader,a.box,2));

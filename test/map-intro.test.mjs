@@ -22,7 +22,7 @@ function setup(t,{reduced=false,hidden=false,supported=true,decode=()=>Promise.r
     const motion={target:this,keys,options,cancelled:false,finished:new Promise((yes,no)=>{resolve=yes;reject=no;}),complete:()=>resolve(),cancel(){this.cancelled=true;reject(Error('Cancelled'));}};
     motions.push(motion);return motion;
   };
-  w.Image=class {constructor(){this.naturalWidth=1024;images.push(this);}decode(){return decode();}};
+  w.Image=class {constructor(){this.naturalWidth=1024;images.push(this);}decode(){return decode(this.src);}};
   w.eval(script);
   const flushFrames=()=>{const batch=[...frames.values()];frames.clear();for(const callback of batch)callback();};
   const ready=async()=>{w.RedlineMapIntro.start();await tick();flushFrames();};
@@ -42,7 +42,11 @@ test('the opening sheet shares the live artwork and hands off without replacing 
   await env.ready();
   const faces=[...w.document.querySelectorAll('.unfold-face svg')];
   assert.deepEqual(faces.map(face=>face.getAttribute('viewBox')),['0 0 720 360','0 360 720 360','720 0 720 360','720 360 720 360']);
-  assert.ok(faces.every(face=>face.querySelector('use').getAttribute('href')==='#map-artwork'));
+  for(const face of faces){
+    const uses=[...face.querySelectorAll('use')];
+    assert.deepEqual(uses.map(node=>node.getAttribute('href')),['#map-artwork','#route-lines','#route-stops'],'The unfolding sheet includes the connecting ink before the city pins');
+    assert.equal(uses[1].getAttribute('transform'),uses[2].getAttribute('transform'));
+  }
   assert.equal(w.document.querySelectorAll('#map-artwork').length,1,'The atlas is referenced, not copied into four expensive DOM trees');
   w.RedlineMapIntro.start();assert.equal(w.document.querySelectorAll('.map-unfold').length,1);
   for(const motion of motions)motion.complete();await tick();
@@ -77,13 +81,13 @@ test('interaction skips an active fold without swallowing the user action',async
 });
 
 test('a late image decode cannot restart an intro dismissed by the user',async t=>{
-  let release;const env=setup(t,{decode:()=>new Promise(resolve=>{release=resolve;})});
+  let release;const decoded=new Promise(resolve=>{release=resolve;}),env=setup(t,{decode:()=>decoded});
   env.w.RedlineMapIntro.start();env.w.dispatchEvent(new env.w.Event('pointerdown'));env.assertClean();
   release();await tick();env.flushFrames();env.assertClean();assert.equal(env.motions.length,0);
 });
 
 test('initial viewport sizing does not dismiss a fold that has not begun',async t=>{
-  let release;const env=setup(t,{decode:()=>new Promise(resolve=>{release=resolve;})});
+  let release;const decoded=new Promise(resolve=>{release=resolve;}),env=setup(t,{decode:()=>decoded});
   env.w.RedlineMapIntro.start();env.w.dispatchEvent(new env.w.Event('resize'));
   assert.ok(env.root.classList.contains('map-arriving'));
   release();await tick();env.flushFrames();
@@ -102,7 +106,7 @@ test('resizing, hiding the page or enabling reduced motion safely settles the op
 
 test('missing app readiness and stalled image decoding have bounded fallbacks',async t=>{
   const missing=setup(t);missing.expire();missing.assertClean();await missing.ready();assert.equal(missing.motions.length,0);
-  let release;const stalled=setup(t,{decode:()=>new Promise(resolve=>{release=resolve;})});
+  let release;const decoded=new Promise(resolve=>{release=resolve;}),stalled=setup(t,{decode:()=>decoded});
   stalled.w.RedlineMapIntro.start();stalled.expire();stalled.assertClean();
   release();await tick();stalled.flushFrames();stalled.assertClean();assert.equal(stalled.motions.length,0);
 });
@@ -111,4 +115,13 @@ test('failed image and partial animation construction leave the map usable',asyn
   const image=setup(t,{decode:()=>Promise.reject(Error('Image failed'))});await image.ready();image.assertClean();
   const animation=setup(t,{throwAt:3});await animation.ready();animation.assertClean();
   assert.ok(animation.motions.every(motion=>motion.cancelled));await tick();
+});
+
+
+test('the first fold waits for both colour and terrain before exposing either',async t=>{
+  const pending=new Map(),env=setup(t,{decode:src=>new Promise(resolve=>pending.set(src,resolve))});
+  env.w.RedlineMapIntro.start();assert.equal(pending.size,2);
+  pending.get('atlas-tones.png')();await tick();env.flushFrames();assert.equal(env.motions.length,0);
+  pending.get('relief/overview.webp')();await tick();env.flushFrames();
+  assert.ok(env.motions.length>0);env.w.dispatchEvent(new env.w.Event('pointerdown'));env.assertClean();
 });
