@@ -812,7 +812,7 @@
     const tab=nav.querySelector('[aria-current="true"]');if(!tab)return;
     // Scroll only the tab rail. scrollIntoView can move the book's hidden
     // overflow ancestors and expose the stems through its 3D pages.
-    if(twoPage()||reading()){
+    if(reading()){
       if(tab.offsetTop<nav.scrollTop)nav.scrollTop=tab.offsetTop;
       else if(tab.offsetTop+tab.offsetHeight>nav.scrollTop+nav.clientHeight)nav.scrollTop=tab.offsetTop+tab.offsetHeight-nav.clientHeight;
     }else{
