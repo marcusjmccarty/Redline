@@ -35,6 +35,28 @@ function png(width,height,pixels){
   const header=Buffer.alloc(13);header.writeUInt32BE(width);header.writeUInt32BE(height,4);header[8]=8;header[9]=6;
   return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('IDAT',deflateSync(raw,{level:9})),chunk('IEND',Buffer.alloc(0))]);
 }
+// A seamless, reusable rag-paper plate. All fibres and pigment granulation
+// are baked once; the page only repeats this small bitmap at screen scale.
+export function paperGrain(size=192){
+  const raw=Buffer.alloc((size+1)*size),palette=Buffer.alloc(26*3),alpha=Buffer.alloc(26);
+  for(let i=0;i<26;i++){
+    palette.set(i<13?[105,89,60]:[255,251,235],i*3);alpha[i]=(i%13)*3;
+  }
+  const periodic=(x,y,cols,rows,seed)=>{
+    const ix=Math.floor(x),iy=Math.floor(y),u=fade(x-ix),v=fade(y-iy);
+    const at=(a,b)=>random((a+cols)%cols,(b+rows)%rows,seed);
+    return (at(ix,iy)*(1-u)+at(ix+1,iy)*u)*(1-v)+(at(ix,iy+1)*(1-u)+at(ix+1,iy+1)*u)*v;
+  };
+  for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+    const cloud=periodic(x/size*8,y/size*8,8,8,613)-.5;
+    const fibre=periodic(x/size*8,y/size*48,8,48,419)-.5;
+    const grain=random(x,y,827)-.5,ink=grain*.75+cloud*.7+fibre*.32;
+    raw[y*(size+1)+x+1]=(ink>0?0:13)+Math.min(12,Math.round(Math.abs(ink)*58/3));
+  }
+  // Indexed alpha keeps the full-size tile smaller than an RGBA noise image.
+  const header=Buffer.alloc(13);header.writeUInt32BE(size);header.writeUInt32BE(size,4);header[8]=8;header[9]=3;
+  return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('PLTE',palette),chunk('tRNS',alpha),chunk('IDAT',deflateSync(raw,{level:9})),chunk('IEND',Buffer.alloc(0))]);
+}
 // Scan conversion happens at build time. Country borders never participate in
 // the wash; only the original coastlines distinguish warm land from blue water.
 function landMask(data,width,height){
@@ -72,7 +94,7 @@ export function atlasTones(data,width=1024,height=512){
   const pixels=new Uint8Array(width*height*4);
   for(let y=0;y<height;y++)for(let x=0;x<width;x++){
     const i=y*width+x,land=mask[i],tone=wash(x/width*2,y/height,land?0x2d7289:0x629138);
-    const dark=land?[216,185,125]:[147,181,198],middle=land?[255,244,204]:[194,214,222],light=land?[255,249,222]:[239,242,227];
+    const dark=land?[176,184,139]:[147,181,198],middle=land?[249,230,184]:[194,214,222],light=land?[255,249,222]:[239,242,227];
     // A continuous three-colour curve keeps the golden cream and blue lively,
     // with no stop boundaries between the shadows, middle tones, and highlights.
     for(let c=0;c<3;c++)pixels[i*4+c]=Math.round(dark[c]*(1-tone)**2+middle[c]*2*tone*(1-tone)+light[c]*tone**2);

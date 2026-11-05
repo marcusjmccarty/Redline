@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
-  const maxZoom=240,autoZoomLimit=118;
+  const maxZoom=240,autoZoomLimit=84;
   const duration=length=>Math.max(1600,Math.min(3600,length*6));
   const ease=value=>{const t=clamp(value,0,1);return t*t*t*(t*(t*6-15)+10);};
   // Ramp velocity smoothly over the first and last 30% of a move. The
@@ -79,20 +79,31 @@
   }
   function fitLevel({left,right,top,bottom},space,world){
     const spanX=Math.max(1e-6,right-left),spanY=Math.max(1e-6,bottom-top);
-    const localLevel=Math.min(world.w*.28/spanX,world.h*.24/spanY);
-    return Math.max(1,Math.min(autoZoomLimit,Math.max(2.35,localLevel),
-      (space.right-space.left)*world.w/(Math.max(1,spanX)*space.width*1.16),
-      (space.bottom-space.top)*world.h/(Math.max(1,spanY)*space.height*1.16)));
+    // Compose against the actual free viewport, not a fixed fraction of the
+    // world. Regional journeys use the same readable scale on narrow screens.
+    const fit=Math.min((space.right-space.left)*world.w/(spanX*space.width),
+      (space.bottom-space.top)*world.h/(spanY*space.height));
+    const desired=fit*.58;
+    // A soft ceiling preserves geographic context on tiny hops without a
+    // sudden change of behaviour at a particular distance. Manual zoom is free.
+    return Math.max(1,desired/(1+(desired/autoZoomLimit)**4)**.25);
   }
   function camera(geometry,space,world,destination,zoom=null,before=null,after=null){
     if(zoom){const follow=point=>pointFrame(point,space,world,zoom);return {follow,arrival:follow(destination)};}
     const {left,right,top,bottom}=geometry.bounds,center=[(left+right)/2,(top+bottom)/2];
     let level=fitLevel(geometry.bounds,space,world);
-    // Ease an isolated close-up between two wider legs. A run of nearby
-    // stops keeps its natural detail, regardless of playback direction.
+    // Limit a solitary close-up between wider legs, while preserving detail
+    // throughout a local itinerary. Work in zoom ratios, in either direction.
     if(before&&after){
       const neighbor=Math.max(fitLevel(before.bounds,space,world),fitLevel(after.bounds,space,world));
-      if(level>neighbor*1.5)level=Math.max(level*.72,Math.sqrt(level*neighbor*1.5));
+      if(level>neighbor*1.5)level=Math.max(level*.4,Math.sqrt(level*neighbor*1.5));
+    }
+    // Similar neighboring legs share their wider composition. This removes
+    // small in/out breaths as a route works through a region.
+    const composedLevel=level;
+    for(const adjacent of [before,after])if(adjacent){
+      const nearby=fitLevel(adjacent.bounds,space,world);
+      if(nearby>=composedLevel/1.35)level=Math.min(level,nearby);
     }
     const w=world.w/level,h=world.h/level,sx=space.width/w,sy=space.height/h;
     const axis=(min,max,first,last,scale,extent,size,focus)=>{
@@ -100,12 +111,10 @@
       const low=Math.max(0,max-last/scale),high=Math.min(size-extent,min-first/scale);
       return low<=high?clamp(desired,low,high):clamp(desired,0,size-extent);
     };
-    function follow(point){
-      // Keep the entire arc composed; the moving line adds only a small pan bias.
-      const focus=geometry.crossesSeam?center:center.map((n,i)=>n*.84+point[i]*.16);
-      return {x:axis(left,right,space.left,space.right,sx,w,world.w,focus[0]),y:axis(top,bottom,space.top,space.bottom,sy,h,world.h,focus[1]),w,h};
-    }
-    return {follow,arrival:follow(destination)};
+    // One fixed composition per leg. Moving the target along with the ink
+    // made the camera creep after the route already fitted comfortably.
+    const arrival={x:axis(left,right,space.left,space.right,sx,w,world.w,center[0]),y:axis(top,bottom,space.top,space.bottom,sy,h,world.h,center[1]),w,h};
+    return {follow:()=>arrival,arrival};
   }
   function cameraView(start,plan,point,amount){
     if(amount>=1)return {...plan.arrival};

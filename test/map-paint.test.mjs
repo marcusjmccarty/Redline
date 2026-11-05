@@ -105,3 +105,17 @@ test('relief is local, bounded to the visible terrain, and released at overview'
     }});
   }
 });
+
+test('terrain detail fades in gradually and close views preserve paper highlights',t=>{
+  const {w}=atlas(t);w.eval(source('public/relief/index.js'));
+  const layer=w.document.createElementNS('http://www.w3.org/2000/svg','g'),paint=w.RedlineAtlas.relief(layer,w.REDLINE_RELIEF);
+  let previous=[0,0];
+  for(let zoom=2;zoom<=24;zoom+=.02){
+    paint({x:750,y:180,w:1440/zoom,h:720/zoom},zoom);
+    const opacity=cols=>Number([...layer.children].find(node=>node.getAttribute('href').startsWith(`relief/${cols}-`))?.style.opacity||0);
+    const current=[opacity(4),opacity(16)];
+    current.forEach((value,i)=>assert.ok(Math.abs(value-previous[i])<=.026,'No sudden terrain contrast change while zooming'));
+    previous=current;
+  }
+  assert.ok(previous[0]<.15&&previous[1]>.7,'Detailed ridges replace the broad shadow plate');
+});

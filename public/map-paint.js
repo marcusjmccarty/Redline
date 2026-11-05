@@ -35,11 +35,14 @@
   // SVG image (and a decoded bitmap); the overview requests no relief.
   function relief(layer,coverage){
     const levels=[4,16].map((cols,i)=>({cols,rows:coverage?.[i]||[],tiles:new Map(),opacity:0,key:''}));
+    const smoothStep=(start,end,value)=>{const t=Math.max(0,Math.min(1,(value-start)/(end-start)));return t*t*(3-2*t);};
     return function paint(view,zoom){
       for(const level of levels){
         const {cols,rows,tiles}=level,span=1440/cols;
-        const strength=cols===4?Math.min(.86,(zoom-2.2)*.4,Math.max(.48,(16-zoom)*.12)):Math.min(.88,(zoom-10)*.3);
-        const opacity=Math.max(0,Math.round(strength*40)/40);
+        // Let the broad woodland wash give way to the engraved ridges. Keeping
+        // both plates strong at close range used to muddy the paper highlights.
+        const strength=cols===4?.76*smoothStep(2.2,4.6,zoom)*(1-.82*smoothStep(9,20,zoom)):.78*smoothStep(10,18,zoom);
+        const opacity=Math.round(strength*80)/80;
         const x0=Math.max(0,Math.floor(view.x/span)),x1=Math.min(cols-1,Math.ceil((view.x+view.w)/span)-1);
         const y0=Math.max(0,Math.floor(view.y/span)),y1=Math.min(rows.length-1,Math.ceil((view.y+view.h)/span)-1);
         const key=opacity?[x0,x1,y0,y1,opacity].join('/'):'';

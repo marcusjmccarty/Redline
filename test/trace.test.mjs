@@ -112,7 +112,7 @@ test('one smooth camera move fits both cities and has no zoom reversals or date-
   }
 });
 
-test('nearby legs get a readable local scale without changing long-haul framing',()=>{
+test('nearby legs retain context and regional routes fill a useful part of the viewport',()=>{
   const space={width:1200,height:800,left:40,right:1160,top:40,bottom:640};
   function frame(from,to){
     const geometry=measure(route(from,to)),dest=project(to),start=project(from);
@@ -125,8 +125,9 @@ test('nearby legs get a readable local scale without changing long-haul framing'
   }
   const short=frame([-78.424,-1.396],[-78.062,-1.505]),regional=frame([-78.062,-1.505],[-78.145,.04]);
   assert.ok(short.level>regional.level&&regional.level>10);
-  assert.ok(short.separation>150&&regional.separation>150);
-  assert.ok(frame([-80.19,25.76],[-78.47,-.18]).level<=2.35);
+  assert.ok(short.separation>90&&short.level<=84,'A small hop stays legible without an extreme close-up');
+  assert.ok(regional.separation>250,'Regional journeys are not lost in empty space');
+  assert.ok(frame([-80.19,25.76],[-78.47,-.18]).separation>300);
 });
 
 test('the ink stays on screen and zoom changes at a bounded rate across long and short legs',()=>{
@@ -157,7 +158,7 @@ test('an isolated local leg eases the zoom peak while successive nearby legs ret
   const space={width:1200,height:800,left:40,right:1160,top:40,bottom:640};
   const frame=(before,after)=>camera(local,space,worldFrame,local.pointAt(1),null,before,after).arrival;
   const natural=frame(null,null),isolated=frame(wide,wide);
-  assert.ok(isolated.w>natural.w&&isolated.w<=natural.w/.72+.001);
+  assert.ok(isolated.w>=natural.w*2&&isolated.w<=natural.w/.4+.001,'An isolated tiny hop avoids a deep zoom immediately followed by a pullback');
   assert.deepEqual(frame(local,wide),natural);assert.deepEqual(frame(wide,local),natural);
   for(const [from,to] of [[0,1],[1,0]]){
     const run=timeline({from,to,duration:2000,easeStops:true}),start=run.advance(50).position;
@@ -179,4 +180,29 @@ test('long automatic zooms ease into a steady middle speed in either direction',
     }
     assert.deepEqual(last,end);assert.ok(maxSpeed<1.38);
   }
+});
+
+test('automatic framing adapts to portrait space, keeps regional detail, and stops chasing the ink',()=>{
+  for(const [width,height] of [[1440,900],[390,844],[844,390]]){
+    const space={width,height,left:30,right:width-30,top:30,bottom:height-130};
+    for(const pair of [[[0,0],[3,1]],[[0,0],[1,3]],[[10,10],[10.0001,10.0001]],[[0,0],[0,0]]]){
+      const geometry=measure(route(...pair)),plan=camera(geometry,space,worldFrame,project(pair[1]));
+      assert.ok(Object.values(plan.arrival).every(Number.isFinite));
+      assert.ok(worldFrame.w/plan.arrival.w<=84,'Automatic close-ups retain context');
+      for(const amount of [0,.25,.5,.75,1])assert.deepEqual(plan.follow(geometry.pointAt(amount)),plan.arrival,'The settled composition is fixed');
+      if(geometry.length>1){
+        const {left,right,top,bottom}=geometry.bounds;
+        const fill=Math.max((right-left)*width/plan.arrival.w/(space.right-space.left),(bottom-top)*height/plan.arrival.h/(space.bottom-space.top));
+        assert.ok(fill>.4&&fill<.61,'A regional arc occupies a useful share of the free screen');
+      }
+    }
+  }
+});
+
+test('comparable neighboring legs avoid a zoom breath without losing their endpoints',()=>{
+  const space={width:1200,height:800,left:40,right:1160,top:40,bottom:640};
+  const a=measure('M700,300L720,300'),b=measure('M720,300L743,300');
+  const first=camera(a,space,worldFrame,[720,300],null,null,b);
+  const second=camera(b,space,worldFrame,[743,300],null,a,null);
+  assert.equal(first.arrival.w,second.arrival.w);
 });
