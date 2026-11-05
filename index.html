@@ -6,17 +6,19 @@
   <meta name="theme-color" content="#efe5d2">
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
-  <link rel="stylesheet" href="style.css?v=9ce34464a7c4">
-  <link rel="stylesheet" href="gallery.css?v=d3ba2bb3db01">
-  <script src="map-intro.js?v=42c0f59787e3"></script>
+  <link rel="preload" as="image" href="atlas-tones.png?v=44cfb13bc80f" fetchpriority="high">
+  <link rel="preload" as="image" href="relief/overview.webp?v=ac4122ed741c" type="image/webp">
+  <link rel="stylesheet" href="style.css?v=81bfa976fa7f">
+  <link rel="stylesheet" href="gallery.css?v=21ff70a5aba9">
+  <script src="map-intro.js?v=70abca5a38e8"></script>
   <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
   <script src="map-layout.js?v=eb31b38a5551" defer></script>
   <script src="atlas-geography.js?v=5a63514c3186" defer></script>
   <script src="trace.js?v=cf42a4433575" defer></script>
-  <script src="labels.js?v=0e761c11f184" defer></script>
+  <script src="labels.js?v=3a0e0f05b1b8" defer></script>
   <script src="relief/index.js?v=b019ce04df05" defer></script>
-  <script src="map-paint.js?v=d0bbc3e95266" defer></script>
-  <script src="app.js?v=6e55c2781d97" defer></script>
+  <script src="map-paint.js?v=61744e1270ef" defer></script>
+  <script src="app.js?v=ef084588ec80" defer></script>
   <script src="postcard-export.js?v=048b39ce6827" defer></script>
   <script src="postcards.js?v=bb3aca0cbd97" defer></script>
   <script src="jpeg.js?v=c37b5b32449f" defer></script>
@@ -33,7 +35,8 @@
         <rect width="1440" height="720" fill="var(--ocean)" aria-hidden="true"/>
         <g id="land"></g>
         <g id="antarctica" aria-hidden="true"></g>
-        <image id="atlas-tones" href="atlas-tones.png?v=b68b85dd93c9" width="1440" height="720" preserveAspectRatio="none" pointer-events="none" aria-hidden="true"/>
+        <image id="atlas-tones" href="atlas-tones.png?v=44cfb13bc80f" width="1440" height="720" preserveAspectRatio="none" pointer-events="none" aria-hidden="true"/>
+        <image id="atlas-overview" href="relief/overview.webp?v=ac4122ed741c" width="1440" height="720" preserveAspectRatio="none" pointer-events="none" aria-hidden="true"/>
         <g id="atlas-relief" pointer-events="none" aria-hidden="true"></g>
         <g id="graticule" aria-hidden="true">
           <path class="graticule-line" d="M120 0V720M240 0V720M360 0V720M480 0V720M600 0V720M840 0V720M960 0V720M1080 0V720M1200 0V720M1320 0V720M0 120H1440M0 240H1440M0 480H1440M0 600H1440"/>
