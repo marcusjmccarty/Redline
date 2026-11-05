@@ -84,7 +84,9 @@
   const albumPanel=$('photo-panel'),fullscreenButton=$('album-fullscreen');
   const index=$('album-index'),drawer=$('album-drawer'),edge=$('album-edge'),tabs=$('gallery-filter');
   const reading=()=>albumPanel.classList.contains('expanded');
+  let indexCloseTimer=0;
   function showIndex(open){
+    clearTimeout(indexCloseTimer);indexCloseTimer=0;
     drawer.inert=!open;tabs.inert=tabs.classList.contains('away')||reading()&&!open;
     albumPanel.classList.toggle('index-open',reading()&&open);
     edge.setAttribute('aria-expanded',String(open));
@@ -125,21 +127,27 @@
   });
   const onIndex=node=>node&&(index.contains(node)||drawer.contains(node)||tabs.contains(node));
   const indexFocused=()=>onIndex(document.activeElement);
+  const inIndexReach=event=>onIndex(event.target)||event.clientX>=Math.min(innerWidth-180,tabs.getBoundingClientRect().left-24);
+  function leaveIndex(){
+    if(!reading()||indexFocused()||indexCloseTimer)return;
+    indexCloseTimer=setTimeout(()=>{indexCloseTimer=0;if(!indexFocused())showIndex(false);},220);
+  }
   for(const rail of [index,drawer,tabs]){
-    rail.addEventListener('pointerleave',event=>{
-      if(reading()&&event.pointerType!=='touch'&&!onIndex(event.relatedTarget)&&!indexFocused())showIndex(false);
-    });
+    // A tab moves beneath the cursor as the book slides. Leaving one small
+    // element is not leaving the index: the entire right-side corridor stays open.
+    rail.addEventListener('pointerenter',()=>{if(reading())showIndex(true);});
     rail.addEventListener('focusout',event=>{if(reading()&&!onIndex(event.relatedTarget))showIndex(false);});
   }
   tabs.addEventListener('focusin',()=>{if(reading())showIndex(true);});
   albumPanel.addEventListener('pointermove',event=>{
     if(reading()&&event.pointerType!=='touch'&&albumPanel.classList.contains('index-open')&&!onIndex(event.target)&&!indexFocused()){
-      // Keep a small bridge between the fixed screen edge and the moving tabs.
-      if(event.clientX<innerWidth-170)showIndex(false);
+      if(inIndexReach(event)){clearTimeout(indexCloseTimer);indexCloseTimer=0;}
+      else leaveIndex();
     }
   });
+  albumPanel.addEventListener('pointerleave',event=>{if(event.pointerType!=='touch')leaveIndex();});
   albumPanel.addEventListener('pointerdown',event=>{
-    if(reading()&&!onIndex(event.target))showIndex(false);
+    if(reading()&&!inIndexReach(event))showIndex(false);
     if(reading()&&event.target!==topEdge&&!toolbar.contains(event.target))showToolbar(false);
   });
   $('gallery-filter').addEventListener('click',event=>{
@@ -804,10 +812,13 @@
   // A focused tab keeps keyboard focus when the tabs are rebuilt, as they are after every turn.
   function renderTabs(groups){
     const chapters=albumPages(),nav=$('gallery-filter'),focused=nav.contains(document.activeElement)?document.activeElement.dataset.filter:null;
+    const rows=Math.max(1,Math.min(groups.length,Math.max(4,Math.ceil(groups.length/4)))),columns=Math.max(1,Math.ceil(groups.length/rows));
+    $('album-book').style.setProperty('--tab-width',`${columns*28+12}px`);
+    nav.style.setProperty('--tab-rows',String(rows));
     const key=JSON.stringify([busy,groups.map(group=>[group.id,group.name,group.items.length,chapters.findIndex(page=>page.type==='city'&&page.first&&page.group.id===group.id)])]);
     if(key===tabsKey){markTab();return;}tabsKey=key;
     nav.replaceChildren(...groups.map((group,i)=>{
-      const tab=document.createElement('button');tab.type='button';tab.className='album-tab';tab.dataset.filter=group.id;tab.style.setProperty('--tab',String(i%6));tab.style.setProperty('--tab-order',String(i));tab.disabled=busy;
+      const column=Math.floor(i/rows),tab=document.createElement('button');tab.type='button';tab.className='album-tab';tab.dataset.filter=group.id;tab.style.setProperty('--tab',String(column%6));tab.style.setProperty('--tab-order',String(100-column));tab.style.setProperty('--tab-column',String(column));tab.disabled=busy;
       const page=folioOf(chapters.findIndex(page=>page.type==='city'&&page.first&&page.group.id===group.id));
       const number=document.createElement('span');number.className='chip-stop';number.textContent=String(page).padStart(2,'0');number.title=`Page ${page}`;tab.append(number);
       const name=document.createElement('span'),count=document.createElement('span');name.className='tab-name';name.textContent=group.name;count.className='chip-count';count.textContent=String(group.items.length);tab.append(name,count);

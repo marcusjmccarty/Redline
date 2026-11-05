@@ -107,8 +107,7 @@
     // throughout a local itinerary. Work in zoom ratios, in either direction.
     if(before&&after){
       const neighbor=Math.max(fitLevel(before.bounds,space,world),fitLevel(after.bounds,space,world));
-      const difference=Math.max(0,Math.log(level/neighbor));
-      level*=Math.exp(-Math.log(1/.7)*(1-Math.exp(-difference*.65)));
+      level=Math.min(level,Math.max(24,neighbor*1.8));
     }
     // Similar neighboring legs share their wider composition. This removes
     // small in/out breaths as a route works through a region.
@@ -130,9 +129,12 @@
     const arrival={x:axis(left,right,space.left,space.right,sx,w,world.w,center[0]),y:axis(top,bottom,space.top,space.bottom,sy,h,world.h,center[1]),w,h};
     return {follow:()=>arrival,arrival};
   }
+  const framingPhase=amount=>cameraPhase(clamp(amount/.8,0,1));
   function cameraView(start,plan,point,amount){
-    if(amount>=1)return {...plan.arrival};
-    const target=plan.follow(point),blend=cameraPhase(clamp(amount,0,1));
+    // Settle the composition before arrival; the last part of the red line
+    // lands on a still map instead of racing a camera that is still zooming.
+    if(amount>=.8)return {...plan.arrival};
+    const target=plan.follow(point),blend=framingPhase(amount);
     // Zoom by equal ratios. Interpolate the corners by that same change in width
     // to keep the departure in frame while pulling out for the next leg.
     const ratio=Math.log(target.w/start.w);
@@ -152,7 +154,7 @@
     const travel=u=>{
       const ramp=.1;
       const rounded=u<ramp?u*u/(2*ramp*(1-ramp)):u>1-ramp?1-(1-u)**2/(2*ramp*(1-ramp)):(u-ramp/2)/(1-ramp);
-      const fit=Math.exp(-logRatio*(1-cameraPhase(u)));
+      const fit=Math.exp(-logRatio*(1-framingPhase(u)));
       return from+(to-from)*rounded*(ratio>=1?fit:.35+.65*fit);
     };
     let previous=start,point=geometry.pointAt(from);
@@ -181,7 +183,7 @@
   }
   function timeline({from,to,duration,widthRatio=1,easeStops=false}){
     let elapsed=0;
-    const total=Math.max(Math.abs(to-from)*duration,zoomDuration(widthRatio));
+    const total=Math.max(Math.abs(to-from)*duration,zoomDuration(widthRatio)/.8);
     const ramp=easeStops&&total?Math.min(.12,180/total):0;
     const shoulder=t=>t*t/(2*ramp*(1-ramp));
     return {advance(delta){
@@ -189,7 +191,7 @@
       const time=total?elapsed/total:1;
       // A long leg emerging from a close view can only reveal the fraction
       // that fits. On a short leg keep some ink moving as the camera comes in.
-      const fit=Math.exp(-Math.abs(Math.log(widthRatio))*(1-cameraPhase(time)));
+      const fit=Math.exp(-Math.abs(Math.log(widthRatio))*(1-framingPhase(time)));
       // Round the start and end of the ink stroke without pausing at a city.
       let travel=time;
       if(ramp){

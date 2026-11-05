@@ -1470,20 +1470,40 @@ test('window reading view keeps the current spread, opens full photos and leaves
   assert.equal($('gallery-filter').parentElement,$('album-book'));assert.equal($('photo-panel').open,true);
 });
 
-test('the window edge reveals city tabs, dismisses on leave, and provides a touch exit',async t=>{
+test('the window edge keeps tabs reachable across the gap and closes only after leaving the corridor',async t=>{
   const {w,$,tab}=await setup(t),edge=$('album-edge'),drawer=$('album-drawer'),button=$('album-fullscreen');
   button.click();edge.dispatchEvent(new w.Event('pointerenter'));assert.equal(drawer.inert,false);
   assert.equal($('photo-panel').classList.contains('index-open'),true);
   assert.equal($('gallery-filter').inert,false);
   edge.dispatchEvent(new w.MouseEvent('pointerleave',{relatedTarget:tab(madrid.id)}));
   assert.equal($('photo-panel').classList.contains('index-open'),true,'Crossing from the edge onto an attached tab keeps the book shifted');
-  $('album-index').dispatchEvent(new w.Event('pointerleave'));assert.equal(drawer.inert,true);
+  $('album-index').dispatchEvent(new w.MouseEvent('pointerleave',{relatedTarget:$('album-book')}));
+  $('photo-panel').dispatchEvent(new w.MouseEvent('pointermove',{clientX:w.innerWidth-80,bubbles:true}));
+  await new Promise(resolve=>setTimeout(resolve,260));
+  assert.equal(drawer.inert,false,'Crossing empty space between the screen edge and tabs must not hide them');
+  $('gallery-filter').getBoundingClientRect=()=>({left:w.innerWidth-160});
+  $('photo-panel').dispatchEvent(new w.MouseEvent('pointermove',{clientX:100,bubbles:true}));
+  assert.equal(drawer.inert,false,'A brief pointer excursion does not snap the book closed');
+  await new Promise(resolve=>setTimeout(resolve,260));assert.equal(drawer.inert,true);
   assert.equal($('photo-panel').classList.contains('index-open'),false);
   edge.click();assert.equal(edge.getAttribute('aria-expanded'),'true');tab(madrid.id).click();
   assert.match($('album-position').textContent,/Madrid/);assert.equal(drawer.inert,true);
   edge.click();$('album-restore').click();assert.equal(button.getAttribute('aria-pressed'),'false');
   button.click();$('photo-panel').querySelector('[data-close]').click();
   assert.equal($('photo-panel').open,false);assert.equal($('gallery-filter').parentElement,$('album-book'));
+});
+
+test('Escape is consumed on keydown and keyup while retaining local dialog dismissal',async t=>{
+  const {w,$,press}=await setup(t,{realMap:true});
+  assert.equal(press('Escape'),false);await tick();
+  assert.equal($('photo-panel').open,false);
+  assert.equal(press('Escape'),false,'An unhandled map Escape cannot fall through to the browser');
+  const release=new w.KeyboardEvent('keyup',{key:'Escape',bubbles:true,cancelable:true});
+  w.document.dispatchEvent(release);assert.ok(release.defaultPrevented);
+  $('info-dialog').showModal();assert.equal(press('Escape'),false);assert.equal($('info-dialog').open,false);
+  $('photos-button').click();await wait(()=>$('photo-panel').open&&!$('album-fullscreen').disabled);
+  $('album-fullscreen').click();assert.equal($('photo-panel').classList.contains('expanded'),true);assert.equal(press('Escape'),false);
+  assert.equal($('photo-panel').classList.contains('expanded'),false);assert.equal($('photo-panel').open,true);
 });
 
 test('a first-open photo stays visible when the browser has not finished decoding its bitmap',async t=>{

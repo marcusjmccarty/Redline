@@ -668,6 +668,19 @@
   });
   // The play button's own Space activation would toggle a second time.
   document.addEventListener('keyup',event=>{held.delete(event.key);if(event.key===' '&&event.target.id==='play')event.preventDefault();});
+  // Consume Escape after the focused editor and page controls have handled it.
+  // Cancel dialogs ourselves so Safari never receives an unhandled Escape to
+  // leave its window fullscreen mode. Keyup is consumed for the same reason.
+  window.addEventListener('keydown',event=>{
+    if(event.key!=='Escape'||event.isComposing)return;
+    if(!event.defaultPrevented&&!event.repeat){
+      const dialog=document.querySelector('dialog[open]');
+      if(dialog){if(dialog.dispatchEvent(new Event('cancel',{cancelable:true})))dialog.close();}
+      else if(running)stopAnimation();
+    }
+    event.preventDefault();event.stopPropagation();
+  });
+  window.addEventListener('keyup',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();}});
   window.addEventListener('blur',()=>held.clear());
   document.addEventListener('visibilitychange',()=>{if(document.hidden){held.clear();lastTick=null;}});
   atlas=RedlineAtlas.create($('land'),$('regions'),window.ATLAS_LAND,window.REGION_PATHS,$('country-borders'),window.ATLAS_BORDERS);

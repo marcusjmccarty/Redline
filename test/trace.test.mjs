@@ -113,10 +113,10 @@ test('one smooth camera move fits both cities and has no zoom reversals or date-
   for(const [width,height] of [[1440,900],[1920,1080],[390,844]])for(const pair of pairs)for(const reverse of [false,true]){
     const [from,to]=reverse?[...pair].reverse():pair,geometry=measure(route(from,to));
     const space={width,height,left:Math.min(54,width*.09),right:width-Math.min(54,width*.09),top:54,bottom:height-200};
-    const plan=camera(geometry,space,worldFrame,project(to));let previous=worldFrame;
+    const plan=camera(geometry,space,worldFrame,project(to)),playback=journey({geometry,space,start:worldFrame,plan});let previous=worldFrame;
     assert.deepEqual(cameraView(worldFrame,plan,project(from),0),worldFrame);
-    for(let i=1;i<=100;i++){
-      const amount=i/100,frame=cameraView(worldFrame,plan,geometry.pointAt(ease(amount)),amount);
+    for(let i=0;i<Math.ceil(playback.duration/16);i++){
+      const state=playback.advance(16),frame=cameraView(worldFrame,plan,geometry.pointAt(state.position),state.time);
       assert.ok(frame.w<=previous.w+1e-8,'A leg has only one zoom direction');
       assert.ok(Math.hypot(frame.x-previous.x,frame.y-previous.y)<25,'No sudden pan jumps');previous=frame;
     }
@@ -174,7 +174,7 @@ test('an isolated local leg eases the zoom peak while successive nearby legs ret
   const space={width:1200,height:800,left:40,right:1160,top:40,bottom:640};
   const frame=(before,after)=>camera(local,space,worldFrame,local.pointAt(1),null,before,after).arrival;
   const natural=frame(null,null),isolated=frame(wide,wide);
-  assert.ok(isolated.w>=natural.w*1.2&&isolated.w<=natural.w/.7+.001,'An isolated tiny hop softens the zoom peak without shrinking away local detail');
+  assert.ok(isolated.w>=natural.w*1.2&&isolated.w<=worldFrame.w/24+.001,'An isolated tiny hop limits the zoom peak while preserving at least 24× local detail');
   assert.deepEqual(frame(local,wide),natural);assert.deepEqual(frame(wide,local),natural);
   for(const [from,to] of [[0,1],[1,0]]){
     const run=timeline({from,to,duration:2000,easeStops:true}),start=run.advance(50).position;
@@ -221,6 +221,18 @@ test('comparable neighboring legs avoid a zoom breath without losing their endpo
   const first=camera(a,space,worldFrame,[720,300],null,null,b);
   const second=camera(b,space,worldFrame,[743,300],null,a,null);
   assert.equal(first.arrival.w,second.arrival.w);
+});
+
+test('the camera settles before arrival and a tiny stopover does not cause an isolated deep zoom',()=>{
+  const space={width:1200,height:800,left:40,right:1160,top:40,bottom:640};
+  const before=measure('M650,300L700,300'),hop=measure('M700,300L701,300'),after=measure('M701,300L760,300');
+  const plan=camera(hop,space,worldFrame,[701,300],null,before,after);
+  const regional=camera(before,space,worldFrame,[700,300]);
+  assert.ok(worldFrame.w/plan.arrival.w<=worldFrame.w/regional.arrival.w*1.8+1e-8);
+  for(const time of [.8,.9,.99,1])assert.deepEqual(cameraView(worldFrame,plan,hop.pointAt(time),time),plan.arrival);
+  const run=journey({geometry:hop,space,start:worldFrame,plan});let state;
+  do{state=run.advance(16);}while(state.time<.8);
+  assert.ok(state.position<.99,'Some ink remains after the camera settles');
 });
 
 test('automatic playback bounds visible ink speed and zoom together in every viewport',()=>{

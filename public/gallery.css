@@ -271,17 +271,16 @@
 .print-photo:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
 
 /* Divider tabs and page controls */
-.album-tabs { position: absolute; z-index: 1; isolation: isolate; left: calc(100% - var(--pad) - 18px); top: 50%; width: calc(var(--tab-width) + 22px); max-height: 82%; display: flex; flex-direction: column; margin: 0; padding: 5px 6px 5px 0; transform: translateY(-50%); overflow: hidden auto; clip-path: inset(0 0 0 calc(18px + var(--page-depth, 6px))); scrollbar-width: none; overscroll-behavior: contain; transition: left var(--turn-duration) var(--turn-ease); }
+/* Narrow, layered divider tabs: labels read clockwise down the book edge. */
+.album-tabs { position: absolute; z-index: 1; isolation: isolate; left: calc(100% - var(--pad) - 18px); top: 50%; width: calc(var(--tab-width) + 22px); height: min(82%, calc(var(--tab-rows, 4) * 104px + 12px)); display: grid; grid-auto-flow: column; grid-template-rows: repeat(var(--tab-rows, 4), 104px); grid-auto-columns: 28px; align-content: start; margin: 0; padding: 6px 6px 6px 0; transform: translateY(-50%); overflow: hidden auto; clip-path: inset(0 0 0 calc(18px + var(--page-depth, 6px))); scrollbar-width: none; overscroll-behavior: contain; transition: left var(--turn-duration) var(--turn-ease); }
 .album-tabs::-webkit-scrollbar { display: none; }
-/* Book-cloth colours (oxblood, bottle green, navy, ochre, plum, slate) in one strip; --tab picks one, with half a colour to spare on each side. */
-.album-tab { display: flex; align-items: center; position: relative; z-index: var(--tab-order, 0); flex: none; gap: 5px; width: 100%; height: 35px; padding: 7px 10px 7px 28px; border: 0; border-radius: 0 5px 5px 0; background: linear-gradient(90deg, #6b2c2a 0 16.667%, #2f4b3b 0 33.333%, #2d3c58 0 50%, #6c4f1e 0 66.667%, #583450 0 83.333%, #465360 0) calc((var(--tab, 0) * 2 + .5) * 100% / 11) 0 / 1200% 100%; color: #fbf4e6; font: 12px Georgia, serif; text-align: left; box-shadow: 1px 2px 4px #0005, inset 0 1px 0 #ffffff26; transform: none; transition: transform .3s var(--ease-out), filter .3s, box-shadow .3s; }
-.album-tab:hover:not(:disabled), .album-tab:focus-visible { z-index: 1001; filter: brightness(1.12); }
-.album-tab[aria-current=true] { z-index: 1000; filter: brightness(1.2); box-shadow: 1px 2px 6px #0006, inset -2px 0 0 #f4dfae; }
-.album-tab + .album-tab { margin-top: -5px; }
-.album-tab:nth-child(even) { width: calc(100% - 5px); }
-.album-tab .chip-stop { flex: none; min-width: 12px; font: 9px Georgia, serif; opacity: .8; }
-.album-tab .tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.album-tab .chip-count { display: none; flex: none; font: 10px Arial, sans-serif; opacity: .85; }
+.album-tab { display: flex; align-items: center; justify-content: center; position: relative; z-index: var(--tab-order, 0); width: 54px; height: 106px; translate: 0 calc(var(--tab-column, 0) * 3px); padding: 7px 5px 7px 28px; border: 0; border-radius: 0 5px 5px 0; background: linear-gradient(90deg, #6b2c2a 0 16.667%, #2f4b3b 0 33.333%, #2d3c58 0 50%, #6c4f1e 0 66.667%, #583450 0 83.333%, #465360 0) calc((var(--tab, 0) * 2 + .5) * 100% / 11) 0 / 1200% 100%; color: #fbf4e6; font: 11px Georgia, serif; text-align: center; box-shadow: 1px 2px 3px #0004, inset 0 1px 0 #ffffff26; transition: filter .18s, box-shadow .18s; }
+.album-tab::before { content: ''; position: absolute; z-index: -1; right: 100%; top: 0; bottom: 0; width: calc(var(--tab-column, 0) * 28px); background: inherit; }
+.album-tab:hover:not(:disabled), .album-tab:focus-visible { filter: brightness(1.18); }
+.album-tab[aria-current=true] { filter: brightness(1.2); box-shadow: 1px 2px 4px #0005, inset -2px 0 0 #f4dfae; }
+.album-tab:nth-child(even) { border-bottom-right-radius: 8px; }
+.album-tab .chip-stop, .album-tab .chip-count { display: none; }
+.album-tab .tab-name { writing-mode: vertical-rl; text-orientation: sideways; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-height: 92px; }
 .album-tab:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
 .album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs { left: calc(75% - var(--pad) / 2 - 18px); }
 .album-foot { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 4px 20px calc(14px + env(safe-area-inset-bottom)); transition: opacity .3s, transform .3s var(--ease-out); }
@@ -460,7 +459,7 @@
 /* One page at a time: the same rule as twoPage() in trips.js. */
 @media (max-width: 599px), (max-width: 899px) and (orientation: portrait) {
   .album-stage { flex-direction: column; align-items: stretch; gap: 8px; padding: 4px 12px; }
-  .album-book { --tab-width: 100px; --turn-duration: 900ms; --turn-ease: cubic-bezier(.4,0,.2,1); --pad: 10px; width: calc(100% - var(--tab-width)); height: auto; flex: 1; min-height: 0; aspect-ratio: auto; }
+  .album-book { --tab-width: 124px; --turn-duration: 900ms; --turn-ease: cubic-bezier(.4,0,.2,1); --pad: 10px; width: calc(100% - var(--tab-width)); height: auto; flex: 1; min-height: 0; aspect-ratio: auto; }
   .album-loading-cover { left: calc(var(--pad) + 2px); right: calc(var(--pad) + 2px); width: auto; }
   .album-book .album-cover-scene .album-tabs, .album-book .album-cover-scene.closed-book .album-tabs { left: calc(100% - 18px); }
   .album-tabs, .album-book[data-mode=album]:is(.closed-front, .closed-back) > .album-tabs { left: calc(100% - var(--pad) - 18px); }
@@ -546,6 +545,7 @@
    complete book, including its pages, cloth tabs and exit control, as one. */
 .album.expanded.index-open .album-book { translate: calc(-1 * var(--tab-width) - 14px) 0; }
 .album.expanded .album-tabs { max-height: calc(100% - 110px); }
+.album.expanded:not(.index-open) :is(.album-tabs, #album-drawer) { visibility: hidden; pointer-events: none; }
 #album-index { position: absolute; z-index: 5; inset: 0 0 0 auto; width: 18px; pointer-events: none; }
 #album-edge { position: absolute; inset: 0; width: 100%; padding: 0; border: 0; background: transparent; pointer-events: auto; }
 #album-edge:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
