@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
-  const maxZoom=240,autoZoomLimit=84;
+  const maxZoom=240,autoZoomLimit=72;
   const duration=length=>Math.max(1600,Math.min(3600,length*6));
   const ease=value=>{const t=clamp(value,0,1);return t*t*t*(t*(t*6-15)+10);};
   // Ramp velocity smoothly over the first and last 30% of a move. The
@@ -96,14 +96,17 @@
     // throughout a local itinerary. Work in zoom ratios, in either direction.
     if(before&&after){
       const neighbor=Math.max(fitLevel(before.bounds,space,world),fitLevel(after.bounds,space,world));
-      if(level>neighbor*1.5)level=Math.max(level*.4,Math.sqrt(level*neighbor*1.5));
+      const difference=Math.max(0,Math.log(level/neighbor));
+      level*=Math.exp(-Math.log(1/.7)*(1-Math.exp(-difference*.65)));
     }
     // Similar neighboring legs share their wider composition. This removes
     // small in/out breaths as a route works through a region.
     const composedLevel=level;
     for(const adjacent of [before,after])if(adjacent){
       const nearby=fitLevel(adjacent.bounds,space,world);
-      if(nearby>=composedLevel/1.35)level=Math.min(level,nearby);
+      const difference=Math.max(0,Math.log(composedLevel/nearby));
+      const blend=1-ease(clamp((difference-Math.log(1.2))/Math.log(1.6/1.2),0,1));
+      level=Math.min(level,composedLevel*Math.exp(-difference*blend));
     }
     const w=world.w/level,h=world.h/level,sx=space.width/w,sy=space.height/h;
     const axis=(min,max,first,last,scale,extent,size,focus)=>{
@@ -127,6 +130,44 @@
   }
 
   const zoomDuration=ratio=>1050*Math.abs(Math.log2(ratio));
+  // Prepare once per leg. Playback spends time according to the ink's screen
+  // distance AND the camera's zoom, rather than speeding up the ink as a zoom
+  // finishes. A shared clock keeps hold-to-accelerate and pause/resume in sync.
+  function journey({geometry,space,start,plan,from=0,to=1}){
+    const count=256,times=new Float64Array(count+1),positions=new Float64Array(count+1);
+    const ratio=plan.arrival.w/start.w,logRatio=Math.abs(Math.log(ratio));
+    const nominal=Math.max(1200,Math.abs(to-from)*duration(geometry.length));
+    const pixelsPerSecond=clamp(Math.hypot(space.right-space.left,space.bottom-space.top)*.24,150,300);
+    const travel=u=>{
+      const ramp=.1;
+      const rounded=u<ramp?u*u/(2*ramp*(1-ramp)):u>1-ramp?1-(1-u)**2/(2*ramp*(1-ramp)):(u-ramp/2)/(1-ramp);
+      const fit=Math.exp(-logRatio*(1-cameraPhase(u)));
+      return from+(to-from)*rounded*(ratio>=1?fit:.35+.65*fit);
+    };
+    let previous=start,point=geometry.pointAt(from);
+    positions[0]=from;
+    for(let i=1;i<=count;i++){
+      const u=i/count,position=travel(u),nextPoint=geometry.pointAt(position),frame=cameraView(start,plan,nextPoint,u);
+      const w=(previous.w+frame.w)/2,h=(previous.h+frame.h)/2;
+      const dx=nextPoint[0]-point[0],dy=nextPoint[1]-point[1];
+      const ink=Math.abs(dx)>720?geometry.length*Math.abs(position-positions[i-1])*Math.hypot(space.width/w,space.height/h)/Math.SQRT2:Math.hypot(dx*space.width/w,dy*space.height/h);
+      const before=[(point[0]-previous.x)*space.width/previous.w,(point[1]-previous.y)*space.height/previous.h];
+      const after=[(nextPoint[0]-frame.x)*space.width/frame.w,(nextPoint[1]-frame.y)*space.height/frame.h];
+      const movement=Math.abs(dx)>720?0:Math.hypot(after[0]-before[0],after[1]-before[1]);
+      const zoom=Math.abs(Math.log2(frame.w/previous.w));
+      times[i]=times[i-1]+Math.max(nominal/count,ink/pixelsPerSecond*1000,zoom/1.05*1000,movement/(pixelsPerSecond*1.3)*1000);
+      positions[i]=position;previous=frame;point=nextPoint;
+    }
+    const total=times[count];let elapsed=0;
+    return {duration:total,advance(delta){
+      elapsed=clamp(elapsed+Math.max(0,delta),0,total);
+      if(elapsed>=total)return {time:1,position:to,arrived:true,done:true};
+      let low=0,high=count;
+      while(low+1<high){const mid=(low+high)>>1;if(times[mid]<=elapsed)low=mid;else high=mid;}
+      const share=(elapsed-times[low])/(times[high]-times[low]);
+      return {time:(low+share)/count,position:positions[low]+(positions[high]-positions[low])*share,arrived:false,done:false};
+    }};
+  }
   function timeline({from,to,duration,widthRatio=1,easeStops=false}){
     let elapsed=0;
     const total=Math.max(Math.abs(to-from)*duration,zoomDuration(widthRatio));
@@ -149,5 +190,5 @@
       return {time,position:from+(to-from)*drawn,arrived:elapsed>=total,done:elapsed>=total};
     }};
   }
-  globalThis.RedlineTrace=Object.freeze({maxZoom,measure,duration,zoomDuration,timeline,ease,camera,cameraView,pointFrame,spring,trackingCamera});
+  globalThis.RedlineTrace=Object.freeze({maxZoom,measure,duration,zoomDuration,timeline,journey,ease,camera,cameraView,pointFrame,spring,trackingCamera});
 })();

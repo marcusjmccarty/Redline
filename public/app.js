@@ -199,9 +199,9 @@
     const leg=direction>0?Math.floor(progress+1e-7):Math.ceil(progress-1e-7)-1;
     activeLeg={origin:direction>0?leg:leg+1,destination:direction>0?leg+1:leg};
     const autoCamera=cameraFor(leg,direction,null),defaultFrame=autoCamera.arrival;
-    playback={leg,target,direction,returnToOverview,nominalWidth:defaultFrame.w,manual:traceZoom?manualCamera(baseView.w/traceZoom):null,from:progress-leg,to:direction>0?1:0,startView:{...view},camera:traceZoom?cameraFor(leg,direction):autoCamera,timeline:RedlineTrace.timeline({
+    playback={leg,target,direction,returnToOverview,nominalWidth:defaultFrame.w,manual:traceZoom?manualCamera(baseView.w/traceZoom):null,from:progress-leg,to:direction>0?1:0,startView:{...view},camera:traceZoom?cameraFor(leg,direction):autoCamera,timeline:traceZoom?RedlineTrace.timeline({
       from:progress-leg,to:direction>0?1:0,duration:RedlineTrace.duration(geometry[leg].length),widthRatio:traceZoom?1:defaultFrame.w/view.w,easeStops:!traceZoom
-    })};
+    }):RedlineTrace.journey({geometry:geometry[leg],space:cameraSpace(),start:view,plan:autoCamera,from:progress-leg,to:direction>0?1:0})};
     paintProgress();
   }
   function runTo(target,{returnToOverview=false}={}){

@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import vm from 'node:vm';
 import '../public/trace.js';
-const {measure,duration,timeline,camera,cameraView,ease,spring,trackingCamera}=globalThis.RedlineTrace;
+const {measure,duration,timeline,journey,camera,cameraView,ease,spring,trackingCamera}=globalThis.RedlineTrace;
 import '../public/map-layout.js';
 const context={window:{}};vm.createContext(context);
 vm.runInContext(readFileSync('public/vendor/geo.js','utf8'),context);
@@ -158,7 +158,7 @@ test('an isolated local leg eases the zoom peak while successive nearby legs ret
   const space={width:1200,height:800,left:40,right:1160,top:40,bottom:640};
   const frame=(before,after)=>camera(local,space,worldFrame,local.pointAt(1),null,before,after).arrival;
   const natural=frame(null,null),isolated=frame(wide,wide);
-  assert.ok(isolated.w>=natural.w*2&&isolated.w<=natural.w/.4+.001,'An isolated tiny hop avoids a deep zoom immediately followed by a pullback');
+  assert.ok(isolated.w>=natural.w*1.2&&isolated.w<=natural.w/.7+.001,'An isolated tiny hop softens the zoom peak without shrinking away local detail');
   assert.deepEqual(frame(local,wide),natural);assert.deepEqual(frame(wide,local),natural);
   for(const [from,to] of [[0,1],[1,0]]){
     const run=timeline({from,to,duration:2000,easeStops:true}),start=run.advance(50).position;
@@ -188,7 +188,7 @@ test('automatic framing adapts to portrait space, keeps regional detail, and sto
     for(const pair of [[[0,0],[3,1]],[[0,0],[1,3]],[[10,10],[10.0001,10.0001]],[[0,0],[0,0]]]){
       const geometry=measure(route(...pair)),plan=camera(geometry,space,worldFrame,project(pair[1]));
       assert.ok(Object.values(plan.arrival).every(Number.isFinite));
-      assert.ok(worldFrame.w/plan.arrival.w<=84,'Automatic close-ups retain context');
+      assert.ok(worldFrame.w/plan.arrival.w<=72,'Automatic close-ups retain context');
       for(const amount of [0,.25,.5,.75,1])assert.deepEqual(plan.follow(geometry.pointAt(amount)),plan.arrival,'The settled composition is fixed');
       if(geometry.length>1){
         const {left,right,top,bottom}=geometry.bounds;
@@ -205,4 +205,45 @@ test('comparable neighboring legs avoid a zoom breath without losing their endpo
   const first=camera(a,space,worldFrame,[720,300],null,null,b);
   const second=camera(b,space,worldFrame,[743,300],null,a,null);
   assert.equal(first.arrival.w,second.arrival.w);
+});
+
+test('automatic playback bounds visible ink speed and zoom together in every viewport',()=>{
+  const routes=[[[0,0],[2,1]],[[2,1],[2.01,1.01]],[[2.01,1.01],[100,30]],[[100,30],[101,30]],[[101,30],[175,20]],[[175,20],[-175,20]]];
+  for(const [width,height] of [[1440,900],[390,844],[844,390]]){
+    const space={width,height,left:30,right:width-30,top:30,bottom:height-130};
+    const limit=Math.max(150,Math.min(300,Math.hypot(space.right-space.left,space.bottom-space.top)*.24));
+    let start=worldFrame;
+    for(const pair of routes){
+      const geometry=measure(route(...pair)),plan=camera(geometry,space,worldFrame,geometry.pointAt(1));
+      const run=journey({geometry,space,start,plan});
+      assert.ok(run.duration<11000,`Move duration ${run.duration}ms for ${pair} on ${width}×${height}`);
+      let state,previous=start,last=geometry.pointAt(0);
+      do{
+        state=run.advance(16);const point=geometry.pointAt(state.position),view=cameraView(start,plan,point,state.time);
+        const zoom=Math.abs(Math.log2(view.w/previous.w))/.016;
+        assert.ok(zoom<1.08,`Zoom advances without a rush (${zoom})`);
+        if(Math.abs(point[0]-last[0])<720){
+          const ink=Math.hypot((point[0]-last[0])*width/((view.w+previous.w)/2),(point[1]-last[1])*height/((view.h+previous.h)/2))/.016;
+          assert.ok(ink<limit*1.04,`The ink does not surge at the end of a zoom (${ink})`);
+        }
+        previous=view;last=point;
+      }while(!state.done);
+      assert.equal(state.position,1);assert.deepEqual(previous,plan.arrival);start=previous;
+    }
+  }
+});
+
+test('camera and ink share the same boosted, paused and resumed clock in either direction',()=>{
+  const space={width:1200,height:800,left:40,right:1160,top:40,bottom:640};
+  const geometry=measure('M700,300L710,310'),start=worldFrame;
+  for(const [from,to] of [[0,1],[.37,1],[.82,0],[1,0]]){
+    const plan=camera(geometry,space,worldFrame,geometry.pointAt(to));
+    const create=()=>journey({geometry,space,start,plan,from,to});
+    const normal=create(),boost=create();let slow,fast;
+    for(let i=0;i<20;i++){normal.advance(16);slow=normal.advance(16);fast=boost.advance(32);}
+    assert.deepEqual(slow,fast);assert.deepEqual(normal.advance(0),slow);
+    assert.deepEqual(cameraView(start,plan,geometry.pointAt(slow.position),slow.time),cameraView(start,plan,geometry.pointAt(fast.position),fast.time));
+    assert.equal(normal.advance(100000).position,to);
+    assert.equal(boost.advance(100000).done,true);
+  }
 });

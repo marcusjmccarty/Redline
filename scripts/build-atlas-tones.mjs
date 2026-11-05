@@ -6,5 +6,5 @@ vm.runInNewContext(await readFile(new URL('public/atlas-geography.js',root),'utf
 const image=atlasTones(context.window);
 await writeFile(new URL('public/atlas-tones.png',root),image.png);
 const style=new URL('public/style.css',root),css=await readFile(style,'utf8');
-await writeFile(style,css.replace(/--paper-grain: url\("data:image\/png;base64,[^"]+"\);/,`--paper-grain: url("data:image/png;base64,${paperGrain().toString('base64')}");`));
+await writeFile(style,css.replace(/--map-grain: url\("data:image\/png;base64,[^"]+"\);/,`--map-grain: url("data:image/png;base64,${paperGrain().toString('base64')}");`));
 console.log(`Atlas colour: ${image.width} × ${image.height}, ${Math.round(image.png.length/1024)} KB; no runtime filters.`);
