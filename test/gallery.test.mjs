@@ -253,6 +253,45 @@ test('import review supports bulk assignment, previews, and saving only assigned
   assert.ok($('album-pages').querySelector('.page-city'),'The album opens where the new photos were mounted');
 });
 
+test('a stalled metadata reader cannot block photo review and can be retried',async t=>{
+  const {w,$,choose,change,api,trip}=await setup(t,{seed:false});
+  delete w.exifr;
+  const originalTimeout=w.setTimeout.bind(w);let expire;
+  w.setTimeout=(callback,delay,...args)=>delay===3000?(expire=callback,0):originalTimeout(callback,delay,...args);
+  choose(['one.jpg']);
+  assert.equal(typeof expire,'function','Optional metadata loading has a bounded wait');
+  const first=w.document.querySelector('script[src="vendor/exifr.js"]');assert.ok(first);
+  expire();
+  await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+  assert.equal(first.isConnected,false);
+  assert.equal($('photo-ready-count').textContent,'1 needs a city');
+  change('bulk-photo-city',paris.id);$('upload-photos').click();
+  await wait(()=>!$('album-pages').hidden&&!$('choose-photos').disabled);
+  assert.equal((await api(`/trips/${trip.id}`)).photos.length,1);
+  choose(['gps-paris.jpg']);
+  const retry=w.document.querySelector('script[src="vendor/exifr.js"]');assert.ok(retry&&retry!==first);
+  w.exifr={gps:async()=>paris};retry.dispatchEvent(new w.Event('load'));
+  await wait(()=>$('photo-review').children.length===1&&!$('choose-photos').disabled);
+  assert.equal($('photo-review').querySelector('select').value,paris.id);
+});
+
+test('a stalled city lookup falls back once per import batch and retries on the next batch',async t=>{
+  const {w,$,choose}=await setup(t,{seed:false});
+  const location={latitude:51.5,longitude:-.12};w.exifr.gps=async()=>location;
+  let requests=0,expire,signal;
+  w.fetch=async(url,options)=>{assert.equal(url,'photo-cities.json');requests++;signal=options?.signal;return {ok:true,json:()=>new Promise(()=>{})};};
+  const originalTimeout=w.setTimeout.bind(w);
+  w.setTimeout=(callback,delay,...args)=>delay===3000?(expire=callback,0):originalTimeout(callback,delay,...args);
+  choose(['one.jpg','two.jpg']);await wait(()=>requests===1);
+  assert.equal(typeof expire,'function','The city download, including its body, has a bounded wait');expire();
+  await wait(()=>$('photo-review').children.length===2&&!$('choose-photos').disabled);
+  assert.equal(requests,1,'An unavailable index does not delay every photo in a large batch');assert.equal(signal.aborted,true);
+  assert.equal($('photo-ready-count').textContent,'2 need a city');
+  w.fetch=async()=>{requests++;return {ok:true,json:async()=>[['London',51.5,-.12,'United Kingdom']]};};
+  choose(['three.jpg']);await wait(()=>$('photo-review').children.length===3&&!$('choose-photos').disabled);
+  assert.equal(requests,2);assert.equal($('photo-review').lastElementChild.querySelector('select').value,'match');
+});
+
 test('a partial photo save preserves remaining imports and retry never duplicates completed saves',async t=>{
   const {w,$,choose,change,api,storage,trip}=await setup(t,{seed:false});
   choose(['one.jpg','two.jpg','three.jpg']);await wait(()=>$('photo-review').children.length===3&&!$('choose-photos').disabled);

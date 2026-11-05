@@ -7,8 +7,8 @@ import {IDBFactory, IDBObjectStore, IDBIndex} from 'fake-indexeddb';
 const jpeg=readFileSync(new URL('./fixtures/gps.jpg',import.meta.url));
 const paris={id:'city-paris-01',name:'Paris',country:'France',latitude:48.8566,longitude:2.3522};
 const card={message:'Bonjour!\nA good day.',recipient:'A friend',address:'A street',sender:'Marcus'};
-function library(indexedDB=new IDBFactory()) {
-  const window={indexedDB},context={window,indexedDB,Blob,URL,crypto,TextEncoder,TextDecoder,Uint8Array,DataView,FormData,navigator:{storage:{persist:async()=>true}}};
+function library(indexedDB=new IDBFactory(),overrides={}) {
+  const window={indexedDB},context={window,indexedDB,Blob,URL,crypto,TextEncoder,TextDecoder,Uint8Array,DataView,FormData,navigator:{storage:{persist:async()=>true}},...overrides};
   vm.createContext(context);
   for(const name of ['jpeg','archive','storage'])vm.runInContext(readFileSync(new URL(`../public/${name}.js`,import.meta.url),'utf8'),context);
   return {store:window.RedlineStorage,archive:window.RedlineArchive,indexedDB};
@@ -56,6 +56,48 @@ test('binary backup restores routes, image bytes and postcards on a different de
   assert.deepEqual(new Uint8Array(await (await fetch(restored.photos[0].url)).arrayBuffer()),new Uint8Array(await (await fetch(photo.url)).arrayBuffer()));
   assert.equal((await target.api(`/trips/${existing.id}`)).photos.length,0);
   await target.importArchive(backup);assert.equal((await target.api('/trips')).trips.length,3);
+});
+
+test('backup round-trips preserve photo order when creation timestamps tie',async()=>{
+  const FixedDate=class extends Date{constructor(...args){super(...(args.length?args:['2026-11-05T00:00:00.000Z']));}};
+  let sourceId=0,targetId=100;
+  const source=library(undefined,{Date:FixedDate,crypto:{randomUUID:()=>`photo-${String(++sourceId).padStart(8,'0')}`}}).store;
+  const trip=await create(source);
+  for(const caption of ['First','Second','Third']){
+    const photo=await upload(source,trip);
+    await source.api(`/photos/${photo.id}/caption`,{method:'PUT',body:{caption,revision:1}});
+  }
+  const before=(await source.api(`/trips/${trip.id}`)).photos;
+  assert.equal(new Set(before.map(photo=>photo.createdAt)).size,1);
+  let backup=await source.exportArchive(trip.id);
+  for(let round=0;round<2;round++){
+    const target=library(undefined,{crypto:{randomUUID:()=>`photo-${String(--targetId).padStart(8,'0')}`}}).store;
+    await target.importArchive(backup);
+    const [copy]=(await target.api('/trips')).trips;
+    const photos=(await target.api(`/trips/${copy.id}`)).photos;
+    assert.deepEqual(plain(photos.map(photo=>photo.caption)),['First','Second','Third']);
+    assert.ok(photos.every(photo=>!before.some(original=>original.id===photo.id)),'Restored photos still receive independent IDs');
+    backup=await target.exportArchive(copy.id);
+  }
+});
+
+test('legacy backups preserve manifest order for simultaneous photos',async()=>{
+  let next=100;
+  const {store,archive}=library(undefined,{crypto:{randomUUID:()=>`photo-${String(--next).padStart(8,'0')}`}});
+  const backup=archive.pack([{trip:{title:'Legacy',stops:[paris]},photos:['First','Second'].map(caption=>({photo:{caption,createdAt:'2026-11-05T00:00:00.000Z',stopId:paris.id,city:paris},blob:new Blob([jpeg])}))}]);
+  await store.importArchive(backup);
+  const [trip]=(await store.api('/trips')).trips;
+  assert.deepEqual(plain((await store.api(`/trips/${trip.id}`)).photos.map(photo=>photo.caption)),['First','Second']);
+});
+
+test('malformed backup manifests give a useful error and leave saved trips untouched',async()=>{
+  const {store}=library();await create(store);
+  for(const manifest of ['null','[]','42']){
+    const json=new TextEncoder().encode(manifest),header=new Uint8Array(13);
+    header.set(new TextEncoder().encode('REDLINE1\n'));new DataView(header.buffer).setUint32(9,json.length,true);
+    await assert.rejects(store.importArchive(new Blob([header,json])),/This is not a complete Redline backup/);
+  }
+  assert.equal((await store.api('/trips')).trips.length,1);
 });
 
 test('a 512-photo trip survives backup, restore, and bulk edits',async()=>{
@@ -111,7 +153,7 @@ test('static assets and storage have no ChatGPT or root-path API dependency',()=
   const html=readFileSync(new URL('../map.html',import.meta.url),'utf8');
   for(const match of html.matchAll(/(?:src|href)="([^"]+)"/g))if(!match[1].startsWith('https:'))assert.ok(!match[1].startsWith('/'));
   const trips=readFileSync(new URL('../public/trips.js',import.meta.url),'utf8');
-  assert.ok(!trips.includes('/api'));assert.ok(!trips.includes('signin-with-chatgpt'));assert.ok(trips.includes("fetch('photo-cities.json')"));
+  assert.ok(!trips.includes('/api'));assert.ok(!trips.includes('signin-with-chatgpt'));assert.match(trips,/fetch\('photo-cities\.json'[,)]/);
 });
 
 test('photos move and delete atomically within one trip, and deleting a trip removes its photos',async()=>{

@@ -91,7 +91,7 @@ export function atlasTones(data,width=1024,height=512){
   const steps=40,palette=Buffer.alloc((1+steps*6)*3),alpha=Buffer.alloc(1+steps*6);
   for(let land=0;land<2;land++)for(let edge=1;edge<=3;edge++)for(let step=0;step<steps;step++){
     const tone=step/(steps-1),index=1+land*steps*3+(edge-1)*steps+step;
-    const dark=land?[157,140,96]:[155,177,166],middle=land?[231,202,146]:[205,213,188],light=land?[252,237,195]:[239,230,197];
+    const dark=land?[157,140,96]:[181,148,96],middle=land?[231,202,146]:[239,215,166],light=land?[252,237,195]:[255,242,207];
     for(let c=0;c<3;c++)palette[index*3+c]=Math.round(dark[c]*(1-tone)**2+middle[c]*2*tone*(1-tone)+light[c]*tone**2);
     alpha[index]=Math.round(fade(edge/3)*164);
   }
