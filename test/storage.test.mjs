@@ -21,6 +21,18 @@ async function upload(store,trip,bytes=jpeg) {
 const plain=value=>JSON.parse(JSON.stringify(value));
 const single=async(store,id)=>{const parts=await store.exportParts(id);assert.equal(parts.length,1);return parts[0];};
 
+test('map startup reads a route and exact photo count without reading image records or notes',async t=>{
+  const {store,indexedDB}=library(),trip=await create(store);
+  for(let i=0;i<25;i++)await upload(store,trip);
+  const all=IDBIndex.prototype.getAll,get=IDBObjectStore.prototype.get;
+  IDBIndex.prototype.getAll=function(...args){assert.notEqual(this.objectStore.name,'photos','The map must not deserialize photo Blobs');return all.apply(this,args);};
+  IDBObjectStore.prototype.get=function(...args){assert.notEqual(this.name,'photoNotes','No per-photo note queries at startup');return get.apply(this,args);};
+  t.after(()=>{IDBIndex.prototype.getAll=all;IDBObjectStore.prototype.get=get;});
+  const {store:reopened}=library(indexedDB),data=await reopened.api(`/trips/${trip.id}`,{photos:false});
+  assert.deepEqual(plain(data.trip.stops),[{...paris,admin1:''}]);assert.equal(data.photoCount,25);assert.equal('photos' in data,false);
+  await assert.rejects(reopened.api('/trips/missing-trip-0000',{photos:false}),error=>error.status===404);
+});
+
 test('trips survive reopening and simultaneous tabs cannot overwrite newer edits',async()=>{
   const {store,indexedDB}=library(),trip=await create(store),second=library(indexedDB).store;
   assert.equal((await second.api('/trips')).trips[0].title,'Europe');

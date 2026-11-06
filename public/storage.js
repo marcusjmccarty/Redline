@@ -168,6 +168,12 @@
     }
     if (parts[0]==='trips' && parts.length===2) {
       if (method==='GET') {
+        // The map needs its route and a count, not hundreds of image Blobs.
+        // Opening the album still requests the complete records below.
+        if(options.photos===false)return transaction(['trips','photos'],'readonly',async stores=>{
+          const [trip,photoCount]=await Promise.all([ownTrip(stores.trips,parts[1]),request(stores.photos.index('tripId').count(parts[1]))]);
+          return {trip,photoCount};
+        });
         const result=await transaction(['trips','photos','photoNotes'],'readonly',async stores=>({trip:await ownTrip(stores.trips,parts[1]),photos:await withNotes(stores,await request(stores.photos.index('tripId').getAll(parts[1])))}));
         result.photos=result.photos.sort(photoOrder).map(photoDto);
         return result;

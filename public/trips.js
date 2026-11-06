@@ -6,6 +6,7 @@
   const reviewPageSize=70;
   let reviewPage=0,reviewTurn=null;
   let warmOriginals=new Set(),sheetKey='',tabsKey='',sheetWarmTimer=0,tabColumns=1,sheetFollow=0,tabJump=false,sheetHeld=null;
+  let photoSummary=null;
   let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0,anchor=null,drawn=null,reopen=null,albumMotion=null,viewMotion=null,listedTrip=null,heldSheet=null;
   const chosen=new Set(),thumbJobs=new Set(),lastPages=new Map(),lastScrolls=new Map();
   const photoLabel=count=>`${count} photo${count===1?'':'s'}`;
@@ -43,7 +44,8 @@
   function update(){
     $('trip-title').textContent=current?.title||'';
     $('save-trip').classList.toggle('dirty',dirty);
-    $('photo-count').textContent=photos.length?String(photos.length):'';
+    const count=!current?0:listedTrip===current.id?photos.length:photoSummary?.id===current.id?photoSummary.count:0;
+    $('photo-count').textContent=count?String(count):'';
     $('save-trip').disabled=busy;$('new-trip').disabled=busy;$('choose-photos').disabled=busy;$('trips-button').disabled=busy;
     $('export-trip').disabled=busy||!current;$('backup-trips').disabled=busy;$('import-trips').disabled=busy;
     document.querySelectorAll('#photo-gallery button,#album-pages button,#photo-review button,#photo-review input,#photo-review select,#gallery-filter button,#gallery-actions button,#gallery-actions select,#trip-list button,#trip-list input,#backup-list button,#trip-message button').forEach(el=>el.disabled=busy);
@@ -454,7 +456,7 @@
   async function loadTrip(id,{keyboard=true}={}){
     if(busy||!canSwitch())return;
     busy=true;update();let loaded=false;
-    try{const data=await api(`/trips/${id}`);photoPanelRequest++;discardPending();activeCity='';setSelecting(false);suppress=true;app.setStops(data.trip.stops);suppress=false;current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};stale=false;photos=data.photos;listedTrip=id;dirty=false;reopen=lastPages.get(id)||null;albumPage=reopen?.index??0;remember();renderGallery();closePanel('trip-panel');message('trip-message','');loaded=true;}
+    try{const data=await api(`/trips/${id}`,{photos:false});photoPanelRequest++;discardPending();activeCity='';setSelecting(false);suppress=true;app.setStops(data.trip.stops);suppress=false;current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};stale=false;photos=[];listedTrip=null;photoSummary={id,count:data.photoCount};dirty=false;reopen=lastPages.get(id)||null;albumPage=reopen?.index??0;remember();renderGallery();closePanel('trip-panel');message('trip-message','');loaded=true;}
     catch(error){showError('trip-message',error);}
     // Focus leaves the folded logbook for its tab (enabled again once busy clears), or for the map after a click.
     finally{suppress=false;busy=false;update();const active=document.activeElement;if(loaded&&(!active||active===document.body||$('trip-panel').contains(active)))$(keyboard?'trips-button':'map').focus({preventScroll:true});}
@@ -587,7 +589,8 @@
     }catch(error){if(version===photoPanelRequest){const queued=albumMotion?.queued;albumMotion?.scene?.dispose();delete $('album-book').dataset.preparing;albumMotion=null;openPanel('photo-panel');renderGallery();showError('photo-message',error);if(queued)importPhotos(queued);}}
     finally{if(version===photoPanelRequest)photosRequested=false;}
   }
-  // Once the map has its first picture and has been quiet a while: the fonts, the sheet under route maps, and the prints first in line, a small step at a time and only when nothing else wants the page. restore() has read the photo list by then.
+  // Warm the album's fonts and sheet in idle steps. Photos only warm after
+  // the album has been opened; simply viewing the map never reads them.
   async function warmAlbum(){
     const shown=()=>$('photo-panel').open||albumMotion,step=()=>new Promise(resolve=>whenIdle(resolve));
     await step();
@@ -1521,8 +1524,8 @@
     try{if(dirty&&routeContent(app.getStops())===routeContent(JSON.parse(cached.hash)))dirty=false;}catch{}
     update();
     try{
-      const data=await api(`/trips/${cached.id}`);if(current!==cached)return;
-      if(photoVersion===photoPanelRequest){photos=data.photos;listedTrip=cached.id;}
+      const data=await api(`/trips/${cached.id}`,{photos:false});if(current!==cached)return;
+      if(photoVersion===photoPanelRequest)photoSummary={id:cached.id,count:data.photoCount};
       if(!dirty&&fingerprint()===initial){if(JSON.stringify(data.trip.stops)!==initial){suppress=true;app.setStops(data.trip.stops);suppress=false;}current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};remember();}
       if($('photo-panel').open)renderGallery();update();
     }catch(error){if(current!==cached)return;if(error.status===404){detachMissingTrip();openTrips(missingTrip);}else{openTrips();showError('trip-message',error);}}

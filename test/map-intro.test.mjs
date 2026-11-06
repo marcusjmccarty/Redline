@@ -49,7 +49,7 @@ test('the opening sheet shows quarters of the painted map and hands off without 
   assert.deepEqual(faces.map(face=>face.getAttribute('viewBox')),['0 0 720 360','0 360 720 360','720 0 720 360','720 360 720 360']);
   for(const face of faces){
     const uses=[...face.querySelectorAll('use')];
-    assert.deepEqual(uses.map(node=>node.getAttribute('href')),['#route-lines','#route-stops'],'The unfolding sheet includes the connecting ink before the city pins');
+    assert.deepEqual(uses.map(node=>node.getAttribute('href')),['#route-halos','#route-lines','#route-stops'],'The unfolding sheet includes the connecting ink before the city pins');
     assert.equal(uses[0].getAttribute('transform'),'scale(1 0.8)','Ink and pins share the live overlay\'s screen-space scale');
     assert.equal(uses[0].getAttribute('transform'),uses[1].getAttribute('transform'));
     assert.equal(face.previousElementSibling.tagName,'CANVAS','Each panel paints its quarter beneath the ink');
@@ -105,7 +105,7 @@ test('a late atlas cannot restart an intro dismissed by the user',async t=>{
 test('initial viewport sizing does not dismiss a fold that has not begun',async t=>{
   let release;const env=setup(t);
   env.w.RedlineMapIntro.start(env.atlasWith(new Promise(resolve=>{release=resolve;})));env.w.dispatchEvent(new env.w.Event('resize'));
-  assert.ok(env.root.classList.contains('map-arriving'));
+  assert.equal(env.root.classList.contains('map-arriving'),false,'The preview stays visible while the sheet loads');
   release(true);await tick();env.flushFrames();
   assert.ok(env.w.document.querySelector('.map-unfold'),'The fold uses the settled viewport');
 });
@@ -142,10 +142,10 @@ test('a failed or inert atlas and partial animation construction leave the map u
 });
 
 
-test('the first fold waits for the painted sheet before exposing anything',async t=>{
+test('the first fold waits for its sheet while the preview remains visible',async t=>{
   let release;const env=setup(t),atlas=env.atlasWith(new Promise(resolve=>{release=resolve;}));
   env.w.RedlineMapIntro.start(atlas);await tick();env.flushFrames();
-  assert.equal(env.motions.length,0);assert.equal(atlas.snapshots,0);assert.equal(env.w.document.querySelector('.map-unfold'),null);assert.ok(env.root.classList.contains('map-arriving'));
+  assert.equal(env.motions.length,0);assert.equal(atlas.snapshots,0);assert.equal(env.w.document.querySelector('.map-unfold'),null);assert.equal(env.root.classList.contains('map-arriving'),false,'The preview stays visible while the sheet loads');
   release(true);await tick();env.flushFrames();assert.equal(atlas.snapshots,1);
   assert.ok(env.motions.length>0);env.w.dispatchEvent(new env.w.Event('pointerdown'));env.assertClean();
 });

@@ -200,7 +200,7 @@ function judge(s){
   }
   if(s.zoom<=1.001){
     if(!s.plate)say('plate-missing','title plate');
-    const great=new Set(atlas.filter(a=>a.kind==='continent'||a.kind==='ocean').map(a=>a.text));
+    const great=new Set(atlas.filter(a=>a.kind==='continent'||a.kind==='ocean').map(a=>a.text.replace(/\s+/g,' ')));
     for(const name of ['North America','South America','Europe','Africa','Asia','Australia','Pacific Ocean','Atlantic Ocean','Indian Ocean','Southern Ocean','Arctic Ocean'])if(!great.has(name))say('great-missing',name);
   }
   return found;

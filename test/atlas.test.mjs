@@ -289,7 +289,7 @@ test('a name fades up as it arrives, and one already lettered does not fade agai
   const painted=labels=>{alphas.length=0;view.update(frame,labels);return [...alphas];};
   const run=ms=>{now+=ms;const callback=pending;pending=null;alphas.length=0;callback?.(now);return [...alphas];};
   assert.deepEqual(painted([name('Paris')]),[0],'It arrives unseen');assert.ok(pending,'And a frame is asked for, with the camera at rest');
-  assert.deepEqual(run(100),[.5]);assert.deepEqual(run(100),[1]);assert.equal(pending,null,'Once there, the map rests again');
+  assert.deepEqual(run(60),[.5]);assert.deepEqual(run(60),[1]);assert.equal(pending,null,'Once there, the map rests again');
   assert.deepEqual(painted([name('Paris'),name('Madrid')]),[1,0],'Only the newcomer fades');
   w.matchMedia=()=>({matches:true});pending=null;
   assert.deepEqual(painted([name('Rome')]),[1],'Without motion a new name is simply there');assert.equal(pending,null);
@@ -315,7 +315,7 @@ test('every file the docs name exists, and the README describes the map as it is
     assert.doesNotMatch(text,/map-paint|atlas-paper|build-paper|atlas-tones|map-paper|overview\.webp|`server\//,`${name} does not describe the map before the atlas`);
   }
   const readme=readFileSync(new URL('../README.md',import.meta.url),'utf8');
-  for(const fact of [/2\.5×/,/Scroll, pinch/,/Shift \+ double-click zooms out/,/Redline Hand/,/\[IM Fell English\]\(/,/`public\/fonts\/OFL\.txt`/,/SIL Open Font License/,/Natural Earth.*rasters/,/window view/,/map-intro\.js/])assert.match(readme,fact);
+  for(const fact of [/2×/,/Scroll, pinch/,/Shift \+ double-click zooms out/,/Redline Hand/,/\[IM Fell English\]\(/,/`public\/fonts\/OFL\.txt`/,/SIL Open Font License/,/Natural Earth.*rasters/,/window view/,/map-intro\.js/])assert.match(readme,fact);
   assert.doesNotMatch(readme,/single raster image|no map-tile requests|1\.8 seconds|book stays centered, with/,'What is no longer true has gone');
   assert.match(readFileSync(file('../docs/HOSTING.md'),'utf8'),/without close-up relief/,'Hosting notes what a trace misses while offline');
 });
@@ -331,7 +331,7 @@ test('a slow relief tile does not hold up the map',async()=>{
 });
 
 // A view with fake workers. Each message remembers its worker, because a tile must be answered by the worker that was given it.
-function fakeView({innerWidth=1440,agent,cores,width=1440,height=900,dpr=1,assets={worker:'w.js',sheet:'sheet.webp',sheetSmall:'small.webp'}}={}){
+function fakeView({native=false,innerWidth=1440,agent,cores,width=1440,height=900,dpr=1,assets={worker:'w.js',sheet:'sheet.webp',sheetSmall:'small.webp'}}={}){
   const sent=[],workers=[],timers=[],frames=[],clears=[],draws=[],offscreens=[];let box={width,height},now=1000,stack=null;
   class FakeWorker{constructor(){workers.push(this);}postMessage(message){sent.push({...message,from:this});}}
   const paint=new Proxy({},{get:(_,key)=>key==='canvas'?{}:(...args)=>{if(key==='clearRect')clears.push(args);if(key==='drawImage')draws.push(args[0]);return {width:1};},set:()=>true});
@@ -340,14 +340,16 @@ function fakeView({innerWidth=1440,agent,cores,width=1440,height=900,dpr=1,asset
     const node={tag,className:'',children:[],parent:null,width:0,height:0,animations:[],writes:[],held:null,
       style:new Proxy({},{set(style,key,value){style[key]=value;node.writes.push(key);return true;}}),
       append(child){child.remove();child.parent=node;node.children.push(child);},
+      prepend(child){child.remove();child.parent=node;node.children.unshift(child);},
       remove(){if(node.parent)node.parent.children.splice(node.parent.children.indexOf(node),1);node.parent=null;},
       animate(frames,options){node.animations.push({frames,options});},
       listeners:{},addEventListener(type,listener){node.listeners[type]=listener;},
       getContext(kind,options){if(tag!=='canvas')return null;node.kind=kind;node.options=options;return {drawImage(bitmap){node.held=bitmap;}};}};
     return node;
   };
-  const context=createContext({window:{innerWidth,devicePixelRatio:dpr,matchMedia:()=>({matches:false}),addEventListener(){},removeEventListener(){}},navigator:{userAgent:agent,hardwareConcurrency:cores},Worker:FakeWorker,OffscreenCanvas:class{constructor(){offscreens.push(this);}getContext(){return new Proxy({},{get:()=>()=>({width:1})});}},DecompressionStream:class{},
-    document:{fonts:{load:async()=>{}},createElement:element},requestAnimationFrame:callback=>{frames.push(callback);return frames.length;},cancelAnimationFrame(){frames.length=0;},performance:{now:()=>now},ResizeObserver:class{observe(){}disconnect(){}},
+  const preview=native?Object.assign(element('img'),{complete:true,naturalWidth:1440,naturalHeight:800}):null;
+  const context=createContext({Image:class{constructor(){return element('img');}},window:{innerWidth,devicePixelRatio:dpr,matchMedia:()=>({matches:false}),addEventListener(){},removeEventListener(){}},navigator:{userAgent:agent,hardwareConcurrency:cores},Worker:FakeWorker,OffscreenCanvas:class{constructor(){offscreens.push(this);}getContext(){return new Proxy({},{get:()=>()=>({width:1})});}},DecompressionStream:class{},
+    document:{fonts:{load:async()=>{}},createElement:element,getElementById:()=>preview},requestAnimationFrame:callback=>{frames.push(callback);return frames.length;},cancelAnimationFrame(){frames.length=0;},performance:{now:()=>now},ResizeObserver:class{observe(){}disconnect(){}},
     setTimeout:(run,delay)=>{timers.push({run,delay});return timers.length;},clearTimeout(){},console:{error(){},log(){}}});
   context.self=context.window;context.addEventListener=()=>{};
   runInContext(readFileSync(file('atlas-view.js'),'utf8'),context);
@@ -424,10 +426,10 @@ test('coarser tiles and the sheet lie underneath only until the view is covered 
   const writes=sheet().writes.length;atlas.update({...wide,x:1},[]);assert.equal(sheet().writes.length,writes,'Hidden, it is not moved either');
   atlas.update(wide,[]);run(1000);
   atlas.update(near,[]);run(0);assert.ok(shownOf(1)>0,'The coarser level stands in');assert.equal(hidden(),true,'And covers the view, so the sheet need not come back');
-  answer(pendingTiles()[0]);run(0);assert.ok(shownOf(2)>0&&shownOf(1)>0,'One sharp tile does not retire the stand-ins');
+  run(200);answer(pendingTiles()[0]);run(0);assert.ok(shownOf(2)>0&&shownOf(1)>0,'One sharp tile does not retire the stand-ins');
   finish();run(0);assert.ok(shownOf(1)>0,'Nor do all of them until they have faded up');
   run(1000);assert.equal(shownOf(1),0,'Then nothing is drawn twice');assert.equal(hidden(),true);
-  atlas.update(far,[]);run(0);assert.equal(hidden(),false,'Where no stand-in reaches, the sheet returns');
+  atlas.update(far,[]);run(200);assert.equal(hidden(),false,'Where no stand-in reaches, the sheet returns');
   finish();run(1000);assert.equal(hidden(),true);
   atlas.update(wide,[]);run(0);assert.equal(shownOf(2),0,'A finer level is not shown under a coarser target');assert.ok(shownOf(1)>0);
 });
@@ -552,32 +554,27 @@ test('each tile goes to a free worker, regions first, and a change of camera dro
   assert.equal(pendingTiles().length,3,'All are busy, so it waits');
   answer(out[0]);out=pendingTiles();assert.equal(out.at(-1).level,-2,'The next free worker takes the region ahead of every tile');
   // A new camera forgets the old tile queue: only tiles of the new view go out from here.
-  const far={x:1000,y:500,w:180,h:90},before=sent.length;atlas.update(far,[]);for(let i=0;i<40&&pendingTiles().length;i++)answer(pendingTiles()[0]);
+  const far={x:1000,y:500,w:180,h:90},before=sent.length;atlas.update(far,[]);run(200);for(let i=0;i<40&&pendingTiles().length;i++)answer(pendingTiles()[0]);
   const later=sent.slice(before).filter(message=>message.type==='tile');assert.ok(later.length>0&&later.every(message=>message.level===3),'Nothing from the old view is painted');
   await new Promise(setImmediate);assert.ok(region,'The region was answered');
 });
 
-test('the world’s own tiles wait for the camera to rest and the sharp plate to arrive, and then sharpen in place',()=>{
-  const {atlas,workers,sent,world,up,pendingTiles,answer,run}=fakeView();up();
-  const tiles=()=>pendingTiles().filter(message=>message.level===0);
-  atlas.update(world,[]);run(1000);assert.equal(tiles().length,0,'Not before the plate');
-  assert.equal(sent.filter(message=>message.type==='sharpen').length,3,'A desktop window sharpens with no zoom needed');
-  for(const worker of workers)worker.onmessage({data:{type:'detail'}});
-  atlas.update({...world,x:1},[]);run(0);assert.equal(tiles().length,0,'Not while it moves');
-  atlas.update({...world,x:0},[]);run(1000);assert.equal(tiles().length,3,'At rest they are painted');
-  for(let i=0;i<40&&pendingTiles().length;i++)answer(pendingTiles()[0]);
-  const all=sent.filter(message=>message.level===0).length;run(1000);assert.equal(sent.filter(message=>message.level===0).length,all,'And only once');
+test('the baked world view never repaints tiles or loads detailed terrain, even at rest',()=>{
+  const {atlas,sent,world,up,pendingTiles,run}=fakeView();up();
+  for(let i=0;i<6;i++){atlas.update({...world,x:i%2},[]);run(1000);}
+  assert.equal(pendingTiles().length,0);
+  assert.equal(sent.filter(message=>message.type==='sharpen').length,0);
 });
 
 test('a sharpen that fails is asked for again, not forgotten',()=>{
   const {atlas,sent,workers,timers,up,run}=fakeView({innerWidth:600,width:600,height:900});up();assert.equal(workers.length,2);
   const count=()=>sent.filter(message=>message.type==='sharpen').length;
   atlas.update({x:0,y:0,w:1440,h:720},[]);run(1000);assert.equal(count(),0,'A small screen waits until it zooms in');
-  atlas.update({x:0,y:0,w:360,h:180},[]);run();assert.equal(count(),2);
+  atlas.update({x:0,y:0,w:360,h:180},[]);run(200);assert.equal(count(),2);
   workers[0].onmessage({data:{type:'detail'}});workers[1].onmessage({data:{type:'sharpen-error',message:'Failed to fetch'}});
   atlas.update({x:0,y:0,w:300,h:150},[]);run();assert.equal(count(),2,'Not at once');
   const later=timers.find(timer=>timer.delay===30000);assert.ok(later,'Half a minute later');later.run();
-  atlas.update({x:0,y:0,w:280,h:140},[]);run();assert.equal(count(),3,'Only the worker that failed asks again');
+  atlas.update({x:0,y:0,w:280,h:140},[]);run(200);assert.equal(count(),3,'Only the worker that failed asks again');
 });
 
 test('relief eviction spares what the tile about to paint needs, however many that is',async()=>{
@@ -698,4 +695,43 @@ test('the map runs to the window edge, with no frame',()=>{
   assert.match(css,/\.map-arriving\.map-revealing :is\(\.atlas-layers, #map, #place-labels\) \{ opacity: 1; \}/);
   assert.match(css,/@media \(prefers-reduced-motion: reduce\) \{[^}]*\}\s*\.map-arriving :is\(\.atlas-layers, #map/);
   assert.match(css,/\.map-unfold \{ position: absolute; z-index: 4;/);
+});
+
+
+test('the HTML preview shows the map before any worker exists, and zoom starts detail on demand',async()=>{
+  const {atlas,workers,sent,world,run,sheet}=fakeView({native:true});
+  assert.equal(await atlas.ready,true);assert.equal(sheet().tag,'img');
+  atlas.update(world,[]);run(1000);assert.equal(workers.length,0,'No procedural painting or terrain downloads at world view');
+  assert.equal(sent.length,0);assert.equal(sheet().width,1440);assert.equal(sheet().height,800);
+  atlas.update({x:300,y:100,w:360,h:180},[]);run(200);
+  assert.equal(workers.length,3,'Detail starts only when zoomed in');
+  assert.ok(sent.filter(message=>message.type==='start').every(message=>!message.sheet),'Workers do not download another copy of the visible map');
+});
+
+test('stacked great names retain accurate collision bounds without slanting across coasts',()=>{
+  const {atlas}=fakeView();
+  const flat=atlas.measure('continent','South America'),stacked=atlas.measure('continent','South\nAmerica');
+  assert.ok(stacked.w<flat.w*.65);assert.ok(stacked.h>flat.h*1.7);
+  for(const text of ['South\nAmerica','Atlantic\nOcean']){
+    const kind=text.startsWith('South')?'continent':'ocean',print=atlas.footprint(kind,text),outline=atlas.outline({kind,text,x:0,y:0,angle:0,curve:0});
+    assert.ok(outline.every(box=>box.x>=print.left&&box.y>=print.top&&box.x+box.w<=print.right+.001&&box.y+box.h<=print.bottom+.001));
+  }
+});
+
+test('continuous camera motion reuses the sheet without painting intermediate views',()=>{
+  const {atlas,workers,sent,world,run}=fakeView({native:true});
+  atlas.update(world,[]);run(1000);
+  for(let i=0;i<20;i++){atlas.update({x:300+i,y:100,w:360,h:180},[]);run(40);}
+  assert.equal(workers.length,0,'A moving camera never starts background terrain work');
+  run(160);assert.equal(workers.length,3,'The final view starts detail after the camera rests');
+  for(const worker of workers)worker.onmessage({data:{type:'ready'}});
+  assert.ok(sent.some(message=>message.type==='tile'),'The final view still sharpens');
+});
+
+test('small windows retain readable city and country letter heights',()=>{
+  const {atlas,world}=fakeView({width:390,height:700,innerWidth:390});atlas.update(world,[]);
+  for(const [kind,min] of [['city',13],['capital',14],['country',12],['land',12]]){
+    const measured=atlas.measure(kind,'Paris');
+    assert.ok(measured.h>=min*1.34-.01,`${kind} stays readable on a phone`);
+  }
 });
