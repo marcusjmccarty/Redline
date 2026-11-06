@@ -7,25 +7,26 @@
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14.5' fill='%23efe5d2' stroke='%233a2c20' stroke-width='2'/%3E%3Cpath d='M16 3.5l3 9.5 9.5 3-9.5 3-3 9.5-3-9.5-9.5-3 9.5-3z' fill='%238f2f25'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=0d92374abb31">
+  <link rel="preload" as="image" href="atlas/sheet-small.webp?v=667578798f7f" fetchpriority="high">
+  <link rel="stylesheet" href="style.css?v=fa3476f9aecf">
   <link rel="stylesheet" href="gallery.css?v=ca0cc8050d2a">
-  <script src="map-intro.js?v=aef8ece96111"></script>
+  <script src="map-intro.js?v=25f25b2dc4d1" defer></script>
   <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
   <script src="map-layout.js?v=8b7e0c00ea40" defer></script>
   <script src="atlas-geography.js?v=613c6439287c" defer></script>
-  <script src="trace.js?v=a1cabecf62e1" defer></script>
+  <script src="trace.js?v=9a8fb254389e" defer></script>
   <script src="labels.js?v=838540788118" defer></script>
   <script src="atlas-names.js?v=5aa0b5e0e4a3" defer></script>
-  <script src="atlas-view.js?v=821cd104423a" defer></script>
+  <script src="atlas-view.js?v=5c4c9e8a03f6" defer></script>
   <script id="atlas-assets" type="application/json">{"reliefVersion":"d187936bd7cf","worker":"atlas-worker.js?v=148cacaaddb9","painter":"atlas-painter.js?v=0d12a9bd0939","reliefIndex":"relief/index.js?v=47b0a09c73cc","sheet":"atlas/sheet.webp?v=fb48cffc4a32","sheetSmall":"atlas/sheet-small.webp?v=667578798f7f","near":"atlas/geo0.bin?v=b70a77dcd1fd","far":"atlas/geo1.bin?v=cb9176e8907d","land":"atlas/land.jpg?v=ecca4f0287bf","landSmall":"atlas/land-small.jpg?v=cb4f5911b8e6","sea":"atlas/sea.jpg?v=d56536eb8836"}</script>
-  <script src="app.js?v=0e936128cc8d" defer></script>
+  <script src="app.js?v=eed92c7512a9" defer></script>
   <script src="postcard-export.js?v=048b39ce6827" defer></script>
   <script src="postcards.js?v=5ca7a6299787" defer></script>
   <script src="jpeg.js?v=5732e6d6ead7" defer></script>
   <script src="archive.js?v=620ee28b6af9" defer></script>
-  <script src="storage.js?v=644ca96cbfdc" defer></script>
+  <script src="storage.js?v=ae3f113911a5" defer></script>
   <script src="album-motion.js?v=ec7a3c7c08cb" defer></script>
-  <script src="trips.js?v=e7d9591bcd60" defer></script>
+  <script src="trips.js?v=35a0db2dd7dc" defer></script>
 </head>
 <body>
   <main aria-label="Travel map">
@@ -83,8 +84,9 @@
         </div></div>
       </div>
     <div class="map-shell" id="map-shell">
+      <img id="atlas-preview" class="atlas-preview" src="atlas/sheet-small.webp?v=667578798f7f" width="1440" height="800" fetchpriority="high" alt="" aria-hidden="true">
       <canvas id="map" role="img" aria-label="World map showing your travel route" tabindex="-1"></canvas>
-      <svg id="place-labels" role="group" aria-label="Route stops"><g id="route-lines" aria-hidden="true"></g><g id="route-stops"></g></svg>
+      <svg id="place-labels" role="group" aria-label="Route stops"><g id="route-halos" aria-hidden="true"></g><g id="route-lines" aria-hidden="true"></g><g id="route-stops"></g></svg>
       <svg class="atlas-source" width="0" height="0" aria-hidden="true"><defs><g id="land"></g></defs></svg>
     </div>
     <dialog id="photo-panel" class="album" aria-labelledby="photos-heading" tabindex="-1">

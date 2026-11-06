@@ -4,6 +4,7 @@
   const root=document.documentElement,media=window.matchMedia?.('(prefers-reduced-motion: reduce)');
   const foldEase='cubic-bezier(.45,0,.25,1)';
   let active=!media?.matches&&!document.hidden&&typeof Element.prototype.animate==='function';
+  try{if(sessionStorage.getItem('redline-unfolded'))active=false;}catch{}
   let started=false,stage=null,frame=0,timer=0,motions=[];
   const events=['pointerdown','keydown','wheel','pagehide'];
   function finish(){
@@ -39,7 +40,7 @@
     const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
     svg.setAttribute('viewBox',`${x} ${y} 720 360`);svg.setAttribute('preserveAspectRatio','none');
     // Ink and pins share the same screen-space transform from the first fold.
-    for(const id of ['route-lines','route-stops']){
+    for(const id of ['route-halos','route-lines','route-stops']){
       const ink=document.createElementNS(svg.namespaceURI,'use');
       ink.setAttribute('href',`#${id}`);
       ink.setAttribute('transform',`scale(${1440/bounds.width} ${720/bounds.height})`);
@@ -59,6 +60,8 @@
     const map=document.getElementById('map'),bounds=map?.getBoundingClientRect();
     if(!bounds?.width||!bounds?.height||!sheet){finish();return;}
     try{
+      root.classList.add('map-arriving');
+      try{sessionStorage.setItem('redline-unfolded','1');}catch{}
       stage=element('map-unfold',document.querySelector('main'));stage.setAttribute('aria-hidden','true');
       const paper=element('unfold-paper',stage),leftTop=quarter(paper,0,0,false,bounds,sheet),leftBottom=quarter(paper,0,360,true,bounds,sheet);
       const right=element('unfold-right',paper),rightTop=quarter(right,720,0,false,bounds,sheet),rightBottom=quarter(right,720,360,true,bounds,sheet);
@@ -96,7 +99,6 @@
   }
   window.RedlineMapIntro={start};
   if(!active)return;
-  root.classList.add('map-arriving');
   // A delayed/failed app script must never leave a blank or unusable page.
   guard(2400);
   for(const name of events)window.addEventListener(name,finish,{capture:true,passive:true});

@@ -114,7 +114,7 @@
       if(path._amount!==amount||path._matrix!==routeMatrixKey){
         // A leg wholly off screen costs nothing: no string to build and no path for the browser to parse.
         const b=geometry[i].bounds,m=routeMatrix,seen=amount>0&&m&&b.right*m.a+m.e>-4&&b.left*m.a+m.e<viewportBounds.width+4&&b.bottom*m.d+m.f>-4&&b.top*m.d+m.f<viewportBounds.height+4;
-        if(seen||!path._blank){path.style.visibility=seen?'':'hidden';path.setAttribute('d',seen?geometry[i].screenPathAt(amount,m):'');path._blank=!seen;}
+        if(seen||!path._blank){path.style.visibility=seen?'':'hidden';const d=seen?geometry[i].screenPathAt(amount,m):'';path.setAttribute('d',d);path._halo.setAttribute('d',d);path._blank=!seen;}
         path._amount=amount;path._matrix=routeMatrixKey;
       }
     });
@@ -128,9 +128,9 @@
   function drawRoute() {
     // Rebuilding the list would drop keyboard focus to the page, where the next Space sets sail behind the logbook.
     const had=document.activeElement,hadRow=had?.closest?.('#stop-list li'),hadIndex=hadRow?[...$('stop-list').children].indexOf(hadRow):-1,hadPart=had?.classList?.contains('remove-stop')?'.remove-stop':'.stop-grip';
-    stopAnimation();traceZoom=null;progress=null;activeLeg=null;activeStopId=null;focused=null;$('route-lines').replaceChildren();$('route-stops').replaceChildren();$('stop-list').replaceChildren();lines=[];
+    stopAnimation();traceZoom=null;progress=null;activeLeg=null;activeStopId=null;focused=null;$('route-halos').replaceChildren();$('route-lines').replaceChildren();$('route-stops').replaceChildren();$('stop-list').replaceChildren();lines=[];
     stops.forEach((place,index)=>{
-      if(index) {const path=svg('path',{class:'route-path'});$('route-lines').append(path);lines.push(path);}
+      if(index) {const path=svg('path',{class:'route-path',id:`route-ink-${index}`}),halo=svg('path',{class:'route-halo','aria-hidden':'true'});path._halo=halo;$('route-halos').append(halo);$('route-lines').append(path);lines.push(path);}
       const [x,y]=project(place),group=svg('g',{'data-index':index,visibility:'hidden'}),dot=svg('circle',{cx:0,cy:0,r:4.5,class:'stop-dot'});
       const label=svg('text',{x:10,y:-12,class:'stop-label label-hidden'});
       label.textContent=place.name.toUpperCase();
@@ -215,10 +215,9 @@
     const leg=direction>0?Math.floor(progress+1e-7):Math.ceil(progress-1e-7)-1;
     activeLeg={origin:direction>0?leg:leg+1,destination:direction>0?leg+1:leg};
     const autoCamera=cameraFor(leg,direction,null),defaultFrame=autoCamera.arrival;
-    playback={leg,target,direction,returnToOverview,nominalWidth:defaultFrame.w,manual:traceZoom?manualCamera(baseView.w/traceZoom):null,startView:{...view},camera:traceZoom?cameraFor(leg,direction):autoCamera,timeline:traceZoom?RedlineTrace.timeline({
-      from:progress-leg,to:direction>0?1:0,duration:RedlineTrace.duration(geometry[leg].length)
+    playback={leg,target,direction,returnToOverview,nominalWidth:defaultFrame.w,manual:traceZoom?manualCamera(baseView.w/traceZoom):null,from:progress-leg,to:direction>0?1:0,startView:{...view},camera:traceZoom?cameraFor(leg,direction):autoCamera,timeline:traceZoom?RedlineTrace.timeline({
+      from:progress-leg,to:direction>0?1:0,duration:RedlineTrace.duration(geometry[leg].length),widthRatio:traceZoom?1:defaultFrame.w/view.w,easeStops:!traceZoom
     }):RedlineTrace.journey({geometry:geometry[leg],space:cameraSpace(),start:view,plan:autoCamera,from:progress-leg,to:direction>0?1:0})};
-    // The next port's map is already painted when the camera gets there.
     atlasView.prefetch(playback.camera.arrival);
     paintProgress();
   }
@@ -227,34 +226,28 @@
     if(progress===null)progress=0;
     target=Math.max(0,Math.min(lines.length,target));
     const direction=target>=progress?1:-1;
-    reachedCity();paintProgress();
-    if(Math.abs(progress-target)<1e-7){activeLeg=null;paintProgress();scheduleView();return;}
-    // Without motion a whole trace lands on its last port with the route drawn, rather than appearing to do nothing.
+    reachedCity();paintProgress();scheduleView();
+    if(Math.abs(progress-target)<1e-7){activeLeg=null;paintProgress();return;}
     if(matchMedia('(prefers-reduced-motion: reduce)').matches){finishLeg(direction>0?target-1:target,direction);return;}
     beginLeg(target,direction,returnToOverview);setPlayState(true);lastTick=performance.now();
-    // Stepping with the arrows is the reader moving about, not the voyage: it keeps a brisker clock.
-    const cruise=returnToOverview?1:2;let speed=cruise;
+    let speed=1;
     function nextLeg(run){
       if(Math.abs(progress-run.target)<1e-7){if(run.returnToOverview)returnToWorld();else stopAnimation();return false;}
       beginLeg(run.target,run.direction,run.returnToOverview);return true;
     }
     function tick(now){
-      const targetSpeed=[...held.values()].some(since=>now-since>=140)?2.5:cruise;
+      const targetSpeed=[...held.values()].some(since=>now-since>=180)?2:1;
       const elapsed=lastTick===null?0:Math.max(0,Math.min(80,now-lastTick));lastTick=now;
       // Integrate the speed ramp over this frame so 60 and 120 Hz cover the same distance.
       const decay=Math.exp(-elapsed/110),travel=targetSpeed*elapsed+(speed-targetSpeed)*110*(1-decay);
       speed=targetSpeed+(speed-targetSpeed)*decay;
       const run=playback;
-      // Between legs: the port is on show, and nothing is painted unless a hand-zoomed camera is still coming to it.
-      if(run.settling||run.dwell>0){
-        run.dwell-=travel;
-        if(run.settling){
-          run.settling.elapsed+=elapsed*speed;
-          view=run.manual.tracker.step(project(stops[run.direction>0?run.leg+1:run.leg]),traceZoom,elapsed);
-          if(frameDistance(view,run.camera.arrival)<.2||run.settling.elapsed>=620){view={...run.camera.arrival};run.settling=null;}
-          paintView();
-        }
-        if(!run.settling&&!(run.dwell>0)&&!nextLeg(run))return;
+      if(run.settling){
+        run.settling.elapsed+=travel;
+        view=run.manual.tracker.step(project(stops[run.direction>0?run.leg+1:run.leg]),traceZoom,elapsed);
+        const settled=frameDistance(view,run.camera.arrival)<.2||run.settling.elapsed>=620;
+        if(settled)view={...run.camera.arrival};paintView();
+        if(settled&&!nextLeg(run))return;
         animation=requestAnimationFrame(tick);return;
       }
       // Keep the visible drawing speed comfortable as the user moves closer.
@@ -266,29 +259,24 @@
         const lead=run.direction*90*speed*pace/RedlineTrace.duration(geometry[run.leg].length);
         const position=Math.max(0,Math.min(1,state.position+lead));
         const point=geometry[run.leg].pointAt(position),here=geometry[run.leg].pointAt(state.position);
-        // Cut when the ink crosses the map's date-line seam, rather than sweep the whole sheet, and never anticipate that jump.
         if(run.tipX!==undefined&&Math.abs(here[0]-run.tipX)>WORLD_W/2)run.manual.tracker.jump(here);run.tipX=here[0];
+        // Never anticipate a jump across the map's date-line seam.
         view=run.manual.tracker.step(Math.abs(point[0]-here[0])>WORLD_W/2?here:point,traceZoom,elapsed);
       }else view=RedlineTrace.cameraView(run.startView,run.camera,geometry[run.leg].pointAt(state.position),state.time);
       paintView();
       if(state.arrived){reachedCity();scheduleView();}
       if(state.done){
-        // Only a port with more to come waits, and not on a second visit it has just shown. The glide home has its own pause.
-        const here=run.direction>0?run.leg+1:run.leg,there=run.direction>0?run.leg:run.leg+1;
-        run.dwell=Math.abs(progress-run.target)>1e-7&&!stopPeers[here]?.includes(there)?RedlineTrace.dwell:0;
         if(run.manual)run.settling={elapsed:0};
-        else if(!(run.dwell>0)&&!nextLeg(run))return;
-        // The workers get the pause to paint where the camera goes next.
-        if(run.dwell>0)atlasView.prefetch(cameraFor(run.leg+run.direction,run.direction).arrival);
+        else if(!nextLeg(run))return;
       }
       animation=requestAnimationFrame(tick);
     }
     animation=requestAnimationFrame(tick);
   }
-  // The glide back to the overview is the voyage finishing: anything that would stop it completes it instead.
   function endGlide(){if(playback?.phase!=='overview')return false;stopAnimation();showWorld();view={...baseView};paintView();return true;}
   function startTrace(){
-    endGlide();if(running||!lines.length)return;
+    endGlide();
+    if(running||!lines.length)return;
     resumeFromFocus();
     if(progress===null||progress>=lines.length)progress=0;
     runTo(lines.length,{returnToOverview:true});
@@ -373,13 +361,20 @@
   $('play').addEventListener('click',trace);
   $('clear').addEventListener('click',()=>{if(!stops.length)return;checkpoint('clear route');stops=[];drawRoute();persist();input.value='';closeSearch();$('undo-route').focus({preventScroll:true});});
   // The chart's great names, in sheet coordinates: where a hand would letter them on an empty map.
-  const GREAT_NAMES=[['continent','North America',318,150,-3,.04],['continent','South America',470,424,66,0],['continent','Europe',790,146,0,0],['continent','Africa',800,330,0,0],['continent','Asia',1092,172,0,0],['continent','Australia',1250,472,0,0],['ocean','Pacific Ocean',164,330,-6,.12],['ocean','Atlantic Ocean',604,290,-30,.1],['ocean','Indian Ocean',1000,412,8,-.08],['ocean','Southern Ocean',1185,640,0,.04],['ocean','Arctic Ocean',1120,30,0,0]];
+  const GREAT_NAMES=[['continent','North America',318,150,-3,.04],['continent','South\nAmerica',495,414,0,0],['continent','Europe',790,146,0,0],['continent','Africa',800,330,0,0],['continent','Asia',1092,172,0,0],['continent','Australia',1250,472,0,0],['ocean','Pacific Ocean',164,330,-6,.12],['ocean','Atlantic\nOcean',602,280,0,0],['ocean','Indian Ocean',1000,412,8,-.08],['ocean','Southern Ocean',1185,640,0,.04],['ocean','Arctic Ocean',1120,30,0,0]];
+  // Keep ocean names in their own water even when a narrow window makes
+  // screen-sized lettering much wider than its geographic anchor.
+  const OCEAN_BOUNDS={
+    'Pacific Ocean':[32,265,302,420], 'Atlantic\nOcean':[540,220,666,352],
+    'Indian Ocean':[919,382,1117,498], 'Southern Ocean':[1025,602,1370,666],
+    'Arctic Ocean':[865,7,1370,55]
+  };
   // Every other name appears as you come close enough to read it, and leaves once it spans the window.
   const nameZoom={1:1.5,2:2.4,3:4,4:6.5};
   const chartName=(kind,text,x,y,from,{angle=0,curve=0,until=Infinity,spread=0,roam=0,city=-1}={})=>({kind,text,x,y,from,angle,curve,until,spread,roam,city,print:null,era:-1,shown:-2,dx:0,dy:0,lost:-Infinity,lostZoom:1});
   // Best first: continents and oceans, then countries, then the rest. Where a name of a large place meets the line or a port it can move over a little, up to two of its roam each way.
   const chartNames=[
-    GREAT_NAMES.map(([kind,name,x,y,angle,curve])=>chartName(kind,name,x,y,0,{angle,curve,until:1.6,roam:kind==='ocean'?44:34})),
+    GREAT_NAMES.map(([kind,name,x,y,angle,curve])=>chartName(kind,name,x,y,0,{angle,curve,until:1.6,roam:kind==='ocean'?8:18})),
     window.MAP_COUNTRIES.map(p=>chartName('country',p.name,p.x,p.y,Math.max(1.3,1.25+Math.max(0,p.rank-2)*.42),{roam:9})),
     (window.ATLAS_NAMES||[]).map(name=>chartName(name.kind,name.name,name.x,name.y,nameZoom[name.rank]||9,{angle:name.kind==='land'||name.kind==='desert'?0:name.angle,spread:name.spread,roam:name.rank<=2?9:0})),
     window.MAP_CITIES.map((p,i)=>chartName(p.capital?'capital':'city',p.name,...backgroundPoints[i],p.population>=8000000?1.8:(p.capital||p.population>=2000000)?2.5:p.population>=500000?3.8:p.population>=100000?4.5:5.3,{city:i}))
@@ -411,13 +406,14 @@
       if(sx<-500||sx>width+500||sy<-300||sy>height+300)return;
       if(name.era!==atlasView.era){name.print=atlasView.footprint(name.kind,name.text,name.angle,name.curve);name.era=atlasView.era;}
       const print=name.print;
-      if(keeping&&clear(print,sx+name.dx,sy+name.dy,2,1,2)){letter(name,sx+name.dx,sy+name.dy,print);return;}
+      const region=OCEAN_BOUNDS[name.text],fits=(x,y)=>!region||x+print.left>=region[0]*a+e&&x+print.right<=region[2]*a+e&&y+print.top>=region[1]*d+f&&y+print.bottom<=region[3]*d+f;
+      if(keeping&&fits(sx+name.dx,sy+name.dy)&&clear(print,sx+name.dx,sy+name.dy,3,4,3)){letter(name,sx+name.dx,sy+name.dy,print);return;}
       // One just crowded out stays out for a moment and a little zoom, because what crowded it may itself be about to go, and back and forth is flickering.
       if(!keeping&&name.lost>=restFrom&&now-name.lost<NAME_REST&&Math.abs(Math.log(zoomLevel/name.lostZoom))<.7){namesResting=true;return;}
       const unit=name.roam*reach;
       for(const [i,j] of unit?NUDGES:AT_HOME){
         const dx=i*unit,dy=j*unit;
-        if(clear(print,sx+dx,sy+dy,8,NAME_GAP,3)){name.dx=dx;name.dy=dy;letter(name,sx+dx,sy+dy,print);return;}
+        if(fits(sx+dx,sy+dy)&&clear(print,sx+dx,sy+dy,8,NAME_GAP,4)){name.dx=dx;name.dy=dy;letter(name,sx+dx,sy+dy,print);return;}
       }
       if(keeping){name.lost=now;name.lostZoom=zoomLevel;}
     }
@@ -503,9 +499,9 @@
       if(labelOwner(index)!==index){if(group._leader.hasAttribute('d'))group._leader.removeAttribute('d');if(!text.classList.contains('label-hidden'))text.classList.add('label-hidden');grid.add({x:sx-4.5,y:sy-4.5,w:9,h:9});return;}
       const id=stops[stopPeers[index]?.[0]??index].id;
       const active=stops[index].id===activeStopId,rest=!active&&text._lost>=restFrom&&now-text._lost<STOP_REST;namesResting||=rest;
-      items.push({id,x:sx,y:sy,width:text._width??text.textContent.length*8.3,height:11,priority:active?-1:index,unseen:!stopShown(index),rest});texts.push(text);
+      items.push({id,x:sx,y:sy,width:text._width??text.textContent.length*8.3,height:15,priority:active?-1:index,unseen:!stopShown(index),rest});texts.push(text);
     });
-    const placed=RedlineLabels.place(items,{width:bounds.width,height:bounds.height,obstacles,previous:labelSlots,clusterDistance:2.5,gap:3,routes,grid});
+    const placed=RedlineLabels.place(items,{width:bounds.width,height:bounds.height,obstacles,previous:labelSlots,clusterDistance:2.5,gap:6,routes,grid});
     labelSlots.clear();
     placed.forEach((slot,i)=>{
       const text=texts[i],leader=text.parentNode._leader;
@@ -658,16 +654,16 @@
     if(matchMedia('(prefers-reduced-motion: reduce)').matches||path.length<1e-4){finish();return;}
     // Arrow keys during an overview move finish it instantly.
     if(overview)playback={phase:'overview'};
-    const duration=(home?RedlineTrace.homeDuration(target.w/view.w):overview?Math.max(path.duration,RedlineTrace.zoomDuration(target.w/view.w)):path.duration)/speed;
+    const duration=(home?Math.max(path.duration,RedlineTrace.zoomDuration(target.w/view.w)):path.duration)/speed;
     const began=performance.now();
     const tick=now=>{
       const amount=Math.max(0,Math.min(1,(now-began-hold)/duration));
-      view=path.at((home?RedlineTrace.cameraPhase:RedlineTrace.snap)(amount));paintView();
+      view=path.at(RedlineTrace.ease(amount));paintView();
       if(amount===1){finish();return;}animation=requestAnimationFrame(tick);
     };
     animation=requestAnimationFrame(tick);
   }
-  function returnToWorld(){const hurried=held.size>0;animateView({...baseView},{overview:true,home:true,hold:hurried?0:RedlineTrace.dwell,speed:hurried?2.5:1});if(playback)setPlayState(true);}
+  function returnToWorld(){animateView({...baseView},{overview:true,home:true,hold:held.size?0:320,speed:held.size?2:1});if(playback)setPlayState(true);}
   // Backspace, Home, and the globe: the complete route, with the camera easing back to the world.
   function showOverview(speed=1){stopAnimation();showWorld();paintProgress();animateView({...baseView},{overview:true,speed});}
   // A clicked city is seen within the whole drawn trip; the arrows or play then continue from it.
