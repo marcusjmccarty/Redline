@@ -21,7 +21,7 @@ export async function verifyOwner(fetcher=fetch) {
 // Everything under public/ reaches the public site, so a stray backup, photo, video or document stops the build rather than shipping.
 // The only pictures that belong there are the map's own plates and relief tiles.
 const personal=/\.(?:jpe?g|hei[cf]|png|gif|tiff?|webp|bmp|avif|dng|cr[23]|nef|arw|raw|mov|mp4|m4v|avi|webm|pdf|csv|zip)$/i;
-const mapPicture=/^(?:atlas[\\/](?:land|land-small|sea)\.jpg|relief[\\/]\d+-\d+-\d+\.webp)$/;
+const mapPicture=/^(?:atlas[\\/](?:(?:land|land-small|sea)\.jpg|sheet(?:-small)?\.webp)|relief[\\/]\d+-\d+-\d+\.webp)$/;
 export const privateFiles = paths => paths.filter(path => /\.redline$/i.test(path) || personal.test(path) && !mapPicture.test(path));
 // Source data and system clutter stay out of the published site.
 export const shipped = path => !/(?:\.redline|\.DS_Store|[\\/]world\.js)$/.test(path);

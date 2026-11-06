@@ -81,8 +81,8 @@ test('the build keeps backups and clutter out of the site, and stops on stray pr
   for(const name of ['app.js','world.js','.DS_Store','My summer.redline','nested/.DS_Store','nested/Old trip.redline','nested/keep.css'])await writeFile(join(from,name),'x');
   await cp(from,to,{recursive:true,filter:shipped});
   assert.deepEqual((await readdir(to,{recursive:true})).sort(),['app.js','nested','nested/keep.css']);
-  assert.deepEqual(privateFiles(['app.js','atlas/land.jpg','relief/16-3-2.webp','relief/index.js','My trip.redline','IMG_0042.JPG','nested/photo.heic','photo.jpeg','atlas/hidden.redline']),['My trip.redline','IMG_0042.JPG','nested/photo.heic','photo.jpeg','atlas/hidden.redline']);
-  const strays=['atlas/me-at-the-beach.jpg','relief/holiday.webp','snap.png','snap.webp','clip.MOV','scan.pdf','stops.csv','raw.dng','backup.zip'];
+  assert.deepEqual(privateFiles(['app.js','atlas/land.jpg','atlas/sheet.webp','atlas/sheet-small.webp','relief/16-3-2.webp','relief/index.js','My trip.redline','IMG_0042.JPG','nested/photo.heic','photo.jpeg','atlas/hidden.redline']),['My trip.redline','IMG_0042.JPG','nested/photo.heic','photo.jpeg','atlas/hidden.redline']);
+  const strays=['atlas/me-at-the-beach.jpg','atlas/sheet-holiday.webp','sheet.webp','relief/holiday.webp','snap.png','snap.webp','clip.MOV','scan.pdf','stops.csv','raw.dng','backup.zip'];
   assert.deepEqual(privateFiles(strays),strays,'Only the map’s own pictures may ship');
   const build=await readFile(new URL('../scripts/build-static.mjs',import.meta.url),'utf8');
   assert.match(build,/filter:shipped/,'The real build uses this filter');assert.ok(build.indexOf('privateFiles(')<build.indexOf('await cp('),'and stops before copying anything');

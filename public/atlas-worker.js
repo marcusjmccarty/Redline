@@ -1,12 +1,16 @@
 /* Paints atlas tiles off the main thread, so zooming and tracing never wait for ink. */
 'use strict';
-let scene=null,canvas=null,context=null,sources=null,reliefQuery='';
+let scene=null,canvas=null,context=null,sources=null,reliefQuery='',tileOptions={alpha:false};
 const load=async(url,convert,options)=>{const response=await fetch(url,options);if(!response.ok)throw Error(`Could not load ${url}`);return convert(response);};
 const inflate=response=>new Response(response.body.pipeThrough(new DecompressionStream('deflate'))).arrayBuffer();
 const image=async response=>createImageBitmap(await response.blob());
-async function start({painter,reliefIndex,reliefVersion,near,far,land,landSmall,sea}){
+async function start({painter,reliefIndex,reliefVersion,near,far,land,landSmall,sea,sheet,software=false}){
+  // The baked sheet comes first and alone: it is the map's first picture, and nothing here should delay it. Without it the page asks for a painted one.
+  if(sheet){const bitmap=await load(sheet,image,{signal:AbortSignal.timeout(8000)}).catch(()=>null);postMessage({type:'sheet',bitmap},bitmap?[bitmap]:[]);}
   importScripts(painter,reliefIndex);
-  scene=RedlineAtlasPainter.createScene();scene.relief=new Map();scene.reliefCoverage=self.REDLINE_RELIEF;
+  if(software)tileOptions={alpha:false,willReadFrequently:true};
+  scene=RedlineAtlasPainter.createScene({software});scene.relief=new Map();scene.reliefCoverage=self.REDLINE_RELIEF;
+  RedlineAtlasPainter.prepare(scene);
   const [bundle,seaPlate,firstLand]=await Promise.all([load(near,inflate),load(sea,image),load(landSmall,image)]);
   RedlineAtlasPainter.addLayers(scene,RedlineAtlasPainter.decodeBundle(bundle));
   scene.plates.sea=seaPlate;scene.plates.land=firstLand;
@@ -34,7 +38,7 @@ async function prepareRelief(tile){
 }
 async function paint(tile){
   await prepareRelief(tile);
-  if(!canvas||canvas.width!==tile.w||canvas.height!==tile.h){canvas=new OffscreenCanvas(tile.w,tile.h);context=canvas.getContext('2d',{alpha:false});}
+  if(!canvas||canvas.width!==tile.w||canvas.height!==tile.h){canvas=new OffscreenCanvas(tile.w,tile.h);context=canvas.getContext('2d',tileOptions);}
   RedlineAtlasPainter.paintTile(context,scene,tile);
   const bitmap=canvas.transferToImageBitmap();
   postMessage({type:'tile',id:tile.id,bitmap},[bitmap]);

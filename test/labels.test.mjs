@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const context={};vm.createContext(context);
 vm.runInContext(readFileSync(new URL('../public/labels.js',import.meta.url),'utf8'),context);
-const {place,estimate,overlaps,slots,crosses,indexLines,projectIndex}=context.RedlineLabels;
+const {place,estimate,overlaps,slots,crosses,indexLines,projectIndex,occupancy}=context.RedlineLabels;
 
 const item=(id,x,y,priority)=>({id,x,y,width:estimate(id),height:14,priority});
 const dot=({x,y})=>({x:x-4.5,y:y-4.5,w:9,h:9});
@@ -158,4 +158,71 @@ test('a hub ringed by its own route keeps its name, across a line only when no c
   assert.ok(crowded[0],'The active port wins');
   if(crowded[1])assert.equal(overlaps(crowded[0].box,crowded[1].box,5),false,'Names crossing the line still clear each other');
   assert.equal(place([item('LONDON',hub.x,hub.y,0)],{width:1440,height:900,obstacles:[{x:0,y:0,w:1440,h:900}]})[0],null,'A name never goes under the dock to be seen');
+});
+
+test('the occupancy grid answers for gaps, owners and anything past the edges, and can be cleared and reused',()=>{
+  const grid=occupancy(400,300);
+  assert.equal(grid.hits(10,10,20,20),false);
+  grid.add({x:100,y:100,w:40,h:20});
+  assert.equal(grid.hits(100,100,1,1),true,'Inside');
+  assert.equal(grid.hits(141,100,10,10),false,'Beside it');assert.equal(grid.hits(141,100,10,10,2),true,'Beside it, within the gap');
+  assert.equal(grid.hits(90,90,5,5),false,'A shared cell is not a collision');
+  grid.add({x:-40,y:-40,w:30,h:30});grid.add({x:390,y:290,w:60,h:60});
+  assert.equal(grid.hits(-30,-30,5,5),true,'Past the top left');assert.equal(grid.hits(420,320,5,5),true,'Past the bottom right');
+  grid.add({x:200,y:200,w:10,h:10},7);
+  assert.equal(grid.hits(200,200,5,5,0,7),false,'A name does not collide with its own dot');assert.equal(grid.hits(200,200,5,5,0,8),true,'But another does');
+  // A box wide enough to span many cells: the dock.
+  grid.add({x:0,y:250,w:400,h:40});for(let x=0;x<400;x+=23)assert.equal(grid.hits(x,260,3,3),true);
+  grid.clear();
+  for(const [x,y] of [[100,100],[-30,-30],[420,320],[200,200],[50,260]])assert.equal(grid.hits(x,y,5,5),false,'Nothing is left after a clear');
+  assert.ok(grid.fits(400,300));assert.equal(grid.fits(401,300),false);
+});
+
+test('stop names are placed into the grid they are given, so what is lettered next can keep off them, their dots and their leaders',()=>{
+  const grid=occupancy(800,600),items=[item('ALPHA',400,300,0),item('BRAVO',408,306,1),item('CHARLIE',402,312,2),item('DELTA',410,294,3),item('ECHO',396,306,4),item('FOXTROT',405,303,5)];
+  const obstacle={x:20,y:20,w:60,h:40},result=place(items,{width:800,height:600,grid,obstacles:[obstacle]});
+  assert.ok(grid.hits(40,40,2,2),'The fixtures are in it');
+  for(const {x,y} of items)assert.ok(grid.hits(x-1,y-1,2,2),'The dots are');
+  result.forEach(slot=>{if(slot)assert.ok(grid.hits(slot.box.x+2,slot.box.y+2,2,2),'The names are');});
+  const led=result.find(slot=>slot?.leader);assert.ok(led,'A crowd this close needs a leader somewhere');
+  const [[x0,y0],[x1,y1]]=led.leader;assert.ok(grid.hits((x0+x1)/2-2,(y0+y1)/2-2,4,4,2),'The leader is');
+});
+
+test('a name stays near its dot while there is any room: a ring only when the near places are gone, and a short leader only with a ring',()=>{
+  const view={width:1200,height:800};
+  const [alone]=place([item('LONELY',600,400,0)],view);assert.ok(!alone.leader,'Nothing to step around, so no leader');
+  // A crowd pushes some out to a ring, each with a leader back to its dot.
+  const crowd=[['ALPHA',0,0],['BRAVO',9,6],['CHARLIE',2,12],['DELTA',10,-6],['ECHO',-5,6],['FOXTROT',5,3],['GOLF',-9,-4],['HOTEL',14,12]].map(([name,dx,dy],i)=>item(name,600+dx,400+dy,i)),placed=place(crowd,view);
+  for(const slot of place([item('LEFT',600,400,0),item('RIGHT',624,400,1)],view))assert.ok(slots.findIndex(s=>s.name===slot.name)<8,'Two neighbours both stay near');
+  const pushed=placed.flatMap((slot,i)=>slot&&slots.findIndex(s=>s.name===slot.name)>=8?[[slot,crowd[i]]]:[]);assert.ok(pushed.length,'Someone is pushed out');
+  for(const [slot,city] of pushed)if(Math.hypot(slot.box.x-city.x,slot.box.y-city.y)>30)assert.ok(slot.leader,`${city.id} has a leader`);
+  for(const slot of placed)if(slot?.leader)assert.ok(Math.hypot(slot.leader[1][0]-slot.leader[0][0],slot.leader[1][1]-slot.leader[0][1])<70,'A short one');
+  const names=slots.map(slot=>slot.name);assert.ok(names.indexOf('right-above')<8&&names.indexOf('left')<8,'The eight near places come first');
+  for(const slot of slots.slice(0,8))assert.ok(Math.hypot(slot.x,Math.max(0,Math.abs(slot.y)-(slot.y>0?9:0)))<=22,`${slot.name} is near`);
+});
+
+test('a name once placed keeps its place through a near miss that would turn a newcomer away',()=>{
+  const view={width:800,height:600,gap:3},anchor=item('ANCHOR',400,300,0),near=item('NEAR',400,300,1);
+  // Ready to be kept: a neighbour's box has come close enough that a newcomer, wanting the whole gap, would look elsewhere, but it has not touched.
+  const first=place([{...near,y:360}],view),keep=first[0].name;
+  const box=first[0].box,wall={x:box.x-20,y:box.y+box.h+2,w:box.w+40,h:20};
+  const kept=place([{...near,y:360}],{...view,obstacles:[wall],previous:{NEAR:keep}});
+  assert.equal(kept[0].name,keep,'Still here');
+  const fresh=place([{...near,y:360}],{...view,obstacles:[wall]});
+  assert.notDeepEqual(fresh[0].box,box,'A newcomer keeps the fuller gap');
+  assert.equal(anchor.id,'ANCHOR');
+});
+
+test('a name resting after being crowded out does not arrive anywhere, unless it was already placed',()=>{
+  const view={width:800,height:600};
+  assert.equal(place([{...item('RESTING',400,300,0),rest:true}],view)[0],null,'It waits');
+  assert.ok(place([{...item('RESTING',400,300,0),rest:true}],{...view,previous:{RESTING:'below'}})[0],'A place it holds is its own');
+  assert.ok(place([{...item('ACTIVE',400,300,-1),rest:true}],view)[0],'The port on show is always named');
+});
+
+test('the port on show keeps its name in a crowd whose others got there first',()=>{
+  const view={width:800,height:600},names=['ROME','NAPLES','FLORENCE','BOLOGNA','VENICE','MILAN','TURIN','GENOA','PISA','SIENA'];
+  const items=names.map((name,i)=>item(name,400+(i%4)*7,300+Math.floor(i/4)*6,i)),first=place(items,view),previous=new Map(first.flatMap((slot,i)=>slot?[[items[i].id,slot.name]]:[]));
+  const hidden=first.findIndex(slot=>!slot),target=hidden<0?9:hidden;items[target].priority=-1;
+  assert.ok(place(items,{...view,previous})[target],'The active port wins');
 });

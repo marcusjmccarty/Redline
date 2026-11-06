@@ -8,9 +8,9 @@ A minimalist travel map inspired by the red routes in Indiana Jones: parchment, 
 
 The planner at the bottom of the map shows the trip name, Logbook, Album, and Save. Type a destination and press Enter to add it. Open the logbook to reorder or remove stops.
 
-- **Trace route / Return / Space:** start or resume the trace. A leg normally draws in 0.56 to 1.5 seconds, depending on its length, and one that needs a long camera move takes longer. Hold Return or Space for 2.5× travel speed, including the glide back to the overview; the button pauses.
+- **Trace route / Return / Space:** start or resume the trace. A leg normally draws in 1.2 to 2 seconds, depending on its length, with the ink easing out of one port and into the next, and one that needs a long camera move takes longer: up to about 4.5 seconds for the first leg of a local trip, zooming in from the whole world. Each port is held for 0.4 seconds with its name up before the camera moves on, and anything you press then answers at once. Hold Return or Space for 2.5× travel speed, including the pauses and the glide back to the overview; the button pauses.
 - **Click a city** (on the map or in the list): look at it within the whole trip, with every leg still drawn.
-- **Arrow buttons or keys:** sail one leg, continuing from a port you clicked. Press again during travel to arrive instantly. Navigation loops through the overview in both directions.
+- **Arrow buttons or keys:** sail one leg, at twice the voyage's pace, continuing from a port you clicked. Press again during travel to arrive instantly. Navigation loops through the overview in both directions.
 - **Backspace (Delete on a Mac), Home, or the globe:** glide back to the whole-trip overview.
 - **Full playback:** reveals each port on arrival, then smoothly returns to the complete world overview. With reduced motion it lands on the last port with the route drawn.
 - **Scroll, pinch, or + / −:** zoom with continuous easing, up to 240×. A touch or trackpad pinch zooms around your fingers. Double-click zooms in on that point, and Shift + double-click zooms out. The chosen zoom persists across legs, including one chosen while paused or at rest before a trace; the camera follows the tracer and adjusts its visible speed for close views.
@@ -19,9 +19,9 @@ The planner at the bottom of the map shows the trip name, Logbook, Album, and Sa
 - **Undo / Ctrl or Command + Z:** restore a cleared route, removed or added city, or changed stop order. Add Shift to redo. History lasts for the current trip in this tab; text fields keep their own Undo.
 - **L / S / A:** open the logbook, save the trip, or open the album. Escape closes whichever is open.
 
-The rectangular world map fills the screen, including New Zealand and the reduced-height Antarctica. Geographic shapes are intentionally stretched to fit. The map is painted: a worker inks it tile by tile onto canvases with a watercolour sea, land washes modelled by real hillshade, rivers, lakes, dotted borders, forests, peaks, and ornaments, and the page only moves those bitmaps. Finer coasts, regional boundaries, and terrain appear as you zoom, without existing peaks and trees shifting. See [the atlas notes](docs/ATLAS.md).
+The rectangular world map fills the screen, including New Zealand and the reduced-height Antarctica. Geographic shapes are intentionally stretched to fit. The map is painted, and runs to the window's edge with no frame. A baked picture of the whole sheet appears at once; workers then ink tiles onto canvases with a watercolour sea, land washes modelled by real hillshade, snow on the high ranges and the polar ice, rivers, lakes, dotted borders, forests, peaks, and ornaments, and the page only moves those bitmaps. Finer coasts, regional boundaries, and terrain appear as you zoom, without existing peaks and trees shifting. See [the atlas notes](docs/ATLAS.md).
 
-Names are lettered onto the same canvas, and country and city names appear as you come closer. Continents, countries, ranges, and deserts are in Redline Hand, a typeface drawn for this map; seas and cities are in IM Fell English. Everything the map needs is on this site, and there are no third-party map-tile requests: the finer geography, the full land plate, and close-up relief load from it as you zoom. Route port names are placed so they never overlap, and a port visited twice is named once. Place names are limited to 115 visible items to keep movement responsive.
+Names are lettered onto a clear canvas above the painted tiles, and country and city names appear as you come closer. Continents, countries, ranges, and deserts are in Redline Hand, a typeface drawn for this map; seas and cities are in IM Fell English. Everything the map needs is on this site, and there are no third-party map-tile requests: the finer geography, the full land plate, and close-up relief load from it as you zoom. Route port names are placed so they never overlap, and a port visited twice is named once. Place names are limited to 115 visible items to keep movement responsive.
 
 ## Trips, photos, and postcards
 
@@ -67,11 +67,11 @@ The built website is on the `gh-pages` branch, which GitHub Pages publishes auto
 
 - `map.html`, `public/app.js`, `public/style.css`: interface and interaction.
 - `public/map-intro.js`: the opening fold, once per page load.
-- `public/labels.js`: placement of route city names so they never overlap.
+- `public/labels.js`: the one occupancy grid every name on the map is placed into, and the placement of route city names in it.
 - `public/map-layout.js`: projection and route curves.
 - `public/world.js`: source geography for the build. No page loads it, and it is not published.
 - `scripts/build-atlas.mjs`, `scripts/atlas-geometry.mjs`: dissolve shared national edges at build time while preserving coastlines, lakes, and islands. The generated `public/atlas-geography.js` supplies the route thumbnails' simple land shapes and the country and city label data.
-- `public/atlas-painter.js`, `public/atlas-worker.js`, `public/atlas-view.js`: the painted map, inked tile by tile in a worker from baked local assets. `scripts/build-atlas-art.mjs` and `scripts/build-lettering.mjs` rebuild those assets; see `docs/ATLAS.md`.
+- `public/atlas-painter.js`, `public/atlas-worker.js`, `public/atlas-view.js`: the painted map, inked tile by tile in a small crew of workers from baked local assets. `scripts/build-atlas-art.mjs`, `scripts/build-atlas-sheet.mjs`, and `scripts/build-lettering.mjs` rebuild those assets; see `docs/ATLAS.md`.
 - `public/atlas-names.js`: the mountain ranges, deserts, plains, and seas to letter.
 - `public/album-motion.js`: the book's motion: the cover opening and closing, turning leaves, and the change between Album and All Photos, which carries both views on one leaf with a face on either side.
 - `public/trace.js`: route geometry, timing, camera framing, and damped zoom.
@@ -82,6 +82,7 @@ The built website is on the `gh-pages` branch, which GitHub Pages publishes auto
 - `public/archive.js`: portable binary backups containing routes, postcards, and JPEG blobs.
 - `public/jpeg.js`: metadata removal.
 - `scripts/build-static.mjs`: host-independent static build.
+- `scripts/check-names.mjs`: authoring tool, not part of `npm test`. Finds names that collide, clip, go missing or flicker, from the built page in one headless Chrome.
 - `scripts/build-photo-cities.mjs`: authoring step, not part of the build. Writes `public/photo-cities.json`, which names a photo's city from its GPS position, without the sections of cities that GeoNames also lists.
 
 The current app is entirely static. [Hosting notes](docs/HOSTING.md) cover GitHub Pages and alternative static hosts. The previous server-backed implementation remains in the original Site repository; this build does not contain or call it. The repository contains source and synthetic test fixtures, not personal trips, photos, tokens, or local database files.
@@ -89,7 +90,7 @@ The current app is entirely static. [Hosting notes](docs/HOSTING.md) cover GitHu
 ## Data and libraries
 
 - Redline Hand (`public/fonts/redline-hand.woff`, `public/fonts/redline-hand-bold.woff`) is drawn for this project by `scripts/build-lettering.mjs`.
-- [IM Fell English](https://iginomarini.com/fell/), Igino Marini's revival of the Fell types, is hosted locally for small text. It is licensed under the SIL Open Font License; see `public/fonts/OFL.txt`.
+- [IM Fell English](https://iginomarini.com/fell/), Igino Marini's revival of the Fell types, is hosted locally for the chart's small text and the album's cover title. It is licensed under the SIL Open Font License; see `public/fonts/OFL.txt`.
 - The locally hosted album script is a medium-weight instance of [Dancing Script](https://github.com/google/fonts/tree/main/ofl/dancingscript), renamed Redline Album Script. Its SIL Open Font License is `public/fonts/DancingScript-OFL.txt`.
 - [Natural Earth](https://www.naturalearthdata.com/) rasters, public domain: the 1:50m shaded relief and hypsometric plates give the land washes and terrain in `public/atlas/`, and the [shaded relief plate](https://www.naturalearthdata.com/downloads/10m-raster-data/10m-shaded-relief/) gives the close-up WebP tiles in `public/relief/`, which load only for close-ups.
 - [Natural Earth](https://www.naturalearthdata.com/) vectors, public domain: world outlines, rivers, lakes, labels, and administrative boundaries.

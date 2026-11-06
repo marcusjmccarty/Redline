@@ -27,7 +27,7 @@ function mapClock(w){
 }
 
 // With a profile, the page opens on an existing library instead of a new one: its database, its localStorage and its tab's sessionStorage, and no album opened.
-async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,paris],seedSizes=[],realMap=false,textLength=null,profile=null}={}){
+async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,paris],seedSizes=[],realMap=false,textLength=null,profile=null,atlas=null}={}){
   const dom=new JSDOM(source('map.html'),{url:'https://redline.test/Redline/',runScripts:'outside-only',pretendToBeVisual:true});
   const w=dom.window,$=id=>w.document.getElementById(id),objects=new Set();let stops=route;
   Object.assign(w,{Blob,File,FormData,TextEncoder,TextDecoder,indexedDB:profile?.idb||new IDBFactory()});
@@ -78,6 +78,7 @@ async function setup(t,{seed=true,route=[paris,madrid],seedStops=[madrid,paris,p
     await api(`/trips/${trip.id}/photos`,{method:'POST',body:form});
   }
   if(!profile)w.localStorage.setItem('redline-saved-trip',JSON.stringify({id:trip.id,title:trip.title,revision:trip.revision,hash:JSON.stringify(stops)}));
+  if(atlas)w.RedlineApp.atlas=atlas;
   w.eval(source('public/postcards.js'));w.eval(source('public/album-motion.js'));w.eval(source('public/trips.js'));
   if(!profile){
     await wait(()=>$('trip-title').textContent===trip.title&&(!seed||$('photo-count').textContent===String(seedStops.length)));
@@ -757,10 +758,10 @@ test('album and All Photos slide in, keep their spread stable, and slide away af
     assert.equal($('gallery-filter').parentElement,scene,'Tabs follow the cover geometrically');
     assert.equal(scene.querySelectorAll('[id]').length,1,'Only the original tab navigation has an ID');
     assert.equal($('photo-gallery').firstElementChild,paper);assert.equal($('album-pages').firstElementChild,spread);
-    const closing=[...motion.running];assert.ok(closing.every(animation=>animation.options.duration===1400&&animation.options.direction==='reverse'));
+    const closing=[...motion.running];assert.ok(closing.every(animation=>animation.options.duration===1000&&animation.options.direction==='reverse'));
     const reversedFrames=closing.map(animation=>JSON.stringify(animation.frames));
     assert.equal($('photo-panel').dataset.departing,'true');
-    assert.equal($('photo-panel').style.getPropertyValue('--album-exit-delay'),'1220ms');
+    assert.equal($('photo-panel').style.getPropertyValue('--album-exit-delay'),'820ms');
     press('Escape');assert.deepEqual([...motion.running],closing,'A second close does not restart the reverse');
     await motion.finish();assert.equal($('photo-panel').open,false);
     assert.equal($('album-pages').children.length,0);assert.equal($('album-book').querySelector('.album-cover-scene'),null);
@@ -768,8 +769,8 @@ test('album and All Photos slide in, keep their spread stable, and slide away af
     $('photos-button').click();await wait(()=>motion.running.size===3);
     assert.equal($('photo-panel').dataset.motion,'opening');assert.equal($('album-book').dataset.mode,view);
     const entrance=[...motion.running].find(animation=>animation.element.classList.contains('album-arrival'));
-    assert.equal(entrance.options.duration,1400);
-    assert.equal(entrance.frames[1].offset,1000/1400,'The slide occupies the first second of the common timeline');
+    assert.equal(entrance.options.duration,1000);
+    assert.equal(entrance.frames[1].offset,.72,'The slide occupies the first part of the common timeline');
     assert.deepEqual([...motion.running].map(animation=>JSON.stringify(animation.frames)),reversedFrames,'Close reuses the exact opening frames and easing');
     assert.ok([...motion.running].every(animation=>animation.options.direction==='normal'));
     assert.match(entrance.frames[0].transform,/translateY\([1-9]/);assert.equal(entrance.frames.at(-1).transform,'translateY(0px)');
@@ -798,15 +799,55 @@ test('closing halfway through opening reverses that same cover and preserves the
   assert.equal(pages(),bookmark);assert.equal(motion.running.size,0);
 });
 
-test('dismissal while storage is loading never reveals late pages or reopens the album',async t=>{
+test('the cover rises before storage answers, and dismissal then never reveals late pages or reopens the album',async t=>{
   const {w,$,press,storage,api}=await setup(t);press('Escape');
   const motion=controlledMotion(w);let release;
   storage.api=async(path,options)=>{await new Promise(resolve=>release=resolve);return api(path,options);};
-  $('photos-button').click();await wait(()=>!!release);assert.equal($('album-book').dataset.preparing,'true');
-  press('Escape');await wait(()=>!$('photo-panel').open);
-  assert.equal($('photo-panel').open,false);release();await tick();
+  $('photos-button').click();
+  const scene=$('album-book').querySelector('.album-cover-scene');
+  assert.ok(scene,'The cover is built in the click itself');assert.equal(motion.running.size,1,'Only the rise runs, and it needs no photos');
+  assert.ok([...motion.running][0].element.classList.contains('album-arrival'));
+  assert.equal(scene.querySelector('.album-snapshot'),null,'No spread yet');assert.equal(scene.style.visibility,'');
+  assert.equal($('album-book').dataset.preparing,undefined);assert.equal($('gallery-filter').parentElement,scene,'The tabs travel with it from the first frame');
+  assert.equal(scene.querySelector('.cover-meta').textContent,'2 stops · 3 photos','Its list is already known');
+  press('Escape');assert.equal($('photo-panel').dataset.motion,'closing');assert.ok([...motion.running][0].reversed);
+  await wait(()=>!!release);await motion.finish();await wait(()=>!$('photo-panel').open);
+  release();await tick();
   assert.equal($('photo-panel').open,false);assert.equal($('album-book').querySelector('.album-cover-scene'),null);
   assert.equal($('album-book').dataset.preparing,undefined);
+});
+
+test('the spread comes in behind the shut cover, and the leaf keeps to the clock or starts from its hold if the read is late',async t=>{
+  const {w,$,press,storage,api}=await setup(t);press('Escape');
+  const motion=controlledMotion(w);let release;
+  // A timeline the test can move: the leaf is stamped against it.
+  let now=5000;Object.defineProperty(w.document,'timeline',{configurable:true,get:()=>({currentTime:now})});
+  storage.api=async(path,options)=>{await new Promise(resolve=>release=resolve);return api(path,options);};
+  $('photos-button').click();await wait(()=>!!release);now+=600;release();
+  await wait(()=>motion.running.size===3);
+  const [rise,leaf,book]=[...motion.running];
+  assert.equal(rise.startTime,5000);assert.equal(leaf.startTime,5350,'250ms of hold have passed, so it turns at once and does not jump');assert.equal(book.startTime,5350);
+  assert.ok($('album-book').querySelector('.album-cover-scene .album-cover-still .album-snapshot'));assert.ok($('album-book').querySelector('.album-cover-back .album-snapshot'));
+  await motion.finish();await wait(()=>!$('photo-panel').dataset.motion);assert.equal($('album-book').querySelector('.album-cover-scene'),null);
+  press('Escape');await wait(()=>motion.running.size===3);await motion.finish();await wait(()=>!$('photo-panel').open);
+  storage.api=async(path,options)=>{await new Promise(resolve=>release=resolve);return api(path,options);};release=null;now=9000;
+  $('photos-button').click();await wait(()=>!!release);now+=40;release();await wait(()=>motion.running.size===3);
+  assert.deepEqual([...motion.running].map(animation=>animation.startTime),[9000,9000,9000],'On time, every channel shares one clock');
+  await motion.finish();await wait(()=>!$('photo-panel').dataset.motion);
+});
+
+test('with no list yet the cover waits a moment for the read, then goes on sized for the route, and the list corrects it',async t=>{
+  const {w,$,press,storage,api}=await setup(t);press('Escape');
+  const motion=controlledMotion(w);let release=null;
+  $('trips-button').click();$('new-trip').click();w.RedlineApp.setStops([paris,madrid]);w.dispatchEvent(new w.Event('redline:routechange'));$('photos-button').click();$('trip-name').value='Pacific crossing';
+  storage.api=async(path,options)=>{if(/^\/trips\/[^/]+$/.test(path)&&!options?.method)await new Promise(resolve=>release=resolve);return api(path,options);};
+  $('save-trip').click();await wait(()=>!!release&&motion.running.size===1);
+  const scene=$('album-book').querySelector('.album-cover-scene');
+  assert.equal(scene.querySelector('.cover-meta').textContent,'2 stops','A count it does not have is not guessed at');
+  assert.equal($('album-book').style.getPropertyValue('--tab-width'),'45px','One column, as two stops would need');
+  release();await wait(()=>motion.running.size===3);
+  assert.equal(scene.querySelector('.cover-meta').textContent,'2 stops · 0 photos');
+  await motion.finish();await wait(()=>!$('photo-panel').dataset.motion);assert.equal($('photo-panel').open,true);
 });
 
 test('single-page opening and All Photos use the same cover lifecycle and defer redraws',async t=>{
@@ -1001,19 +1042,17 @@ test('city tabs identify their actual chapter page in both album layouts',async 
   }
 });
 
-test('cover motion waits for decoded snapshots and can close before its first moving frame',async t=>{
+test('cover motion never waits for decoding, a print appears when its bitmap arrives, and a stuck decode still ends the opening',async t=>{
   const {w,$,press,tab}=await setup(t);tab(paris.id).click();press('Escape');
   const motion=controlledMotion(w),originalDecode=w.HTMLImageElement.prototype.decode,releases=[];
   w.HTMLImageElement.prototype.decode=function(){return this.closest('.album-snapshot')?new Promise(resolve=>releases.push(resolve)):Promise.resolve();};
-  $('photos-button').click();await wait(()=>releases.length>0);
-  assert.equal(motion.running.size,0,'No moving frame precedes the decoded spread');
-  assert.equal($('album-book').dataset.preparing,'true','The book stays out of sight during preparation');
-  const scene=$('album-book').querySelector('.album-cover-scene');assert.equal(scene.style.visibility,'hidden');
-  // Release every pending decode, including a second snapshot of the spread.
+  $('photos-button').click();await wait(()=>motion.running.size===3&&releases.length>0);
+  const scene=$('album-book').querySelector('.album-cover-scene'),copies=[...scene.querySelectorAll('.photo-image')];
+  assert.ok(copies.length);assert.equal(scene.style.visibility,'','Motion did not wait for it');
+  for(const copy of copies)copy.classList.remove('loaded');
+  releases.forEach(resolve=>resolve());await wait(()=>copies.every(copy=>copy.classList.contains('loaded')));
   w.HTMLImageElement.prototype.decode=originalDecode;
-  press('Escape');assert.equal($('photo-panel').dataset.motion,'closing');
-  releases.forEach(resolve=>resolve());await wait(()=>!$('photo-panel').open);
-  assert.equal(motion.running.size,0,'A book that never entered does not flash onscreen to leave');
+  press('Escape');assert.equal($('photo-panel').dataset.motion,'closing');await motion.finish();await wait(()=>!$('photo-panel').open);
   assert.equal($('album-book').querySelector('.album-cover-scene'),null);
 });
 
@@ -1792,7 +1831,8 @@ test('crowded route names retain safe widths and clear one another through camer
       const text=group.querySelector('text');assert.ok(text._width>=text.textContent.length*8.3,'A short browser measurement never poisons the cached width');
       if(text.classList.contains('label-hidden'))continue;
       const anchor=text.getAttribute('text-anchor'),width=text._width,[x,y]=group._point;
-      const box={x:(x-vx)*1440/vw+Number(text.getAttribute('x'))-(anchor==='end'?width:anchor==='middle'?width/2:0)-3,y:(y-vy)*900/vh+Number(text.getAttribute('y'))-17,w:width+6,h:23};
+      // The lettering's own extent: capitals standing on the baseline, with their halo.
+      const box={x:(x-vx)*1440/vw+Number(text.getAttribute('x'))-(anchor==='end'?width:anchor==='middle'?width/2:0)-2,y:(y-vy)*900/vh+Number(text.getAttribute('y'))-11,w:width+4,h:15};
       for(const other of boxes)assert.equal(w.RedlineLabels.overlaps(box,other),false,`${text.textContent} has a clear label at zoom ${zoom}`);
       boxes.push(box);
     }
@@ -1810,12 +1850,18 @@ test('geographic headings yield to route city labels instead of drawing through 
     for(const id of ['zoom-in','zoom-out']){$(id).click();clock.settle();}
     assert.equal($('route-stops').querySelector('text').classList.contains('label-hidden'),false,'The trip keeps priority over decorative names');
     assert.deepEqual(camera(w),{x:0,y:0,w:1440,h:720});
-    return lettered(w);
+    const atlas=w.RedlineApp.atlas,boxOf=text=>{const label=atlas.labels.find(l=>l.text===text);if(!label)return null;const {w:width,h}=atlas.measure(label.kind,text);return {x:label.x-width/2,y:label.y-h/2,w:width,h,home:label};};
+    return {boxOf,w,$};
   };
-  assert.equal((await names([16,51.5])).includes('Europe'),false,'The atlas heading shares the city collision layout, and simply goes unlettered');
-  assert.equal((await names([-150,-50])).includes('Europe'),true,'With the route elsewhere the heading is lettered');
-  const crossing=await names([0,7.5],[40,7.5]);
-  assert.equal(crossing.includes('Africa'),false,'A heading never sits under the red line either');assert.equal(crossing.includes('Europe'),true);
+  const home=await names([-150,-50]),europe=home.boxOf('Europe');
+  assert.equal(europe.home.x,790,'With the route elsewhere the heading is at home');
+  const moved=await names([16,51.5]),aside=moved.boxOf('Europe');
+  assert.ok(aside,'A continent steps aside for a port rather than leaving the chart');assert.notDeepEqual([aside.home.x,aside.home.y],[europe.home.x,europe.home.y]);
+  const group=moved.$('route-stops').children[0],label=group._label,[gx,gy]=group._point,width=label._width,anchor=label.getAttribute('text-anchor'),left=gx+Number(label.getAttribute('x'))-(anchor==='end'?width:anchor==='middle'?width/2:0),top=gy*900/720+Number(label.getAttribute('y'))-11;
+  assert.equal(moved.w.RedlineLabels.overlaps(aside,{x:left,y:top,w:width,h:15}),false,'And is clear of its name');
+  const crossing=await names([0,7.5],[40,7.5]),africa=crossing.boxOf('Africa'),y=7.5;
+  if(africa){const lineY=(90-y)*4*900/720;assert.ok(africa.y>lineY||africa.y+africa.h<lineY,'A heading never sits under the red line either');}
+  assert.ok(crossing.boxOf('Europe'));
 });
 
 test('turning pages keep their measured padding when removed from the live grid',async t=>{
@@ -2120,7 +2166,7 @@ test('every great name lettered at world view is inside the sheet, and an empty 
   }
 });
 
-test('a seven-stop trip sails start to finish in under twelve seconds, and holding Return hurries it',async t=>{
+test('a seven-stop trip sails start to finish in about twelve seconds, and holding Return hurries it',async t=>{
   const cities=[['New York',-74.006,40.7128],['London',-.1257,51.5085],['Cairo',31.2497,30.0626],['Delhi',77.2315,28.6519],['Tokyo',139.6917,35.6895],['Sydney',151.2073,-33.8679],['Rio de Janeiro',-43.1729,-22.9068]];
   const route=cities.map(([name,longitude,latitude],i)=>({id:`world-stop-${i}`,name,country:'Test',longitude,latitude}));
   const {w,$,press}=await setup(t,{realMap:true,route,seed:false}),clock=mapClock(w);
@@ -2130,7 +2176,7 @@ test('a seven-stop trip sails start to finish in under twelve seconds, and holdi
     while($('play-label').textContent==='Pause'&&clock.now-began<60000)clock.frame();
     assert.deepEqual(camera(w),{x:0,y:0,w:1440,h:720},'Every trip ends on the whole world');return clock.now-began;
   };
-  const normal=sail(()=>$('play').click());assert.ok(normal<12000,`The trip took ${normal}ms`);
+  const normal=sail(()=>$('play').click());assert.ok(normal>11000&&normal<13000,`The trip took ${normal}ms`);
   const hurried=sail(()=>press('Enter'));w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:'Enter',bubbles:true}));
   assert.ok(hurried<normal/1.9&&hurried>normal/2.6,`Held, ${hurried}ms against ${normal}ms: 2.5× after a moment's grace`);
   assert.ok(Math.abs(sail(()=>$('play').click())-normal)<50,'Letting go returns to normal speed');
@@ -2140,7 +2186,7 @@ test('a seven-stop trip sails start to finish in under twelve seconds, and holdi
   w.RedlineApp.focusStop('world-stop-5');const across=clock.settle();assert.ok(Math.abs(across-820)<=16,`New York to Sydney took ${across}ms`);
 });
 
-test('a trace zoomed in by hand slows to less than half pace at most, and waits at most 620ms at each port',async t=>{
+test('a trace zoomed in by hand slows to less than half pace at most, and waits 400 to 620ms at each port',async t=>{
   const cities=[['London',-.1257,51.5085],['Cairo',31.2497,30.0626],['Delhi',77.2315,28.6519],['Tokyo',139.6917,35.6895]];
   const route=cities.map(([name,longitude,latitude],i)=>({id:`manual-stop-${i}`,name,country:'Test',longitude,latitude}));
   const {w,$,press}=await setup(t,{realMap:true,route,seed:false}),clock=mapClock(w),map=$('map');
@@ -2153,7 +2199,7 @@ test('a trace zoomed in by hand slows to less than half pace at most, and waits 
   until(2);
   for(const leg of [1,2]){
     const nominal=legTime(cities[leg].slice(1),cities[leg+1].slice(1)),took=until(leg+2);
-    assert.ok(took>=nominal/.45&&took<=620+nominal/.45+32,`Leg ${leg}: ${took}ms for a ${nominal}ms leg at the .45 pace floor, after a settle of at most 620ms`);
+    assert.ok(took>=400+nominal/.45&&took<=620+nominal/.45+32,`Leg ${leg}: ${took}ms for a ${nominal}ms leg at the .45 pace floor, after a pause of 400ms and a settle of at most 620ms`);
     const stop=w.RedlineLayout.project(cities[leg+1].slice(1)),view=camera(w);
     assert.ok(view.w<7,`The chosen close-up is kept (${view.w})`);
     assert.ok(Math.abs(stop[0]-view.x-view.w/2)<view.w&&Math.abs(stop[1]-view.y-view.h/2)<view.h,'At full zoom the camera still keeps within a window of the ink');
@@ -2177,7 +2223,7 @@ test('a port far from a sudden close-up gets 620ms of settling at most, counted 
     const landed=clock.now;while(!drawing()&&clock.now-landed<5000)clock.frame();
     assert.ok(camera(w).w<7,'The chosen close-up carries on');const took=clock.now-landed;home();return took;
   };
-  const normal=settling(()=>$('play').click());assert.ok(normal>=320&&normal<=656,`The camera waited ${normal}ms before the next leg`);
+  const normal=settling(()=>$('play').click());assert.ok(normal>=400&&normal<=656,`The camera waited ${normal}ms before the next leg`);
   const held=settling(()=>press('Enter'));assert.ok(held>=256&&held<=288,`Held, the 620ms cap is reached in ${held}ms, cutting the camera's chase short`);
 });
 
@@ -2192,6 +2238,63 @@ async function chart(t,places){
   const until=(step,limit=20000)=>{const began=clock.now;while(map.dataset.tripStep!==String(step)&&clock.now-began<limit)clock.frame();assert.equal(map.dataset.tripStep,String(step));};
   return {...opened,clock,map,wheel,pointer,until,sailing:()=>$('play-label').textContent==='Pause',stop:i=>$('route-stops').children[i]};
 }
+
+test('the reference voyages keep about 85% of the earlier pace, which was 5.7, 33.6, 16.7, 13.7 and 18.9 seconds',async t=>{
+  const trips={
+    starter:[5000,[['New York',-74.006,40.7128],['London',-.1257,51.5085],['Cairo',31.2497,30.0626]]],
+    voyage:[28000,[['Lisbon',-9.1393,38.7223],['Seville',-5.9845,37.3891],['Marrakesh',-7.9811,31.6295],['Cadiz',-6.2886,36.5271],['Rome',12.5113,41.8919],['Athens',23.7278,37.9838],['Istanbul',28.9784,41.0082],['Cairo',31.2497,30.0626],['Muscat',58.4059,23.5859],['Mumbai',72.8777,19.076],['Kathmandu',85.324,27.7172],['Bangkok',100.5018,13.7563],['Singapore',103.8198,1.3521],['Rio de Janeiro',-43.1729,-22.9068]]],
+    europe:[14000,[['London',-.1257,51.5085],['Paris',2.3488,48.8534],['Amsterdam',4.9041,52.3676],['Berlin',13.405,52.52],['Prague',14.4208,50.088],['Vienna',16.3738,48.2082]]],
+    world:[12000,[['New York',-74.006,40.7128],['London',-.1257,51.5085],['Cairo',31.2497,30.0626],['Delhi',77.2315,28.6519],['Tokyo',139.6917,35.6895],['Sydney',151.2073,-33.8679],['Rio de Janeiro',-43.1729,-22.9068]]],
+    italy:[15500,[['Milan',9.19,45.4642],['Venice',12.3155,45.4408],['Florence',11.2558,43.7696],['Siena',11.3308,43.3188],['Rome',12.4964,41.9028],['Naples',14.2681,40.8518],['Bari',16.8719,41.1171]]],
+  };
+  for(const [name,[target,places]] of Object.entries(trips)){
+    const {$,w,clock,sailing}=await chart(t,places),began=clock.now;$('play').click();
+    while(sailing()&&clock.now-began<60000)clock.frame();
+    assert.deepEqual(camera(w),{x:0,y:0,w:1440,h:720},name);
+    assert.ok(Math.abs(clock.now-began-target)<target*.08,`${name} took ${clock.now-began}ms against about ${target}ms`);
+  }
+});
+
+test('each port is held for a moment with its dot and name up, and anything pressed then answers at once',async t=>{
+  const {w,$,press,clock,map,sailing,until,wheel,stop}=await chart(t,[LONDON,PARIS,ROME,ATHENS]);
+  const world={x:0,y:0,w:1440,h:720},resting=()=>{const view=camera(w),began=clock.now;while(JSON.stringify(camera(w))===JSON.stringify(view)&&clock.now-began<3000)clock.frame();return clock.now-began;};
+  const toPort=()=>{$('play').click();until(2);clock.frame();assert.ok(sailing(),'Under way');};
+  const home=()=>{if(sailing())$('play').click();w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:'Enter',bubbles:true}));press('Home');clock.settle();assert.deepEqual(camera(w),world);};
+  toPort();
+  assert.equal(stop(1).style.opacity,'1','The dot is up');assert.equal(stop(1)._label.classList.contains('label-hidden'),false,'And the name');
+  const at=stop(1)._label.getAttribute('x'),held=resting();
+  assert.ok(held>=300&&held<=450,`The port is held for ${held}ms`);assert.equal(stop(1)._label.getAttribute('x'),at,'Without its name moving');
+  home();
+  // A camera at a port does nothing that needs a frame painted.
+  toPort();const update=w.RedlineApp.atlas.update;let paints=0;w.RedlineApp.atlas.update=(...args)=>{paints++;return update(...args);};
+  clock.run(10);assert.equal(paints,0,'Nothing is repainted while the port is on show');w.RedlineApp.atlas.update=update;home();
+  // Holding Return shortens it with everything else.
+  press('Enter',map);until(2);clock.frame();const hurried=resting();
+  assert.ok(hurried>=120&&hurried<=200,`Held, the port waits ${hurried}ms`);home();
+  // Pausing stops on the port, and playing again sets out from it at once.
+  toPort();$('play').click();assert.equal(sailing(),false,'The button pauses');const paused=camera(w);clock.run(40);assert.deepEqual(camera(w),paused);
+  $('play').click();assert.ok(sailing());clock.run(8);assert.notDeepEqual(camera(w),paused,'Playing again leaves within a few frames');home();
+  // An arrow goes straight on to the next port, or back to the last, and stops there.
+  toPort();press('ArrowRight');assert.equal(sailing(),true,'Stepping on');clock.run(8);assert.notDeepEqual(camera(w),world);
+  let began=clock.now;until(3);assert.ok(clock.now-began<2000,'And it gets there');clock.settle();assert.equal(sailing(),false,'Then stops');home();
+  toPort();press('ArrowLeft');clock.settle();assert.equal(map.dataset.tripStep,'1');assert.equal(sailing(),false);home();
+  // Backspace, a click on another city and a drag all take over at once, and the wheel moves the camera now.
+  toPort();press('Backspace');assert.equal(sailing(),false,'The voyage is over');const far=camera(w).w;clock.frame();assert.ok(camera(w).w>far,'On the very next frame');clock.settle();home();
+  toPort();stop(0).dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));const leaving=camera(w);clock.frame();assert.notDeepEqual(camera(w),leaving,'A click flies at once');clock.settle();assert.equal(map.dataset.tripStep,'1');home();
+  toPort();const close=camera(w).w;wheel();clock.frame();clock.frame();assert.ok(camera(w).w<close,`The wheel answers at once, ${close} to ${camera(w).w}`);assert.ok(sailing(),'And the voyage carries on');
+  $('play').click();press('Home');clock.settle();
+});
+
+test('stepping with the arrows stays quick though the voyage is slower, and a second press still lands at once',async t=>{
+  const {w,$,press,clock,map,sailing,until}=await chart(t,[LONDON,PARIS,ROME,ATHENS]);
+  press('ArrowRight');assert.equal(map.dataset.tripStep,'1');clock.settle();
+  let began=clock.now;press('ArrowRight');until(2);const hop=clock.now-began;clock.settle();
+  assert.ok(hop<2100,`The first step, with its long zoom, takes ${hop}ms`);
+  began=clock.now;press('ArrowRight');until(3);const next=clock.now-began;clock.settle();
+  assert.ok(next>500&&next<1100,`A step from port to port takes ${next}ms`);assert.equal(sailing(),false,'And stops there');
+  press('ArrowRight');assert.ok(sailing());press('ArrowRight');assert.equal(sailing(),false,'The second press lands');assert.equal(map.dataset.tripStep,'4');
+  press('Home');clock.settle();assert.deepEqual(camera(w),{x:0,y:0,w:1440,h:720});
+});
 
 test('Escape acts on the innermost dialog: the photo first, then the album',async t=>{
   const {$,press,prints,tab}=await setup(t,{realMap:true});
@@ -2258,7 +2361,7 @@ test('removing a middle stop leaves two stops in one place: the trace neither di
   $('stop-list').children[1].querySelector('.remove-stop').click();clock.frame();
   const began=clock.now;let closest=1440;$('play').click();
   while($('map').dataset.tripStep!=='2'&&clock.now-began<20000){clock.frame();closest=Math.min(closest,camera(w).w);}
-  assert.ok(clock.now-began<1500,`The leg to nowhere took ${clock.now-began}ms`);
+  assert.ok(clock.now-began<3200,`The leg to nowhere took ${clock.now-began}ms`);
   assert.ok(1440/closest<14,`The camera came in only to frame the next leg (${1440/closest}×)`);
 });
 
@@ -2452,7 +2555,7 @@ test('names keep their places as a trace moves the camera, rather than flickerin
   assert.ok(frames>100,'It really sailed');assert.ok(again<=20,`${again} of ${shows.size} names came and went four times or more`);
 });
 
-test('the chart title is a piece of its own: it follows the trip, stays on the sheet and gives way to the route',async t=>{
+test('the chart title is a piece of its own: it follows the trip, stays on the sheet and moves off the route',async t=>{
   const piece=w=>w.RedlineApp.atlas.labels.find(label=>label.kind==='cartouche');
   const {w,$,press}=await setup(t,{realMap:true,route:[],seed:false}),clock=mapClock(w),atlas=w.RedlineApp.atlas;
   press('Escape');await tick();clock.frame();
@@ -2472,7 +2575,63 @@ test('the chart title is a piece of its own: it follows the trip, stays on the s
   const route=[[-128,-30],[-128,-70]].map(([longitude,latitude],i)=>({id:`cartouche-stop-${i}`,name:`Stop ${i}`,country:'Test',longitude,latitude}));
   const crossed=await setup(t,{realMap:true,route,seed:false}),other=mapClock(crossed.w);
   crossed.press('Escape');await tick();other.frame();
-  assert.equal(piece(crossed.w),undefined,'It gives way to the red line');assert.ok(lettered(crossed.w).includes('Europe'));
+  const moved=piece(crossed.w),{h}=crossed.w.RedlineApp.atlas.measure('cartouche',moved.text,moved.kicker);
+  assert.ok(moved.y+h/2<480*900/720,'It finds open water clear of the red line, rather than leaving the chart');assert.ok(lettered(crossed.w).includes('Europe'));
+});
+
+test('the chart title is on the chart in a window short enough for the dock to reach its usual place',async t=>{
+  const {w,press}=await setup(t,{realMap:true,route:[],seed:false}),clock=mapClock(w),atlas=w.RedlineApp.atlas,measure=atlas.measure;
+  atlas.measure=(kind,...rest)=>kind==='cartouche'?{w:346,h:76}:measure(kind,...rest);
+  // 1440 by 820, where the title's corner came within reach of the dock's top left and it silently gave way.
+  w.Element.prototype.getBoundingClientRect=function(){
+    const [left,top,width,height]=this.id==='route-dock'?[370,686,700,112]:this.matches('.zoom-controls')?[1380,650,36,136]:this.closest?.('#trip-panel')?[24,24,380,600]:[0,0,1440,820];
+    return {left,top,width,height,right:left+width,bottom:top+height};
+  };
+  for(const resized of w.testResizes)resized([]);press('Escape');await tick();clock.frame();
+  const label=atlas.labels.find(l=>l.kind==='cartouche');assert.ok(label,'It is there');
+  const size=atlas.measure('cartouche',label.text,label.kicker),box={x:label.x-size.w/2,y:label.y-size.h/2,w:size.w,h:size.h};
+  assert.ok(box.x>=4&&box.y>=4&&box.x+box.w<=1436&&box.y+box.h<=816,'Whole');
+  assert.equal(w.RedlineLabels.overlaps(box,{x:370,y:686,w:700,h:112}),false,'And clear of the dock');
+  assert.ok(Math.abs(label.y-574*820/720)<60,'Close to its usual place');
+});
+
+test('crossing a route does not make the names change with the ink: the whole route is kept clear from the start',async t=>{
+  // The second leg runs through Africa's name, and the first does not.
+  const route=[[-60,-60],[0,7.5],[40,7.5]].map(([longitude,latitude],i)=>({id:`ink-stop-${i}`,name:`Port ${i}`,country:'Test',longitude,latitude}));
+  const {w,$,press}=await setup(t,{realMap:true,route,seed:false}),clock=mapClock(w);
+  press('Escape');await tick();clock.frame();
+  const overview=lettered(w).filter(text=>text!=='The Known World').sort();
+  $('play').click();clock.frame();
+  assert.deepEqual(lettered(w).filter(text=>text!=='The Known World').sort(),overview,'Nothing moves in where the line is about to run');
+  for(const i of [1,2])assert.equal($('route-stops').children[i].style.opacity,'0','The ports ahead are unseen');
+});
+
+test('names keep their places through a zoom in and out: what leaves does not flicker back, and the route comes first',async t=>{
+  const route=[['Lisbon',-9.14,38.72],['Seville',-5.98,37.39],['Cadiz',-6.29,36.53],['Rome',12.5,41.9],['Athens',23.73,37.98],['Istanbul',28.98,41.01],['Cairo',31.25,30.06]].map(([name,longitude,latitude],i)=>({id:`sweep-stop-${i}`,name,country:'Test',longitude,latitude}));
+  const {w,$,press}=await setup(t,{realMap:true,route,seed:false}),clock=mapClock(w),map=$('map');w.matchMedia=()=>({matches:true});
+  press('Escape');await tick();clock.frame();
+  const seen=new Map();let frames=0,lost=0,returned=0;const away=new Map();
+  const look=()=>{
+    const now=new Set(lettered(w));
+    for(const [text,at] of away){if(now.has(text)){away.delete(text);if(frames-at<20)returned++;}}
+    for(const text of seen.keys())if(!now.has(text)&&seen.get(text)===frames-1){lost++;away.set(text,frames);}
+    for(const text of now)seen.set(text,frames);frames++;
+    // The port names, drawn first, are never covered.
+    for(const group of $('route-stops').children){
+      const text=group._label;if(text.classList.contains('label-hidden'))continue;
+      const {x,y,w:vw,h:vh}=camera(w),[px,py]=group._point,width=text._width,anchor=text.getAttribute('text-anchor'),left=(px-x)*1440/vw+Number(text.getAttribute('x'))-(anchor==='end'?width:anchor==='middle'?width/2:0),top=(py-y)*900/vh+Number(text.getAttribute('y'))-11;
+      for(const label of w.RedlineApp.atlas.labels){
+        if(label.kind==='cartouche')continue;
+        const print=w.RedlineApp.atlas.footprint(label.kind,label.text,label.angle,label.curve);
+        for(const b of print.boxes)assert.equal(w.RedlineLabels.overlaps({x:left,y:top,w:width,h:15},{x:label.x+b.x,y:label.y+b.y,w:b.w,h:b.h}),false,`${text.textContent} is clear of ${label.text}`);
+      }
+    }
+  };
+  const wheel=deltaY=>{map.dispatchEvent(new w.WheelEvent('wheel',{clientX:760,clientY:220,deltaY,bubbles:true,cancelable:true}));look();};
+  // Each way on its own: turning round brings back what just left, as it should.
+  for(let i=0;i<60;i++)wheel(-16);away.clear();for(let i=0;i<60;i++)wheel(16);
+  assert.ok(lost>20,'The sweep really took names away');
+  assert.ok(returned<=10,`${returned} of ${lost} names lost came back within a moment, against 63 before names rested`);
 });
 
 const pointerOn=(w,target,type,extra={})=>{const event=new w.Event(type,{bubbles:true,cancelable:true});Object.assign(event,{pointerType:'mouse',pointerId:1,clientX:0,clientY:0,...extra});target.dispatchEvent(event);};
@@ -2772,21 +2931,69 @@ test('tabs beyond the rail are cued by a quiet fade and reached by scrolling and
   list[1].focus();Object.defineProperties(list[2],{offsetTop:{configurable:true,value:100},offsetHeight:{configurable:true,value:90}});press('ArrowDown',list[1]);assert.equal(rail.scrollTop,72,'A key can reach any of them');
 });
 
-test('route maps draw from land that is never culled, in their own colours',async t=>{
+test('route maps lie on the baked sheet at once, with land that is never culled only if the picture fails',async t=>{
   const {w,$,press}=await setup(t,{realMap:true});
-  assert.equal($('album-pages').querySelector('.route-map-land').getAttribute('href'),'#land');
+  const map=$('album-pages').querySelector('.route-map'),images=[...map.querySelectorAll('image')];
+  assert.equal(images.length,1);assert.equal(images[0].getAttribute('href'),'atlas/sheet.webp');
+  assert.deepEqual(['x','y','width','height'].map(name=>images[0].getAttribute(name)),['0','0','1440','720'],'The whole sheet lies under the view box, which does the cropping');
+  assert.equal(map.querySelector('.route-map-land'),null,'Stroking the world under an opaque picture is only a cost');
+  images[0].dispatchEvent(new w.Event('error'));
+  assert.equal(map.querySelector('.route-map-land').getAttribute('href'),'#land');assert.equal(map.querySelector('image'),null);
+  assert.ok(map.children[1].classList.contains('route-map-land'),'It lies under the route');
   press('Escape');$('zoom-in').click();$('zoom-in').click();mapClock(w).settle();
   assert.ok([...$('land').children].every(path=>!path.hasAttribute('style')),'Zooming the map leaves the shared land alone');
   const styles=source('public/style.css');
-  assert.match(styles,/\.route-map-land \{[^}]*fill: var\(--land\);[^}]*fill-rule: evenodd;[^}]*stroke: var\(--coast\);/,'A selector cannot reach into a <use> copy, so it inherits these, and is not drawn black until the painting arrives');
+  assert.match(styles,/\.route-map-land \{[^}]*fill: var\(--land\);[^}]*fill-rule: evenodd;[^}]*stroke: var\(--coast\);/,'A selector cannot reach into a <use> copy, so it inherits these, and is not drawn black');
   assert.doesNotMatch(styles,/\.route-map-land path/);assert.match(styles,/#land path \{[^}]*vector-effect: non-scaling-stroke;/);
+});
+
+test('a route near the date line runs on into the world repeated',async t=>{
+  const {$,press}=await setup(t,{realMap:true,seed:false,route:[{id:'fiji-stop-a',name:'Suva',country:'Fiji',latitude:-18.1,longitude:178.4},{id:'fiji-stop-b',name:'Labasa',country:'Fiji',latitude:-16.4,longitude:179.4}]});
+  const images=[...$('album-pages').querySelectorAll('.route-map image')];
+  assert.deepEqual(images.map(image=>image.getAttribute('x')),['0','1440'],'The view box runs past the eastern edge');
+  assert.ok(images[1].classList.contains('route-map-under'));
+  press('Escape');
+});
+
+test('a sharper cut is painted only for a route zoomed past the sheet, and only once the album has settled and is idle',async t=>{
+  const painted=[],bitmap={width:720,height:360,close(){}},atlas={supported:true,ready:new Promise(()=>{}),paintRegion:(box,width,height)=>{painted.push([box,width,height]);return Promise.resolve(bitmap);}};
+  const {w,$,press}=await setup(t,{atlas});
+  // The small route shown wide: this page holds more device pixels than the sheet has there.
+  const route=$('album-pages').querySelector('.title-map .route-map');assert.ok(route);
+  assert.equal(painted.length,0,'Nothing is painted before it has settled and been idle');
+  const idle=[];w.requestIdleCallback=task=>{idle.push(task);return idle.length;};
+  const rect=w.Element.prototype.getBoundingClientRect;w.Element.prototype.getBoundingClientRect=function(){return this.classList?.contains('route-map')?{left:0,top:0,width:5000,height:2500,right:5000,bottom:2500}:rect.call(this);};
+  w.dispatchEvent(new w.Event('resize'));await wait(()=>idle.length>0);
+  assert.equal(painted.length,0,'Waiting for idle');
+  while(idle.length)idle.shift()({});
+  await wait(()=>painted.length===1);
+  await wait(()=>!!$('album-pages').querySelector('.title-map .route-map-sharp'));
+  const under=$('album-pages').querySelector('.title-map .route-map-under');assert.equal(under.nextElementSibling,$('album-pages').querySelector('.title-map .route-map-sharp'),'Under the route line, over the sheet');
+  // A wide route in a small picture never asks.
+  w.Element.prototype.getBoundingClientRect=function(){return this.classList?.contains('route-map')?{left:0,top:0,width:100,height:50,right:100,bottom:50}:rect.call(this);};
+  w.dispatchEvent(new w.Event('resize'));await wait(()=>idle.length>0);while(idle.length)idle.shift()({});await tick();
+  assert.equal(painted.length,1,'The cut is kept, and this one is not soft');
+  w.Element.prototype.getBoundingClientRect=rect;press('Escape');
+});
+
+test('after the map settles the album warms its fonts, sheet and first prints, in idle steps and never while it is open',async t=>{
+  let settle;const ready=new Promise(resolve=>{settle=resolve;}),loaded=[],decoded=[];
+  const atlas={supported:true,ready,paintRegion:()=>Promise.resolve(null)};
+  const {w,$,press}=await setup(t,{atlas,seedStops:[madrid,paris]});press('Escape');
+  w.document.fonts={load:font=>{loaded.push(font);return Promise.resolve([]);}};
+  w.HTMLImageElement.prototype.decode=async function(){decoded.push(this.src);};
+  assert.equal(loaded.length,0,'Nothing before the map has its first picture');
+  settle();await new Promise(resolve=>setTimeout(resolve,2600));
+  await wait(()=>loaded.length>=4,3000);
+  assert.ok(loaded.some(font=>font.includes('Redline Album Script')));assert.ok(loaded.some(font=>font.includes('IM Fell English')));
+  await wait(()=>decoded.some(url=>url.includes('atlas/sheet.webp')),3000);
 });
 
 test('the album rules only a browser can act on stay in place',()=>{
   const css=source('public/gallery.css'),rule=(selector,part)=>assert.ok(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')} \\{[^}]*${part.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}`).test(css),`${selector} needs ${part}`);
   rule('.closed-back .album-pages','pointer-events: none;');rule('.closed-back .album-pages > *','pointer-events: auto;');
   rule('.album-pages','touch-action: pan-y pinch-zoom;');
-  rule('.folio','color: var(--muted);');
+  rule('.folio','color: var(--album-quiet);');
   assert.match(css,/\.album\.expanded #photo-message\.error \{ position: absolute; bottom: 16px; z-index: 5; \}/,'An error keeps its own red toast and centring');
   rule(':is(#photo-ready-count, .album-copy-photo-ready-count)','flex: 1;');
   rule('.album-tab:focus-visible','z-index: 1001;');
@@ -3007,7 +3214,7 @@ test('the viewer and review rules only a browser can act on stay in place',()=>{
   assert.match(css,/@media \(max-width: 650px\) \{[^@]*\.gallery-actions \{ flex-wrap: wrap; row-gap: 4px; \}\s*\.toolbar-spacer \{ display: none; \}/);
   // Postcard fields do not make iOS zoom, its buttons take a fingertip, and this comes after the rule it overrides.
   const touch=css.indexOf('@media (hover: none), (any-pointer: coarse) {\n  #postcard-back textarea, #postcard-back input { font-size: 16px; }');
-  assert.ok(touch>css.indexOf('#postcard-back textarea, #postcard-back input { font-size: 12px; }'));assert.match(css.slice(touch),/\.postcard-actions button:not\(\.viewer-tool\) \{ min-width: 44px; min-height: 44px; \}/);
+  assert.ok(touch>css.indexOf('#postcard-back textarea, #postcard-back input { font-size: 15px; }'));assert.match(css.slice(touch),/\.postcard-actions button:not\(\.viewer-tool\) \{ min-width: 44px; min-height: 44px; \}/);
   // A panorama keeps height for its fields, and a narrow photo keeps a toolbar and buttons that fit, the save note giving way first.
   assert.match(css,/#postcard-back \{[^}]*padding: clamp\(10px, 4%, 24px\);/);
   assert.match(css,/#postcard-card \{[^}]*min-width: min\(240px, calc\(90vw - 40px\)\);/);assert.match(css,/#full-photo \{[^}]*margin-inline: auto;/);assert.match(css,/#postcard-saved \{ min-width: 0;[^}]*overflow: hidden;/);
@@ -3024,14 +3231,45 @@ const markup=()=>new JSDOM(source('map.html')).window.document;
 const blockOf=(css,opening)=>{const from=css.indexOf(opening);assert.ok(from>=0,opening);let depth=0;for(let i=css.indexOf('{',from);i<css.length;i++){if(css[i]==='{')depth++;else if(css[i]==='}'&&--depth===0)return css.slice(from,i+1);}};
 
 test('quiet text and glyphs stay readable on the darkest paper behind them',()=>{
-  const css=source('public/style.css')+source('public/gallery.css'),rule=selector=>css.match(new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')} \\{([^}]*)\\}`,'m'))?.[1],muted=css.match(/--muted: (#\w{6})/)[1];
+  const css=source('public/style.css')+source('public/gallery.css'),rule=selector=>css.match(new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')} \\{([^}]*)\\}`,'m'))?.[1],token=name=>css.match(new RegExp(`${name}: (#\\w{6})`))[1];
   const logbook='#f1e7d4',page='#efe5d2',strip='#e4d5b9',leather='#594b3a';
-  for(const [selector,ground,need] of [['.folio',page,4.5],['#postcard-back textarea::placeholder, #postcard-back input::placeholder',page,4.5],['.trip-state',logbook,4.5],['.trip-state.unsaved',logbook,4.5],[':is(#photo-ready-count, .album-copy-photo-ready-count)',strip,4.5],['.danger-button',strip,4.5],['.cover-meta',leather,4.5],['.back-mark',leather,4.5],['.remove-stop',logbook,3]]){
+  for(const [selector,ground,need] of [['.folio',page,4.5],['#postcard-back textarea::placeholder, #postcard-back input::placeholder',page,4.5],['.trip-state',logbook,4.5],['.trip-state.unsaved',logbook,4.5],[':is(#photo-ready-count, .album-copy-photo-ready-count)',strip,4.5],['.danger-button',strip,4.5],['.cover-kicker',leather,4.5],['.cover-title',leather,4.5],['.cover-meta',leather,4.5],['.back-mark',leather,4.5],['.page-stop',page,4.5],['.contents-no',page,4.5],['.album .eyebrow',page,4.5],['.title-meta',page,4.5],['.page-country',page,4.5],['.gallery-city-count',page,4.5],['.photo-empty-hint',page,4.5],['.sheet-label',page,4.5],[':where(.album) .text-button',strip,4.5],['.remove-stop',logbook,3]]){
     const body=rule(selector);assert.ok(body,`${selector} is still styled`);
-    const colour=body.match(/(?:^|;)\s*color: ([^;]+);/)[1].replace('var(--muted)',muted);
+    const colour=body.match(/(?:^|;)\s*color: ([^;]+);/)[1].replace(/var\((--[\w-]+)\)/,(_,name)=>token(name));
     assert.ok(contrast(colour,ground)>=need,`${selector} is ${contrast(colour,ground).toFixed(2)}:1, and needs ${need}:1`);
     assert.doesNotMatch(body,/opacity: (?!1;)/,`${selector} would fade below that`);
   }
+});
+
+test('the album keeps to its type system: a book face, nothing under 13px, no wide tracking on small type, lining figures, and tabs left alone',()=>{
+  const css=source('public/gallery.css').replace(/\/\*[\s\S]*?\*\//g,''),tabs=/\.album-tab/;
+  assert.match(css,/--album-text: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;/);
+  assert.doesNotMatch(css,/Arial|Helvetica|sans-serif/,'No interface sans inside the book');
+  const rules=[...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([,selector,body])=>({selector:selector.trim(),body}));
+  const sizeOf=body=>{const px=[...body.matchAll(/font(?:-size)?:[^;]*?(?:clamp\()?(\d+(?:\.\d+)?)px/g)].map(match=>Number(match[1]));return px.length?Math.min(...px):null;};
+  for(const {selector,body} of rules){
+    if(tabs.test(selector))continue;
+    const size=sizeOf(body);
+    if(size!==null)assert.ok(size>=13,`${selector} sets ${size}px`);
+    const tracking=body.match(/letter-spacing: ([\d.]+)(em|px)/);
+    if(tracking&&size!==null&&size<14){const em=tracking[2]==='em'?Number(tracking[1]):Number(tracking[1])/size;assert.ok(em<=.08,`${selector} tracks ${em.toFixed(2)}em at ${size}px`);}
+  }
+  // Rough outlines and a script only where they are large enough to read.
+  for(const {selector,body} of rules){
+    if(tabs.test(selector))continue;
+    const size=sizeOf(body);
+    if(/var\(--serif\)/.test(body))assert.ok(size>=22,`${selector} letters IM Fell at ${size}px`);
+    if(/var\(--hand\)/.test(body))assert.ok(size>=21,`${selector} writes script at ${size}px`);
+    if(/var\(--lettering\)/.test(body))assert.ok(size>=20,`${selector} letters Redline Hand at ${size}px`);
+  }
+  assert.match(css,/#postcard-back #postcard-message \{[^}]*var\(--hand\)/,'The postcard message is the one long piece of handwriting');
+  assert.match(css,/@container \(max-width: 300px\) \{\s*\.print figcaption \{[^}]*-webkit-line-clamp: 2;[^}]*white-space: normal;/,'A caption this large cannot be cut short on a narrow print');
+  assert.match(css,/#photo-panel :not\(\.album-tab, \.album-tab \*\) \{ font-variant-numeric: lining-nums; \}/);
+  assert.ok(css.lastIndexOf('font-variant-numeric')>css.lastIndexOf('font: '),'The font shorthand resets it, so it comes after them all');
+  // The user's tabs: their lettering, size and placement.
+  assert.match(css,/\.album-tab \.tab-name \{[^}]*font: 14px\/var\(--tab-strip, 27px\) var\(--lettering\); letter-spacing: \.05em;/);
+  assert.match(css,/\.album-tab \.chip-stop \{ bottom: 5px; color: #f6e8c4; font: 10px\/1\.2 var\(--serif\); \}/);
+  const style=source('public/style.css');assert.match(style,/--serif: "IM Fell English", Georgia, serif;/,'The map chrome and tabs keep it');
 });
 
 test('keyboard focus stands out on the album\'s dark chrome, in the trip menu and in search results',()=>{
