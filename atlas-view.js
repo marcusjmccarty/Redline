@@ -107,7 +107,10 @@
       return true;
     }
     // Its pixels are device pixels too, so a small window still zooms into all of them.
-    function fitSheet(){if(sheet.el){sheet.el.style.width=`${sheet.el.width/dpr}px`;sheet.el.style.height=`${sheet.el.height/dpr}px`;}}
+    // Image width/height report CSS pixels once styled; canvas width/height
+    // report backing pixels. Always transform from the source pixel dimensions.
+    const sheetWidth=()=>sheet.el.naturalWidth||sheet.el.width,sheetHeight=()=>sheet.el.naturalHeight||sheet.el.height;
+    function fitSheet(){if(sheet.el){sheet.el.style.width=`${sheetWidth()/dpr}px`;sheet.el.style.height=`${sheetHeight()/dpr}px`;}}
     function showSheet(bitmap){sheet.el?.remove();sheet.el=picture(bitmap,'atlas-sheet');sheet.transform='';sheet.shown=true;fitSheet();stack.append(sheet.el);resize();}
     // Only if the baked sheet could not be had: this is the slowest thing the painter does.
     function paintOverview(){
@@ -160,14 +163,14 @@
       stamp++;
       if(target===0&&sheet.el){
         for(const layer of levels.values()){for(const tile of layer.tiles)tile.el.remove();layer.tiles.clear();}
-        sheet.shown=true;sheet.el.style.opacity=1;aim(sheet,sheet.el.width,sheet.el.height);return false;
+        sheet.shown=true;sheet.el.style.opacity=1;aim(sheet,sheetWidth(),sheetHeight());return false;
       }
       let lvl=target,{covered,fading}=showLevel(lvl,now),whole=covered&&!fading;
       while(!whole&&lvl>Math.max(0,target-3)){const under=showLevel(--lvl,now);whole=under.covered&&!under.fading;fading||=under.fading;}
       for(const [other,layer] of levels)if(other>target||other<lvl){for(const tile of layer.tiles)tile.el.remove();layer.tiles.clear();}
       if(sheet.el){
         if(sheet.shown===whole){sheet.shown=!whole;sheet.el.style.opacity=whole?0:1;}
-        if(!whole)aim(sheet,sheet.el.width,sheet.el.height);
+        if(!whole)aim(sheet,sheetWidth(),sheetHeight());
       }
       return fading;
     }
@@ -359,7 +362,7 @@
     // Keep it as an image layer: no worker startup or full-size canvas upload is needed.
     function adoptImage(img){
       img.width=img.naturalWidth;img.height=img.naturalHeight;img.className='atlas-sheet';
-      sheet.el?.remove();sheet.el=img;sheet.transform='';sheet.shown=true;fitSheet();resize();aim(sheet,img.width,img.height);stack.prepend(img);pictured(true);
+      sheet.el?.remove();sheet.el=img;sheet.transform='';sheet.shown=true;fitSheet();resize();aim(sheet,sheetWidth(),sheetHeight());stack.prepend(img);pictured(true);
     }
     function firstPicture(){
       if(!preview?.naturalWidth){needsPainting=true;ensurePainters();return;}
