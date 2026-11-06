@@ -18,7 +18,6 @@
 html, body { margin: 0; min-height: 100%; width: 100%; }
 body { height: 100svh; overflow: hidden; background: var(--paper); color: var(--ink); font-family: Arial, Helvetica, sans-serif; }
 body::before { content: ""; position: fixed; inset: 0; z-index: 5; pointer-events: none; opacity: .14; background-image: var(--paper-grain); background-size: 64px 64px; }
-body::after { content: ""; position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 150px #5d503d29; }
 button, input { font: inherit; }
 button { cursor: pointer; }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
@@ -44,8 +43,8 @@ main { position: relative; width: 100%; height: 100%; }
 .map-shell { position: absolute; inset: 0; overflow: hidden; background: var(--ocean); }
 /* A temporary four-panel sheet shows the live painted map, then leaves no layers behind. */
 .map-arriving .map-shell { background: transparent; }
-.map-arriving :is(#map, #place-labels, .route-dock, .zoom-controls) { opacity: 0; }
-.map-arriving.map-revealing :is(#map, #place-labels) { opacity: 1; }
+.map-arriving :is(.atlas-layers, #map, #place-labels, .route-dock, .zoom-controls) { opacity: 0; }
+.map-arriving.map-revealing :is(.atlas-layers, #map, #place-labels) { opacity: 1; }
 .map-arriving.map-revealing .map-shell { background: var(--ocean); }
 .map-unfold { position: absolute; z-index: 4; inset: 0; perspective: max(4800px, 600vh); perspective-origin: 50% 45%; pointer-events: none; }
 .unfold-paper { position: absolute; inset: 0; transform-origin: 0 0; transform-style: preserve-3d; will-change: transform; }
@@ -60,11 +59,15 @@ main { position: relative; width: 100%; height: 100%; }
 .unfold-shade { position: absolute; inset: 0; background: linear-gradient(90deg, #53432e26, #53432e00 55%); pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   .map-arriving .map-shell { background: var(--ocean); }
-  .map-arriving :is(#map, #place-labels, .route-dock, .zoom-controls) { opacity: 1; }
+  .map-arriving :is(.atlas-layers, #map, #place-labels, .route-dock, .zoom-controls) { opacity: 1; }
   .map-unfold { display: none; }
 }
 
-#map { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+/* The art: one layer the compositor moves per level, and one per tile inside it, because WebKit would otherwise paint them all into their parent. */
+.atlas-layers { position: absolute; inset: 0; z-index: 0; overflow: hidden; contain: strict; pointer-events: none; }
+.atlas-sheet, .atlas-level { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+.atlas-tile { position: absolute; display: block; will-change: transform; }
+#map { position: relative; display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 #map.dragging { cursor: grabbing; }
 #map.zoomed-out, #map.zoomed-out.dragging { cursor: default; }
 #map:focus { outline: none; }
@@ -306,9 +309,9 @@ form[aria-busy=true] .add-button { opacity: .45; }
 .print-front { display: grid; place-items: center; background: white; }
 .print-front img { width: 100%; height: 100%; object-fit: contain; }
 .print-back { display: flex; flex-direction: column; padding: .25in; background: #faf5e9; }
-.print-back .postcard-heading { min-height: .65in; font-size: 11pt; }
+.print-back .postcard-heading { min-height: .65in; font-size: 16pt; }
 .print-back .postcard-stamp { width: .45in; height: .52in; }
-.print-back .postcard-columns { min-height: 0; grid-template-columns: 1.1fr 1fr; gap: .25in; font: 10pt/1.45 var(--serif); }
+.print-back .postcard-columns { min-height: 0; grid-template-columns: 1.1fr 1fr; gap: .25in; font: 10pt/1.45 var(--album-text); }
 .print-back .postcard-address { padding-left: .25in; gap: .12in; }
 .print-message, .print-recipient, .print-address, .print-sender { white-space: pre-wrap; overflow-wrap: anywhere; }
 .print-address { flex: 1; }

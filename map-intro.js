@@ -32,7 +32,8 @@
   function quarter(parent,x,y,bottom,bounds,sheet){
     const panel=element(`unfold-quarter${bottom?' unfold-bottom':''}`,parent),face=element('unfold-face',panel);
     // Each panel shows its quarter of the live painted sheet, so nothing changes when the panels leave.
-    const canvas=document.createElement('canvas');canvas.width=Math.ceil(sheet.width/2);canvas.height=Math.ceil(sheet.height/2);
+    // No sharper than the panel can show: the baked sheet is large, and these four are layers the compositor must hold while they turn.
+    const fit=Math.min(1,bounds.width*Math.min(2,window.devicePixelRatio||1)/sheet.width),canvas=document.createElement('canvas');canvas.width=Math.ceil(sheet.width/2*fit);canvas.height=Math.ceil(sheet.height/2*fit);
     canvas.getContext('2d')?.drawImage(sheet,x/1440*sheet.width,y/720*sheet.height,sheet.width/2,sheet.height/2,0,0,canvas.width,canvas.height);
     face.append(canvas);
     const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');

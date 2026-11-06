@@ -6,7 +6,7 @@
   const reviewPageSize=70;
   let reviewPage=0,reviewTurn=null;
   let warmOriginals=new Set(),sheetKey='',tabsKey='',sheetWarmTimer=0,tabColumns=1,sheetFollow=0,tabJump=false,sheetHeld=null;
-  let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0,anchor=null,drawn=null,reopen=null,albumMotion=null,viewMotion=null;
+  let view='album',albumPage=0,pages=[],turning=null,tripCache=[],resizeFrame=0,anchor=null,drawn=null,reopen=null,albumMotion=null,viewMotion=null,listedTrip=null,heldSheet=null;
   const chosen=new Set(),thumbJobs=new Set(),lastPages=new Map(),lastScrolls=new Map();
   const photoLabel=count=>`${count} photo${count===1?'':'s'}`;
   const plural=(count,word)=>`${count} ${word}${count===1?'':'s'}`;
@@ -61,10 +61,13 @@
   function showError(id,error){message(id,error.message||'Please try again.',true);}
   const api=(path,options={})=>window.RedlineStorage.api(path,options);
 
-  // Route maps show the same painted sheet as the main map, cut to the route. Paintings are kept for reuse.
-  const sheetCuts=new Map();
+  // Route maps lie on the baked sheet, the map's own first picture, which needs no painting and so never waits. A route zoomed in past what it holds gets a sharper cut, once the album has settled and is idle. Paintings are kept for reuse.
+  const sheetAssets=(()=>{try{return JSON.parse($('atlas-assets').textContent);}catch{return {};}})();
+  const smallSheet=innerWidth<900&&!!sheetAssets.sheetSmall,sheetUrl=smallSheet?sheetAssets.sheetSmall:sheetAssets.sheet,sheetPixels=smallSheet?1:2;
+  const whenIdle=(task,wait=1500)=>{if(window.requestIdleCallback)requestIdleCallback(task,{timeout:wait});else setTimeout(task,200);};
+  const sheetCuts=new Map(),cutKey=box=>[box.x,box.y,box.w,box.h].map(n=>n.toFixed(1)).join();
   function paintedSheet(box){
-    const atlas=app.atlas,key=[box.x,box.y,box.w,box.h].map(n=>n.toFixed(1)).join();
+    const atlas=app.atlas,key=cutKey(box);
     if(!atlas?.supported)return Promise.resolve(null);
     if(sheetCuts.has(key))return sheetCuts.get(key);
     const job=(async()=>{
@@ -76,9 +79,19 @@
     if(sheetCuts.size>32){const [oldest,value]=sheetCuts.entries().next().value;sheetCuts.delete(oldest);value.then(url=>{if(url)URL.revokeObjectURL(url);});}
     return job;
   }
-  // A small parchment map of a route, drawn from the map's own land shapes.
+  const svgNode=(tag,attrs)=>{const el=document.createElementNS(SVG,tag);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);return el;};
+  function addSharpCut(svg,job){
+    job.then(url=>{const under=svg.querySelector('.route-map-under');if(!url||!under||svg.querySelector('.route-map-sharp'))return;const {x,y,w,h}=svg.routeBox;under.after(svgNode('image',{x,y,width:w,height:h,preserveAspectRatio:'none',href:url,class:'route-map-sharp'}));});
+  }
+  function sharpenRouteMap(){
+    if(!$('photo-panel').open||albumMotion||viewMotion||turning||busy||mode()!=='album')return;
+    const svg=$('album-pages').querySelector('.title-map .route-map'),box=svg?.routeBox;
+    // A cut can only show the sheet itself, so a route running off its edge keeps the repeated world beneath.
+    if(box&&box.x>=0&&box.y>=0&&box.x+box.w<=1440&&box.y+box.h<=720&&svg.getBoundingClientRect().width*(window.devicePixelRatio||1)>box.w*sheetPixels*1.25)addSharpCut(svg,paintedSheet(box));
+  }
+  // A small parchment map of a route, on the baked sheet. The land's simple shapes stand in only if the picture cannot be had.
   function routeMap(points,{pad=46,aspect=2}={}){
-    const svg=document.createElementNS(SVG,'svg'),node=(tag,attrs)=>{const el=document.createElementNS(SVG,tag);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);return el;};
+    const svg=document.createElementNS(SVG,'svg'),node=svgNode,land=()=>node('use',{href:'#land',class:'route-map-land'});
     svg.setAttribute('class','route-map');svg.setAttribute('aria-hidden','true');svg.setAttribute('preserveAspectRatio','xMidYMid slice');
     const L=window.RedlineLayout,G=window.RedlineGeo;
     let box={x:0,y:0,w:1440,h:720},d='';
@@ -89,9 +102,17 @@
       if(w/h<aspect)w=h*aspect;else h=w/aspect;
       if(w<1440)box={x:(Math.max(...xs)+Math.min(...xs))/2-w/2,y:(Math.max(...ys)+Math.min(...ys))/2-h/2,w,h};
     }
+    svg.routeBox=box;
     svg.setAttribute('viewBox',`${box.x.toFixed(1)} ${box.y.toFixed(1)} ${box.w.toFixed(1)} ${box.h.toFixed(1)}`);
-    svg.append(node('rect',{x:-1440,y:-720,width:4320,height:2160,class:'route-map-sea'}),node('use',{href:'#land',class:'route-map-land'}));
-    paintedSheet(box).then(url=>{if(!url)return;const image=node('image',{x:box.x,y:box.y,width:box.w,height:box.h,preserveAspectRatio:'none',href:url});svg.children[1]?.after(image);});
+    svg.append(node('rect',{x:-1440,y:-720,width:4320,height:2160,class:'route-map-sea'}));
+    // A route near the date line runs off the sheet's edge, so the world repeats there.
+    const under=sheetUrl?[-1440,0,1440].filter(shift=>box.x<shift+1440&&box.x+box.w>shift).map(shift=>{
+      const image=node('image',{x:shift,y:0,width:1440,height:720,preserveAspectRatio:'none',href:sheetUrl});
+      image.addEventListener('error',()=>{if(!svg.querySelector('.route-map-land'))image.before(land());image.remove();},{once:true});
+      return image;
+    }):[land()];
+    under.at(-1).classList.add('route-map-under');svg.append(...under);
+    if(sheetCuts.has(cutKey(box)))addSharpCut(svg,sheetCuts.get(cutKey(box)));
     if(d)svg.append(node('path',{d,class:'route-map-line'}));
     const r=Math.max(2.2,box.w/150);
     if(L)points.forEach(point=>{const [x,y]=L.project(point);svg.append(node('circle',{cx:x,cy:y,r,class:'route-map-stop'}));});
@@ -311,7 +332,7 @@
   function canSwitch(){return !(dirty||pending.length)||confirm('Discard unsaved changes and switch trips?');}
   // A trip deleted elsewhere leaves nothing to save over. Its route and any pending photos stay here, ready to save as a new trip.
   const missingTrip='This trip is no longer in this browser. Name it to save the route again, or import a backup.';
-  function detachMissingTrip(){photoPanelRequest++;photos.forEach(p=>window.RedlinePostcards.forget(p.id));photos=[];current=null;activeCity='';stale=false;dirty=app.getStops().length>0;remember();renderGallery();$('trip-name').value='';update();}
+  function detachMissingTrip(){photoPanelRequest++;photos.forEach(p=>window.RedlinePostcards.forget(p.id));photos=[];listedTrip=null;current=null;activeCity='';stale=false;dirty=app.getStops().length>0;remember();renderGallery();$('trip-name').value='';update();}
   // Refusals about the open trip: a newer save elsewhere means its row must reload it, and a missing trip detaches.
   function tripTrouble(error){
     if(!current)return error;
@@ -433,7 +454,7 @@
   async function loadTrip(id,{keyboard=true}={}){
     if(busy||!canSwitch())return;
     busy=true;update();let loaded=false;
-    try{const data=await api(`/trips/${id}`);photoPanelRequest++;discardPending();activeCity='';setSelecting(false);suppress=true;app.setStops(data.trip.stops);suppress=false;current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};stale=false;photos=data.photos;dirty=false;reopen=lastPages.get(id)||null;albumPage=reopen?.index??0;remember();renderGallery();closePanel('trip-panel');message('trip-message','');loaded=true;}
+    try{const data=await api(`/trips/${id}`);photoPanelRequest++;discardPending();activeCity='';setSelecting(false);suppress=true;app.setStops(data.trip.stops);suppress=false;current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};stale=false;photos=data.photos;listedTrip=id;dirty=false;reopen=lastPages.get(id)||null;albumPage=reopen?.index??0;remember();renderGallery();closePanel('trip-panel');message('trip-message','');loaded=true;}
     catch(error){showError('trip-message',error);}
     // Focus leaves the folded logbook for its tab (enabled again once busy clears), or for the map after a click.
     finally{suppress=false;busy=false;update();const active=document.activeElement;if(loaded&&(!active||active===document.body||$('trip-panel').contains(active)))$(keyboard?'trips-button':'map').focus({preventScroll:true});}
@@ -485,7 +506,7 @@
     }
     catch(error){showError('trip-message',error);}finally{busy=false;update();if(album)showPhotos();}
   });
-  $('new-trip').addEventListener('click',()=>{if(!canSwitch())return;discardPending();setSelecting(false);current=null;stale=false;photos=[];activeCity='';albumPage=0;suppress=true;app.setStops([]);suppress=false;dirty=false;remember();update();renderGallery();closePanel('trip-panel');$('destination').focus();});
+  $('new-trip').addEventListener('click',()=>{if(!canSwitch())return;discardPending();setSelecting(false);current=null;stale=false;photos=[];listedTrip=null;activeCity='';albumPage=0;suppress=true;app.setStops([]);suppress=false;dirty=false;remember();update();renderGallery();closePanel('trip-panel');$('destination').focus();});
   document.querySelectorAll('[data-close]').forEach(button=>button.addEventListener('click',event=>closePanel(button.dataset.close,{focus:event.detail?'map':true})));
   document.addEventListener('pointerdown',event=>{if(!event.target.closest?.('.trip-menu,.trip-more'))closeTripMenus();},true);
   window.addEventListener('resize',()=>{stopWindowMotion();if(!$('photo-panel').open||resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;finishReviewTurn();if(albumMotion){albumMotion.refresh=true;return;}settleView();const had=$('album-pages').contains(document.activeElement)||!!turning?.had;renderGallery();if(view==='album')keepAlbumFocus(had);if(mode()==='sheet')keepSheetPlace(sheetHeld);});});
@@ -496,9 +517,13 @@
   function coverScene(opening){
     const book=$('album-book'),displayMode=mode(),source=displayMode==='album'?$('album-pages'):$('album-sheet');
     const closed=book.dataset.preparing&&!opening?'front':displayMode==='album'?(book.classList.contains('closed-front')?'front':book.classList.contains('closed-back')?'back':''):'';
-    const scene=window.RedlineAlbumMotion.create({book,source,cover:pageElement({type:'cover'},0,'right'),two:twoPage(),closed,opening:opening||!!book.dataset.preparing});
+    const scene=window.RedlineAlbumMotion.create({book,source,cover:pageElement({type:'cover'},0,'right'),two:twoPage(),closed,opening:opening||!!book.dataset.preparing,late:opening});
     return scene;
   }
+  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  // The frame holding the first motion has gone out. A hidden page has no frames to wait for.
+  const nextPaint=()=>new Promise(resolve=>{const timer=setTimeout(resolve,120);requestAnimationFrame(()=>setTimeout(()=>{clearTimeout(timer);resolve();}));});
+  // Nothing moves before the cover. It needs only the book's size and tabs, which come from the list read at startup or last shown, or failing that from the route, and the fresh read corrects them behind the shut cover. Motion is the compositor's once started, so pages, copies and decoding all happen while it rises.
   async function showPhotos(){
     // An import keeps running with the album shut, and reopening shows its review. A running save does not: this would replace the photos it is adding to.
     if(busy&&!importing||albumMotion?.phase==='closing')return;
@@ -509,30 +534,52 @@
       if(!requireTrip()||version!==photoPanelRequest)return;
       const tripId=current.id,place=lastPages.get(tripId)||{type:'title',index:step()};
       const token={phase:'opening',place,displayMode:pending.length||importing?'review':view};albumMotion=token;
+      const gone=()=>version!==photoPanelRequest||current?.id!==tripId||albumMotion!==token;
       // Nothing is drawn until the photos arrive, so pressing A builds one spread once.
       reopen=null;albumPage=0;drawn=null;openPanel('photo-panel');renderPhotoMode();message('photo-message','');
       // The dialog focused a control that has just gone inert, which would drop keyboard and screen-reader users out of the album.
       if(!$('photo-panel').contains(document.activeElement)||$('album-modes').contains(document.activeElement))$('photo-panel').focus({preventScroll:true});
-      const animated=canAnimate($('album-pages')),book=$('album-book');
-      if(animated)book.dataset.preparing='true';
-      const data=await api(`/trips/${tripId}`);
-      if(version!==photoPanelRequest||current?.id!==tripId||albumMotion!==token)return;
-      photos=data.photos;pages=albumPages();
-      albumPage=clampPage(pageAt(place));token.place=placeAt(albumPage,twoPage());
-      token.displayMode=pending.length||importing?'review':view;
-      renderGallery();renderReview();update();
-      if(view==='sheet')$('photo-scroll').scrollTop=lastScrolls.get(tripId)||0;
+      const animated=canAnimate($('album-pages')),book=$('album-book'),fresh=api(`/trips/${tripId}`);
+      const findPlace=()=>{pages=albumPages();albumPage=clampPage(pageAt(place));token.place=placeAt(albumPage,twoPage());};
+      const draw=data=>{
+        photos=data.photos;listedTrip=tripId;token.listed=true;findPlace();
+        token.displayMode=pending.length||importing?'review':view;
+        token.filling=true;renderGallery();renderReview();update();token.filling=false;
+        const meta=book.querySelector('.album-cover-front .cover-meta');if(meta)meta.textContent=coverMeta();
+        if(view==='sheet')$('photo-scroll').scrollTop=lastScrolls.get(tripId)||0;
+        return token.displayMode==='album'?$('album-pages'):$('album-sheet');
+      };
       if(animated){
-        // Decode just this spread while the book is still out of sight.
-        const source=token.displayMode==='album'?$('album-pages'):$('album-sheet'),rect=source.getBoundingClientRect();
-        const images=[...source.querySelectorAll('img')].filter(img=>{const r=img.getBoundingClientRect();return !rect.height||r.bottom>=rect.top&&r.top<=rect.bottom;});
-        await window.RedlineAlbumMotion.prepareImages(images,{reveal:()=>albumMotion===token});
-        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-        if(version!==photoPanelRequest||albumMotion!==token)return;
+        book.dataset.preparing='true';
+        let list=listedTrip===tripId?photos:null;
+        if(!list){
+          // A bookmark may be a shut book, which only the list can tell. Otherwise this is a moment for the read, and the cover goes on without it.
+          let arrived=null;fresh.then(data=>{arrived=data.photos;},()=>{});
+          await (place.type==='title'?Promise.race([fresh,pause(48)]):fresh);
+          if(gone())return;
+          list=arrived;
+        }
+        token.listed=!!list;
+        if(list){photos=list;listedTrip=tripId;}
+        findPlace();stateClasses(albumPage);
+        if(list){const groups=photoGroups();if(activeCity&&!groups.some(group=>group.id===activeCity))activeCity='';renderTabs(groups);}
+        renderPhotoMode();
+        if(!list)routeTabs();
         token.scene=coverScene(true);
-        await token.scene.open();
-        if(version!==photoPanelRequest||albumMotion!==token||token.phase!=='opening')return;
+        const opened=token.scene.open(),[data]=await Promise.all([fresh,nextPaint()]);
+        if(gone())return;
+        token.scene.fill(()=>draw(data));
+        // The live prints decode behind the copies, so the hand-off does not flash. Copies fade in as their own bitmaps arrive.
+        const source=mode()==='album'?$('album-pages'):$('album-sheet'),rect=source.getBoundingClientRect();
+        const images=[...source.querySelectorAll('img')].filter(img=>{const r=img.getBoundingClientRect();return !rect.height||r.bottom>=rect.top&&r.top<=rect.bottom;});
+        const prepared=window.RedlineAlbumMotion.prepareImages(images,{reveal:()=>albumMotion===token});
+        await opened;await prepared;
+        if(gone()||token.phase!=='opening')return;
         token.scene.dispose();
+      }else{
+        const data=await fresh;
+        if(gone())return;
+        draw(data);
       }
       albumMotion=null;renderPhotoMode();warmSheet();
       if(token.refresh){renderReview();renderGallery();}
@@ -540,6 +587,22 @@
     }catch(error){if(version===photoPanelRequest){const queued=albumMotion?.queued;albumMotion?.scene?.dispose();delete $('album-book').dataset.preparing;albumMotion=null;openPanel('photo-panel');renderGallery();showError('photo-message',error);if(queued)importPhotos(queued);}}
     finally{if(version===photoPanelRequest)photosRequested=false;}
   }
+  // Once the map has its first picture and has been quiet a while: the fonts, the sheet under route maps, and the prints first in line, a small step at a time and only when nothing else wants the page. restore() has read the photo list by then.
+  async function warmAlbum(){
+    const shown=()=>$('photo-panel').open||albumMotion,step=()=>new Promise(resolve=>whenIdle(resolve));
+    await step();
+    await Promise.allSettled(['28px "Redline Hand"','26px "IM Fell English"','italic 26px "IM Fell English"','21px "Redline Album Script"'].map(font=>document.fonts?.load?.(font)));
+    const ruler=document.createElement('canvas').getContext?.('2d');if(ruler?.measureText){ruler.font=`15px ${getComputedStyle(document.documentElement).getPropertyValue('--album-text')}`;ruler.measureText('Stop 05');}
+    await step();
+    if(shown()||!sheetUrl)return;
+    heldSheet=new Image();heldSheet.decoding='async';heldSheet.src=sheetUrl;await heldSheet.decode().catch(()=>{});
+    if(listedTrip!==current?.id)return;
+    for(const url of photoGroups().slice(0,2).flatMap(group=>group.items.slice(0,4)).map(photo=>photo.thumbUrl).filter(Boolean)){
+      await step();if(shown())return;
+      await window.RedlineAlbumMotion.preload([url]);
+    }
+  }
+  if(app.atlas)Promise.resolve(app.atlas.ready).then(()=>setTimeout(()=>warmAlbum().catch(()=>{}),2500));
   $('photos-button').addEventListener('click',event=>{if(photosRequested||$('photo-panel').open){closePanel('photo-panel');return;}clickOpened=event.detail>0;showPhotos();clickOpened=false;});
   document.addEventListener('keydown',async event=>{
     const viewer=$('photo-viewer').open,info=$('info-dialog').open;
@@ -773,7 +836,7 @@
     sheetWarmTimer=setTimeout(()=>{
       if(!$('photo-panel').open||$('photo-viewer').open||mode()!=='album'||albumMotion||viewMotion||turning||busy)return;
       if(!reading())renderSheet(photoGroups());
-      warmPages();
+      warmPages();whenIdle(sharpenRouteMap);
     },160);
   }
   function applyView(next){
@@ -832,7 +895,7 @@
     const button=document.createElement('button');button.type='button';button.className='remove-photo';button.innerHTML='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg>';button.title=label;button.setAttribute('aria-label',label);button.disabled=busy;button.addEventListener('click',remove);return button;
   }
   function renderReview(incremental=false){
-    if(albumMotion?.scene){albumMotion.refresh=true;return;}
+    if(albumMotion?.scene&&!albumMotion.filling){albumMotion.refresh=true;return;}
     const container=$('photo-review'),fragment=document.createDocumentFragment(),stops=app.getStops();
     // Save reads every page, so a stop removed from the route must release its photos on unseen pages too.
     if(!incremental){const ids=new Set(stops.map(stop=>stop.id));for(const entry of pending)if(entry.selected&&entry.selected!=='match'&&!ids.has(entry.selected))entry.selected='';}
@@ -840,7 +903,7 @@
     reviewPage=Math.min(reviewPage,lastPage);
     const start=reviewPage*reviewPageSize,end=Math.min(start+reviewPageSize,pending.length);
     const citySelect=document.createElement('select');
-    if(!incremental||pending.length-1<end)cityOptions(citySelect,'Choose city…');
+    if(!incremental||pending.length-1<end)cityOptions(citySelect,'City…');
     // While decoding, append just the new visible print. Bulk controls refresh once at the end.
     for(let index=incremental?Math.max(start,pending.length-1):start;index<end;index++){
       const entry=pending[index];
@@ -976,9 +1039,9 @@
     if(tile&&hasPostcard(photo)!==!!badge){if(badge)badge.remove();else tile.append(postcardBadge());}
   });
   function viewerActions(){return {remove:photo=>deletePhotos([photo.id],{ask:false})};}
-  function photoGroups(){
+  function photoGroups(list=photos){
     const groups=new Map(),stops=app.getStops(),order=new Map(stops.map((stop,index)=>[stop.id,index]));
-    for(const photo of photos){const key=photo.stopId||'unplaced';if(!groups.has(key))groups.set(key,{id:key,name:photo.city?.name||'Other photos',country:photo.city?.country||'',stop:order.get(key),items:[]});groups.get(key).items.push(photo);}
+    for(const photo of list){const key=photo.stopId||'unplaced';if(!groups.has(key))groups.set(key,{id:key,name:photo.city?.name||'Other photos',country:photo.city?.country||'',stop:order.get(key),items:[]});groups.get(key).items.push(photo);}
     return [...groups.values()].sort((a,b)=>(a.stop??Infinity)-(b.stop??Infinity)||a.name.localeCompare(b.name));
   }
   function openPhoto(photo,group,origin){window.RedlinePostcards.open(photo,api,group.items,viewerActions(),origin);}
@@ -988,7 +1051,7 @@
     show.addEventListener('click',()=>{afterAlbumClose=()=>app.focusStop?.(group.id);closePanel('photo-panel',{focus:'map'});});return show;
   }
   function renderGallery(){
-    if(albumMotion?.scene){albumMotion.refresh=true;return;}
+    if(albumMotion?.scene&&!albumMotion.filling){albumMotion.refresh=true;return;}
     if(viewMotion?.scene){viewMotion.refresh=true;return;}
     const groups=photoGroups();
     if(activeCity&&!groups.some(group=>group.id===activeCity))activeCity='';
@@ -1021,13 +1084,18 @@
     while(holds(rows,columns)<count)columns++;
     return {rows,columns,tall:Math.max(44,Math.min(tall,height/rows))};
   }
-  function renderTabs(groups){
-    const chapters=albumPages(),nav=$('gallery-filter'),focused=nav.contains(document.activeElement)?document.activeElement.dataset.filter:null;
-    // More columns can narrow a two-page book, which changes how many fit. Settle that first, or the first draw cuts the bottom tabs.
+  function settleTabs(groups){
     const book=$('album-book'),width=layout=>`${layout.columns*TAB_STRIP+18}px`;
     let layout=tabLayout(groups);
     for(let pass=0;pass<6&&book.style.getPropertyValue('--tab-width')!==width(layout);pass++){book.style.setProperty('--tab-width',width(layout));layout=tabLayout(groups);}
-    const {rows,columns,tall}=layout;tabColumns=columns;
+    return layout;
+  }
+  // Before the photos are known, a cover sized as if every stop had some: the usual case, and its size is corrected behind the cover if not.
+  function routeTabs(){tabColumns=settleTabs(app.getStops().map(stop=>({name:stop.name}))).columns;$('album-book').style.setProperty('--tab-gutter',`${tabColumns*TAB_STRIP+4}px`);}
+  function renderTabs(groups){
+    const chapters=albumPages(),nav=$('gallery-filter'),focused=nav.contains(document.activeElement)?document.activeElement.dataset.filter:null;
+    // More columns can narrow a two-page book, which changes how many fit. Settle that first, or the first draw cuts the bottom tabs.
+    const {rows,columns,tall}=settleTabs(groups);tabColumns=columns;
     nav.style.setProperty('--tab-h',`${tall}px`);nav.style.setProperty('--tab-strip',`${TAB_STRIP}px`);nav.style.setProperty('--tab-root',`${TAB_ROOT}px`);
     const key=JSON.stringify([busy,rows,columns,tall,groups.map(group=>[group.id,group.name,group.items.length,chapters.findIndex(page=>page.type==='city'&&page.first&&page.group.id===group.id)])]);
     if(key===tabsKey){markTab();return;}tabsKey=key;
@@ -1151,9 +1219,9 @@
     return list;
   }
   // A contents page lists eight ports, or fewer on a short page: margins take about a sixth of it,
-  // the heading up to two lines (about 70px, as 'continued' wraps), and each row 18px at the smallest type.
+  // the heading up to two lines (about 76px, as 'continued' wraps), and each row 24px at the smallest type.
   const CONTENTS_ROWS=8;
-  function contentsRows(){const book=$('album-book'),style=getComputedStyle(book),page=book.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom);return page>0?Math.max(3,Math.min(CONTENTS_ROWS,Math.floor((page*.84-70)/18))):CONTENTS_ROWS;}
+  function contentsRows(){const book=$('album-book'),style=getComputedStyle(book),page=book.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom);return page>0?Math.max(3,Math.min(CONTENTS_ROWS,Math.floor((page*.84-76)/24))):CONTENTS_ROWS;}
   const lastPage=()=>twoPage()?pages.length:pages.length-1;
   function clampPage(index){index=Math.max(0,Math.min(index,lastPage()));return twoPage()?Math.ceil(index/2)*2:index;}
   const visiblePages=index=>twoPage()?[index-1,index]:[index];
@@ -1181,6 +1249,7 @@
     if(n===3)return portrait[0]?'n-3 tall':'n-3';
     return `n-${n}`;
   }
+  const coverMeta=()=>[plural(app.getStops().length,'stop'),...(albumMotion?.listed===false?[]:[photoLabel(photos.length)])].join(' · ');
   function coverFace(el,back=false){
     el.classList.add(back?'album-back':'album-cover');
     el.innerHTML=back
@@ -1188,7 +1257,7 @@
       :'<div class="cover-plate"><svg class="cover-emblem" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" stroke-width=".9"/><circle cx="20" cy="20" r="13.5" fill="none" stroke="currentColor" stroke-width=".5" stroke-dasharray="1 2"/><path d="M20 4 22.4 17.6 36 20 22.4 22.4 20 36 17.6 22.4 4 20 17.6 17.6Z" fill="currentColor"/></svg><p class="cover-kicker">A travel album</p><p class="cover-title"></p><span class="cover-rule"></span><p class="cover-meta"></p></div>';
     if(!back){
       el.querySelector('.cover-title').textContent=current?.title||'Photos';
-      const stops=app.getStops();el.querySelector('.cover-meta').textContent=[plural(stops.length,'stop'),photoLabel(photos.length)].join(' · ');
+      el.querySelector('.cover-meta').textContent=coverMeta();
     }
   }
   function pageElement(page,index,side){
@@ -1453,7 +1522,7 @@
     update();
     try{
       const data=await api(`/trips/${cached.id}`);if(current!==cached)return;
-      if(photoVersion===photoPanelRequest)photos=data.photos;
+      if(photoVersion===photoPanelRequest){photos=data.photos;listedTrip=cached.id;}
       if(!dirty&&fingerprint()===initial){if(JSON.stringify(data.trip.stops)!==initial){suppress=true;app.setStops(data.trip.stops);suppress=false;}current={id:data.trip.id,title:data.trip.title,revision:data.trip.revision,hash:fingerprint()};remember();}
       if($('photo-panel').open)renderGallery();update();
     }catch(error){if(current!==cached)return;if(error.status===404){detachMissingTrip();openTrips(missingTrip);}else{openTrips();showError('trip-message',error);}}
