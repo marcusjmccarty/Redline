@@ -71,6 +71,12 @@ test('the opening sheet shows quarters of the painted map and hands off without 
   assert.equal(atlas.snapshots,1);
 });
 
+test('the opening fold crops native image pixels independently of Retina CSS size',async t=>{
+  const env=setup(t),sheet={width:1440,height:800,naturalWidth:2880,naturalHeight:1600};
+  await env.ready(env.atlasWith(Promise.resolve(true),sheet));
+  assert.deepEqual(env.painted.map(({args})=>args.slice(1,5)),[[0,0,1440,800],[0,800,1440,800],[1440,0,1440,800],[1440,800,1440,800]],'All four source quarters cover the complete image');
+});
+
 test('interaction during the final paint handoff cancels pending frames without restoring the cover',async t=>{
   const env=setup(t);await env.ready();
   for(const motion of env.motions)motion.complete();await tick();

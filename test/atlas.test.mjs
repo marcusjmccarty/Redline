@@ -345,6 +345,10 @@ function fakeView({native=false,innerWidth=1440,agent,cores,width=1440,height=90
       animate(frames,options){node.animations.push({frames,options});},
       listeners:{},addEventListener(type,listener){node.listeners[type]=listener;},
       getContext(kind,options){if(tag!=='canvas')return null;node.kind=kind;node.options=options;return {drawImage(bitmap){node.held=bitmap;}};}};
+    if(tag==='img')for(const dimension of ['width','height']){
+      let attribute=0;
+      Object.defineProperty(node,dimension,{get:()=>parseFloat(node.style[dimension])||attribute,set:value=>{attribute=value;}});
+    }
     return node;
   };
   const preview=native?Object.assign(element('img'),{complete:true,naturalWidth:1440,naturalHeight:800}):null;
@@ -706,6 +710,18 @@ test('the HTML preview shows the map before any worker exists, and zoom starts d
   atlas.update({x:300,y:100,w:360,h:180},[]);run(200);
   assert.equal(workers.length,3,'Detail starts only when zoomed in');
   assert.ok(sent.filter(message=>message.type==='start').every(message=>!message.sheet),'Workers do not download another copy of the visible map');
+});
+
+test('native image sheets align with the world on Retina screens and after resizing',()=>{
+  const {atlas,world,run,sheet,resize}=fakeView({native:true,dpr:2,width:1280,height:720});
+  const assertBounds=(expectedWidth,expectedHeight)=>{
+    const node=sheet(),matrix=node.style.transform.match(/matrix\(([^)]+)\)/)[1].split(',').map(Number);
+    assert.ok(Math.abs(node.width*matrix[0]-expectedWidth)<.001,'The artwork spans exactly the map width');
+    assert.ok(Math.abs(node.height*matrix[3]-expectedHeight)<.001,'The artwork spans exactly the map height');
+  };
+  atlas.update(world,[]);run(1000);assertBounds(1280,720);
+  resize({width:1000,height:600});atlas.update(world,[]);run(1000);assertBounds(1000,600);
+  assert.equal(sheet().style.width,'720px','Repeated fitting never shrinks the source again');
 });
 
 test('stacked great names retain accurate collision bounds without slanting across coasts',()=>{
