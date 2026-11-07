@@ -40,7 +40,9 @@
     // Software painting truly runs side by side, but every worker decodes its own land plate, so small screens keep fewer.
     const crew=Math.max(1,Math.min(small?2:3,(globalThis.navigator?.hardwareConcurrency||4)-1));
     const ready=new Promise(resolve=>{resolveReady=resolve;});
-    const level=zoom=>Math.max(0,Math.min(8,Math.ceil(Math.log2(Math.max(1,zoom))-.12)));
+    // The regional atlas at 16× is the final artwork. Closer views enlarge
+    // these same tiles instead of generating finer terrain at every zoom.
+    const level=zoom=>Math.max(0,Math.min(4,Math.ceil(Math.log2(Math.max(1,zoom))-.12)));
     const paramsFor=(lvl,i,j)=>{
       const scale=2**lvl,sx=width/WORLD_W*scale,sy=height/WORLD_H*scale,worldW=Math.round(width*scale),worldH=Math.round(height*scale),x0=i*TILE,y0=j*TILE;
       return {type:'tile',sx,sy,x0,y0,w:Math.min(TILE+GUTTER,worldW-x0),h:Math.min(TILE+GUTTER,worldH-y0),dpr,level:lvl};

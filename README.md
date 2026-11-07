@@ -8,7 +8,7 @@ A minimalist travel map inspired by the red routes in Indiana Jones: parchment, 
 
 The planner at the bottom of the map shows the trip name, Logbook, Album, and Save. Type a destination and press Enter to add it. Open the logbook to reorder or remove stops.
 
-- **Trace route / Return / Space:** start or resume the original flowing trace. Ink and camera zoom share one smooth clock, with continuous arrivals between legs. Hold Return or Space for 2× speed; the button pauses. The final leg eases back to the world overview.
+- **Trace route / Space:** pause or resume the original flowing trace. Return starts or resumes. Ink and camera zoom share one smooth clock, with continuous arrivals between legs. Hold Return or Space for 2× speed; release to return to normal speed. The final leg eases back to the world overview.
 - **Click a city** (on the map or in the list): look at it within the whole trip, with every leg still drawn.
 - **Arrow buttons or keys:** trace one leg, continuing from a port you clicked. Press again during travel to arrive instantly. Navigation loops through the overview in both directions.
 - **Backspace (Delete on a Mac), Home, or the globe:** glide back to the whole-trip overview.

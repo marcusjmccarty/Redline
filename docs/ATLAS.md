@@ -107,6 +107,8 @@ node scripts/build-atlas-sheet.mjs
 
 It paints the sheet with the real painter in one headless Chrome with a temporary profile, encodes it as finely as the size limits in `scripts/atlas-sheet.mjs` allow, and writes the record of what it was painted from. Set `CHROME` to the browser's path if it is not in the usual Mac place.
 
+Map tile detail stops at level 4 (16×). Deeper camera zooms enlarge and reuse those tiles; destination prefetch obeys the same ceiling. Inland water is composited after terrain marks so forests cannot cover lakes. Background city names use a short recognizable-place selection; all route stops and the full search index remain available.
+
 ## Lettering
 
 Redline Hand is generated: `scripts/build-lettering.mjs` holds a skeleton for each glyph, runs it through a simulated broad nib, adds small pen serifs and a slow wobble, and writes a WOFF using only Node built-ins. Change a stroke there and rerun it, once plain and once with `bold` for the heavier weight.
@@ -128,4 +130,4 @@ The first opening must move within about 100 ms, so nothing slow lies between th
 
 ## Restored trace and controls
 
-The trace uses the pre-atlas journey clock and camera easing from `208f21e`: continuous arrivals, smooth zoom pacing and a 2× held-key boost. Keep the newer date-line, reduced-motion and interrupted-overview fixes. The logbook remains 380 px wide, the desktop planner 700 px, with their original Georgia typography and twelve visible stop rows. Route ink is 3.4 CSS px over a 6 px pale under-stroke; both paths remain in screen coordinates at all zooms. South America and Atlantic Ocean use stacked, level names with measured collision bounds.
+The trace uses the pre-atlas journey clock and camera easing from `208f21e`: continuous arrivals, smooth zoom pacing and a 2× held-key boost. Keep the newer date-line, reduced-motion and interrupted-overview fixes. The compact logbook is 320 px wide and the desktop planner 640 px, with Georgia typography and tighter stop rows. Tap Space to pause or resume; a hold over 180 ms gives 2× speed without pausing. Route ink is 3.4 CSS px over a 6 px pale under-stroke; both paths remain in screen coordinates at all zooms. South America and Atlantic Ocean use stacked, level names with measured collision bounds.

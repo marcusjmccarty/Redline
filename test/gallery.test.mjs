@@ -2298,18 +2298,25 @@ test('Escape acts on the innermost dialog: the photo first, then the album',asyn
   press('Escape');await wait(()=>!$('photo-panel').open);
 });
 
-test('holding Space after clicking Trace route hurries the voyage rather than pausing it, and a focused button still toggles',async t=>{
+test('Space taps pause and resume, while a hold boosts without pausing on press or release',async t=>{
   const {$,w,press,clock,map,sailing,stop}=await chart(t,[LONDON,PARIS,ROME,ATHENS]);
   // Chrome and Firefox focus a clicked button.
   $('play').focus();$('play').dispatchEvent(new w.MouseEvent('click',{bubbles:true,detail:1}));assert.ok(sailing());
   assert.equal(w.document.activeElement,map,'A pointer click leaves the keys with the map');
-  press(' ',map);press(' ',map,{repeat:true});clock.frame();assert.ok(sailing(),'Space does not stop the voyage');
+  press(' ',map);press(' ',map,{repeat:true});clock.run(20);assert.ok(sailing(),'Holding Space does not stop the voyage');
   w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:' ',bubbles:true}));
-  $('play').focus();$('play').dispatchEvent(new w.KeyboardEvent('keydown',{key:' ',bubbles:true,cancelable:true}));assert.equal(sailing(),false,'From the keyboard the button pauses');
-  w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:' ',bubbles:true}));press('Home');clock.settle();
+  assert.ok(sailing(),'Releasing a hold keeps the trace running');
+  const tap=target=>{press(' ',target);w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:' ',bubbles:true,cancelable:true}));};
+  tap(map);assert.equal(sailing(),false,'A single Space tap pauses from the map');
+  const frozen=camera(w);clock.run(20);assert.deepEqual(camera(w),frozen,'The paused camera stays still');
+  tap(map);assert.ok(sailing(),'Another tap resumes');
+  $('play').focus();tap($('play'));assert.equal(sailing(),false,'The focused play button behaves the same way');
+  press('Home');clock.settle();
   // Return on a focused port looks at it, then sets sail; the next key must not fly back to it.
-  stop(0).focus();press('Enter',stop(0));clock.settle();press('Enter',stop(0));assert.ok(sailing());
-  press(' ',stop(0));assert.ok(sailing(),'A key on the port it sailed from hurries, too');
+  stop(0).focus();press('Enter',stop(0));w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:'Enter',bubbles:true}));clock.settle();press('Enter',stop(0));assert.ok(sailing());
+  w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:'Enter',bubbles:true}));
+  tap(stop(0));assert.equal(sailing(),false,'Space on an active route stop also pauses');
+  tap(stop(0));assert.ok(sailing(),'And resumes the current voyage without jumping back');
 });
 
 test('a zoom chosen at rest carries into the next leg and the next trace, and the whole world hands back to the automatic camera',async t=>{
@@ -2389,7 +2396,8 @@ test('the glide back to the world finishes rather than strands, whatever interru
   const world={x:0,y:0,w:1440,h:720};
   glide();$('play').click();assert.equal(sailing(),false);assert.deepEqual(camera(w),world);assert.equal(map.dataset.tripStep,'0');
   glide();press('Escape');assert.equal(sailing(),false);assert.deepEqual(camera(w),world,'Escape finishes it too');assert.equal(map.dataset.tripStep,'0');
-  glide();press(' ',map);w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:' ',bubbles:true}));assert.ok(sailing());assert.equal(map.dataset.tripStep,'1','Space sets out again from the first port');
+  glide();press(' ',map);w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:' ',bubbles:true}));assert.equal(sailing(),false);assert.equal(map.dataset.tripStep,'0','A Space tap finishes the home glide and pauses');
+  press(' ',map);w.document.dispatchEvent(new w.KeyboardEvent('keyup',{key:' ',bubbles:true}));assert.ok(sailing());assert.equal(map.dataset.tripStep,'1','The next tap sets out again from the first port');
   press('Home');clock.settle();
   glide();pointer('pointerdown',500,500);pointer('pointermove',540,500);assert.equal(sailing(),false);
   assert.equal(map.dataset.tripStep,'0','A drag takes the whole trip with it, not a stranded port');assert.equal($('route-lines').children[1].style.visibility,'');pointer('pointerup',540,500);
@@ -2542,6 +2550,16 @@ test('names keep their places as a trace moves the camera, rather than flickerin
   while(sailing()&&frames<3000){clock.frame();frames++;const now=new Set(lettered(w));for(const name of now)if(!shown.has(name))shows.set(name,(shows.get(name)||0)+1);shown=now;}
   const again=[...shows.values()].filter(count=>count>=4).length;
   assert.ok(frames>100,'It really sailed');assert.ok(again<=20,`${again} of ${shows.size} names came and went four times or more`);
+});
+
+test('background city names stay selective without removing smaller route stops or search entries',async t=>{
+  const places=[['Mumbai',72.88,19.08],['Akola',77,20.7],['Delhi',77.23,28.65],['Makkah',39.82,21.43]],{w,$,clock,sailing}=await chart(t,places);
+  const seen=new Set();$('play').click();let frames=0;
+  while(sailing()&&frames++<3000){clock.frame();for(const label of w.RedlineApp.atlas.labels)if(['city','capital'].includes(label.kind))seen.add(label.text);}
+  for(const name of ['Ahmedabad','Akola','Makkah'])assert.equal(seen.has(name),false,`${name} is not a background label`);
+  assert.ok(seen.size>0,'Recognizable background places still appear');
+  assert.ok(w.MAP_CITIES.some(city=>city.name==='Ahmedabad'),'The destination search index is complete');
+  assert.deepEqual([...$('route-stops').querySelectorAll('.stop-label')].map(node=>node.textContent),places.map(([name])=>name.toUpperCase()),'Smaller destinations keep their route labels');
 });
 
 test('the chart title is a piece of its own: it follows the trip, stays on the sheet and moves off the route',async t=>{

@@ -75,6 +75,15 @@ test('a tile paints the same way every time and scales its work with zoom',()=>{
   assert.ok(sea.length<first.length,'Open water costs less than land');
 });
 
+test('lake water is painted after terrain stamps so forests cannot cover inland water',()=>{
+  const log=[],painter=loadPainter(log),scene=painter.createScene();
+  painter.addLayers(scene,bundle(painter,'geo0.bin'));painter.addLayers(scene,bundle(painter,'geo1.bin'));
+  painter.prepare(scene);log.length=0;
+  painter.paintTile(recorder(log),scene,{sx:16,sy:16,x0:360*16,y0:176*16,w:514,h:514,dpr:1,level:4});
+  assert.ok(log.includes('putImageData'),'The wooded Great Lakes region contains painted terrain');
+  assert.ok(log.lastIndexOf('clip')>log.lastIndexOf('putImageData'),'The lake fill covers the finished terrain layer, including overhanging tree crowns');
+});
+
 test('the view is inert, not broken, where workers or canvas are unavailable',async()=>{
   const dom=new JSDOM('<canvas id="c"></canvas>',{runScripts:'outside-only',pretendToBeVisual:true});
   dom.window.eval(readFileSync(file('atlas-view.js'),'utf8'));
@@ -408,6 +417,17 @@ test('only tiles the view can see stay attached, and one seen again needs no pai
   const before=painted();atlas.update(here,[]);run(1000);
   assert.ok(attached.every(tile=>tile.parent===levelOf(2)),'Back at once');assert.equal(painted(),before,'Without asking a worker');
   assert.equal(attached.reduce((sum,tile)=>sum+tile.animations.length,0),attached.length,'And without fading up a second time');
+});
+
+test('zooming past regional detail reuses the same artwork and prefetch never exceeds it',()=>{
+  const {atlas,sent,up,finish,run}=fakeView();up();
+  const frame=zoom=>({x:360-720/zoom,y:220-360/zoom,w:1440/zoom,h:720/zoom});
+  atlas.update(frame(16),[]);run(1000);finish();run(1000);
+  const painted=sent.filter(message=>message.type==='tile').length;
+  for(const zoom of [32,64,128]){atlas.update(frame(zoom),[]);run(1000);finish();run(1000);}
+  assert.equal(sent.filter(message=>message.type==='tile').length,painted,'Deeper zooms do not repaint the same region');
+  atlas.prefetch({x:900,y:200,w:1440/128,h:720/128});finish();
+  assert.ok(sent.filter(message=>message.type==='tile').every(message=>message.level<=4),'Even destination prefetch stays at the detail ceiling');
 });
 
 test('a prefetched tile waits out of the document, and is simply there when the camera arrives',()=>{

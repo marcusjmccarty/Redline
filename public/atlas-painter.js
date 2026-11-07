@@ -703,12 +703,6 @@
       paintRelief(g,scene,t,p);
       // Snow over the hillshade, or the shade would grey it.
       paintGround(g,scene,t);
-      // Lakes.
-      if(lakes.length){
-        const water=new Path2D(),shore=new Path2D();fillPath(water,lakes,t,4/Math.min(t.sx,t.sy));strokePath(shore,lakes,t,2/Math.min(t.sx,t.sy));
-        g.save();g.clip(water,'evenodd');if(plates.sea)plate(g,plates.sea,t);g.fillStyle='rgba(92,142,154,.62)';g.fillRect(0,0,t.w,t.h);g.restore();
-        g.strokeStyle=WATER_INK;g.lineWidth=.6*u;g.stroke(shore);
-      }
       // Rivers: a pale wash under a fine line, broader for the great ones.
       if(rivers.length){
         const paths=[new Path2D(),new Path2D(),new Path2D()];
@@ -729,6 +723,16 @@
         g.strokeStyle='rgba(74,50,28,.3)';g.lineWidth=.7*u;g.setLineDash([.01,2.6*u]);g.stroke(path);g.setLineDash([]);
       }
       paintTerrain(g,scene,t);
+      // Inland water is the final land pass. Forest and mountain stamps can
+      // extend past their anchors, so covering their entire lake footprint
+      // here keeps the Great Lakes and smaller lakes clear at every scale.
+      if(lakes.length){
+        const water=new Path2D(),shore=new Path2D();fillPath(water,lakes,t,4/Math.min(t.sx,t.sy));strokePath(shore,lakes,t,2/Math.min(t.sx,t.sy));
+        g.save();g.clip(water,'evenodd');
+        if(plates.sea)plate(g,plates.sea,t);else{g.fillStyle='#eadfc2';g.fillRect(0,0,t.w,t.h);}
+        g.fillStyle='rgba(92,142,154,.62)';g.fillRect(0,0,t.w,t.h);g.restore();
+        g.strokeStyle=WATER_INK;g.lineWidth=.6*u;g.stroke(shore);
+      }
       if(shores){g.globalCompositeOperation='destination-in';g.fillStyle='#000';g.fill(fill,'evenodd');ctx.drawImage(scene.scratch,0,0,t.w,t.h,0,0,t.w,t.h);}
     }
     // Coast ink, over the soft edge already laid down either side of it: together they read as a pen, not a plotter.
