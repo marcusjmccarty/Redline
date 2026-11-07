@@ -7,8 +7,8 @@
   <meta name="description" content="Plot your next adventure. A simple vintage travel map with an animated red line.">
   <title>Redline — A journey on the map</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14.5' fill='%23efe5d2' stroke='%233a2c20' stroke-width='2'/%3E%3Cpath d='M16 3.5l3 9.5 9.5 3-9.5 3-3 9.5-3-9.5-9.5-3 9.5-3z' fill='%238f2f25'/%3E%3C/svg%3E">
-  <link rel="preload" as="image" href="atlas/sheet-small.webp?v=667578798f7f" fetchpriority="high">
-  <link rel="stylesheet" href="style.css?v=fa3476f9aecf">
+  <link rel="preload" as="image" href="atlas/sheet-small.webp?v=2b2efefcf3e4" fetchpriority="high">
+  <link rel="stylesheet" href="style.css?v=cfa7b6eb6b3d">
   <link rel="stylesheet" href="gallery.css?v=ca0cc8050d2a">
   <script src="map-intro.js?v=605463ebf88b" defer></script>
   <script src="vendor/geo.js?v=78f7db3eec56" defer></script>
@@ -17,9 +17,9 @@
   <script src="trace.js?v=9a8fb254389e" defer></script>
   <script src="labels.js?v=838540788118" defer></script>
   <script src="atlas-names.js?v=5aa0b5e0e4a3" defer></script>
-  <script src="atlas-view.js?v=f62af49e3e06" defer></script>
-  <script id="atlas-assets" type="application/json">{"reliefVersion":"d187936bd7cf","worker":"atlas-worker.js?v=148cacaaddb9","painter":"atlas-painter.js?v=0d12a9bd0939","reliefIndex":"relief/index.js?v=47b0a09c73cc","sheet":"atlas/sheet.webp?v=fb48cffc4a32","sheetSmall":"atlas/sheet-small.webp?v=667578798f7f","near":"atlas/geo0.bin?v=b70a77dcd1fd","far":"atlas/geo1.bin?v=cb9176e8907d","land":"atlas/land.jpg?v=ecca4f0287bf","landSmall":"atlas/land-small.jpg?v=cb4f5911b8e6","sea":"atlas/sea.jpg?v=d56536eb8836"}</script>
-  <script src="app.js?v=eed92c7512a9" defer></script>
+  <script src="atlas-view.js?v=7729cb9c45a1" defer></script>
+  <script id="atlas-assets" type="application/json">{"reliefVersion":"d187936bd7cf","worker":"atlas-worker.js?v=148cacaaddb9","painter":"atlas-painter.js?v=bbd74c5bb595","reliefIndex":"relief/index.js?v=47b0a09c73cc","sheet":"atlas/sheet.webp?v=76b8f2fd0d48","sheetSmall":"atlas/sheet-small.webp?v=2b2efefcf3e4","near":"atlas/geo0.bin?v=b70a77dcd1fd","far":"atlas/geo1.bin?v=cb9176e8907d","land":"atlas/land.jpg?v=ecca4f0287bf","landSmall":"atlas/land-small.jpg?v=cb4f5911b8e6","sea":"atlas/sea.jpg?v=d56536eb8836"}</script>
+  <script src="app.js?v=be664efcd9a1" defer></script>
   <script src="postcard-export.js?v=048b39ce6827" defer></script>
   <script src="postcards.js?v=5ca7a6299787" defer></script>
   <script src="jpeg.js?v=5732e6d6ead7" defer></script>
@@ -84,7 +84,7 @@
         </div></div>
       </div>
     <div class="map-shell" id="map-shell">
-      <img id="atlas-preview" class="atlas-preview" src="atlas/sheet-small.webp?v=667578798f7f" width="1440" height="800" fetchpriority="high" alt="" aria-hidden="true">
+      <img id="atlas-preview" class="atlas-preview" src="atlas/sheet-small.webp?v=2b2efefcf3e4" width="1440" height="800" fetchpriority="high" alt="" aria-hidden="true">
       <canvas id="map" role="img" aria-label="World map showing your travel route" tabindex="-1"></canvas>
       <svg id="place-labels" role="group" aria-label="Route stops"><g id="route-halos" aria-hidden="true"></g><g id="route-lines" aria-hidden="true"></g><g id="route-stops"></g></svg>
       <svg class="atlas-source" width="0" height="0" aria-hidden="true"><defs><g id="land"></g></defs></svg>
@@ -167,7 +167,7 @@
       <div class="panel-top"><h2 id="info-title">A few bearings</h2><button id="close-info" class="close-panel" aria-label="Close information" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button></div>
       <dl class="info-shortcuts">
         <dt>Plan a trip</dt><dd>Type a destination and press Enter. Use ↑ ↓ to choose a search result. In the logbook, drag a city’s name to reorder it (on a touch screen, drag its number), or focus it and use Alt + arrow keys. Use × beside a stop to remove it. Undo or Ctrl + Z (⌘ + Z on Mac) restores route edits, including a cleared route; Ctrl / ⌘ + Shift + Z redoes them.</dd>
-        <dt>Trace route</dt><dd>Press Return or Space to start or resume the trace, and hold either for 2.5× speed. The Trace route button pauses. A full trip finishes at the world overview. Zoom before or during travel to follow the line at your chosen level.</dd>
+        <dt>Trace route</dt><dd>Tap Space to pause or resume the trace. Hold Space or Return for 2× speed, then release to return to normal speed. Return starts or resumes; the Trace route button also pauses. A full trip finishes at the world overview. Zoom before or during travel to follow the line at your chosen level.</dd>
         <dt>One city at a time</dt><dd>Click a city to look at it within the whole trip. The arrows beside Trace route, or your arrow keys, then travel from that city to the next or previous one; press again during travel to arrive at once. Backspace (Delete on a Mac), Home, or the globe glides back to the overview.</dd>
         <dt>Just the map</dt><dd>Press H to hide the controls. H, Escape, or a double-click on the map brings them back.</dd>
         <dt>The logbook</dt><dd>S saves the trip. L opens a lined logbook on the left: name the trip, drag stops to reorder them, or remove them. Switch trip at the top opens your other trips and their rename, export, and delete controls. Backed-up trips lists trips exported or imported since backup tracking began. Trips, photos, and postcards stay in this browser with no account; use Back up all regularly and Import backup to restore or move devices. Clearing website data or private browsing can erase them, and backups contain your photos and notes, so keep them private. Text you type into the destination box (two or more letters) is sent to Open-Meteo to find places, even when the place is also bundled.</dd>

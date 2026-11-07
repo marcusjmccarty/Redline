@@ -46,6 +46,7 @@
   let progress=null,activeLeg=null,geometry=[],playback=null,lastTick=null;
   let traceZoom=null,idleZoom=null,suppressStopClickUntil=0,focused=null;
   const held=new Map();
+  let spacePress=null;
   const labelSlots=new Map(),labelWidths=new Map(),zoomControls=document.querySelector('.zoom-controls');
   const WORLD_W=1440,WORLD_H=720,MAX_ZOOM=RedlineTrace.maxZoom;
   let view={x:0,y:0,w:WORLD_W,h:WORLD_H};
@@ -142,7 +143,7 @@
       // A pointer goes to the visit that owns the label; assistive technology clicks reach the exact stop it names.
       group.addEventListener('click',event=>{if(event.detail||document.activeElement?.matches?.('input,textarea'))map.focus({preventScroll:true});jumpToCity(event.detail?labelOwner(event.target===hit?nearestStop(event,index):index):index);});
       // Return or Space on the city already in view sets sail from it (holding speeds up, as on the map).
-      group.addEventListener('keydown',event=>{if(!['Enter',' '].includes(event.key))return;event.preventDefault();event.stopPropagation();if(event.repeat)return;if(focused===stops[index].id||running){held.set(event.key,performance.now());startTrace();}else jumpToCity(index);});
+      group.addEventListener('keydown',event=>{if(!['Enter',' '].includes(event.key))return;event.preventDefault();event.stopPropagation();if(event.repeat)return;if(focused===stops[index].id||running||event.key===' '&&progress!==null)traceKeyDown(event);else jumpToCity(index);});
       // A keyboard user tabbing to a port out of view is shown it, at the zoom already chosen.
       group.addEventListener('focus',()=>{if(running)return;const [px,py]=group._point;if(px<view.x||px>view.x+view.w||py<view.y||py>view.y+view.h)animateView(RedlineTrace.pointFrame(group._point,cameraSpace(),baseView,baseView.w/view.w));});
       const li=document.createElement('li'),number=document.createElement('span'),name=document.createElement('span'),remove=document.createElement('button'),grip=document.createElement('button');
@@ -372,12 +373,15 @@
   // Every other name appears as you come close enough to read it, and leaves once it spans the window.
   const nameZoom={1:1.5,2:2.4,3:4,4:6.5};
   const chartName=(kind,text,x,y,from,{angle=0,curve=0,until=Infinity,spread=0,roam=0,city=-1}={})=>({kind,text,x,y,from,angle,curve,until,spread,roam,city,print:null,era:-1,shown:-2,dx:0,dy:0,lost:-Infinity,lostZoom:1});
+  // A small travel-atlas selection, independent of the full destination search
+  // index. Route stops always get their own label, including smaller towns.
+  const familiarCities=new Set('Tokyo|Osaka|Kyoto|Hiroshima|Beijing|Shanghai|Hong Kong|Seoul|Taipei|Singapore|Bangkok|Hanoi|Ho Chi Minh City|Manila|Jakarta|Bali|Kuala Lumpur|Mumbai|Delhi|New Delhi|Kolkata|Kathmandu|Dubai|Abu Dhabi|Istanbul|Jerusalem|Cairo|Alexandria|Casablanca|Marrakesh|Tunis|Nairobi|Cape Town|Johannesburg|Lagos|London|Paris|Rome|Venice|Florence|Milan|Naples|Athens|Madrid|Barcelona|Lisbon|Berlin|Munich|Amsterdam|Brussels|Vienna|Prague|Budapest|Warsaw|Krakow|Stockholm|Oslo|Copenhagen|Helsinki|Dublin|Edinburgh|Zurich|Geneva|Reykjavik|Moscow|St. Petersburg|Saint Petersburg|Kyiv|Kiev|New York|Washington, D.C.|Washington|Boston|Philadelphia|Chicago|Miami|Atlanta|New Orleans|Dallas|Houston|Denver|Las Vegas|Los Angeles|San Francisco|Seattle|Honolulu|Anchorage|Toronto|Vancouver|Montreal|Quebec|Mexico City|Cancun|Havana|San Juan|Panama City|San José|San Jose|Bogotá|Bogota|Cartagena|Lima|Cusco|Quito|Rio de Janeiro|São Paulo|Buenos Aires|Santiago|Sydney|Melbourne|Brisbane|Perth|Auckland|Wellington'.split('|').map(normalize));
   // Best first: continents and oceans, then countries, then the rest. Where a name of a large place meets the line or a port it can move over a little, up to two of its roam each way.
   const chartNames=[
     GREAT_NAMES.map(([kind,name,x,y,angle,curve])=>chartName(kind,name,x,y,0,{angle,curve,until:1.6,roam:kind==='ocean'?8:18})),
     window.MAP_COUNTRIES.map(p=>chartName('country',p.name,p.x,p.y,Math.max(1.3,1.25+Math.max(0,p.rank-2)*.42),{roam:9})),
     (window.ATLAS_NAMES||[]).map(name=>chartName(name.kind,name.name,name.x,name.y,nameZoom[name.rank]||9,{angle:name.kind==='land'||name.kind==='desert'?0:name.angle,spread:name.spread,roam:name.rank<=2?9:0})),
-    window.MAP_CITIES.map((p,i)=>chartName(p.capital?'capital':'city',p.name,...backgroundPoints[i],p.population>=8000000?1.8:(p.capital||p.population>=2000000)?2.5:p.population>=500000?3.8:p.population>=100000?4.5:5.3,{city:i}))
+    window.MAP_CITIES.flatMap((p,i)=>familiarCities.has(normalize(p.name))?[chartName(p.capital?'capital':'city',p.name,...backgroundPoints[i],p.population>=8000000?2.2:(p.capital||p.population>=2000000)?3:4,{city:i})]:[])
   ];
   const NUDGES=[[0,0],[0,-1],[0,1],[1,0],[-1,0],[1,-1],[-1,-1],[1,1],[-1,1],[0,-2],[0,2],[2,0],[-2,0],[2,-1],[-2,-1],[2,1],[-2,1],[1,-2],[-1,-2],[1,2],[-1,2]],AT_HOME=[[0,0]];
   // Where the chart's title goes, on the sheet, in order. Each is open water as far east as its limit, and a small window's plate is too wide for the Pacific.
@@ -721,15 +725,24 @@
   $('close-info').addEventListener('click',()=>$('info-dialog').close());
   $('info-dialog').addEventListener('click',event=>{if(event.target===$('info-dialog'))$('info-dialog').close();});
   map.addEventListener('dblclick',event=>{if(document.body.classList.contains('map-only'))setMapOnly(false);else zoom(event.shiftKey?2:.5,event.clientX,event.clientY);});
+  function traceKeyDown(event){
+    if(event.repeat||held.has(event.key))return;
+    const since=performance.now();held.set(event.key,since);
+    if(event.key===' '){
+      // While playing, distinguish a tap from a hold on release. A hold never
+      // interrupts the camera; a paused trace resumes immediately on press.
+      spacePress={since,wasRunning:running};
+      if(!running)startTrace();
+    }else if(event.target.id==='play')trace();else startTrace();
+  }
   document.addEventListener('keydown',event=>{
     if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.target.closest?.('input,textarea,select,[contenteditable="true"],#trip-panel')||document.querySelector('dialog[open]'))return;
     if(event.key==='Escape'&&document.body.classList.contains('map-only')){event.preventDefault();setMapOnly(false);return;}
     if(event.key.toLowerCase()==='h'){event.preventDefault();if(!event.repeat)setMapOnly(!document.body.classList.contains('map-only'));return;}
-    // Space or Return starts or resumes the trace, and holding either speeds it up.
+    // Tap Space to pause/resume; holding Space or Return gives 2× speed.
     if(event.key===' '||event.key==='Enter'){
       if(event.target.closest?.('button,a,[role=button]')&&event.target.id!=='play')return;
-      event.preventDefault();if(!held.has(event.key))held.set(event.key,performance.now());
-      if(!event.repeat){if(event.target.id==='play')trace();else startTrace();}return;
+      event.preventDefault();traceKeyDown(event);return;
     }
     // Backspace (Delete on a Mac keyboard) glides back to the whole-trip overview.
     if(event.key==='Backspace'||event.key==='Delete'){event.preventDefault();if(!event.repeat)showOverview(1.35);return;}
@@ -739,7 +752,13 @@
     }
   });
   // The play button's own Space activation would toggle a second time.
-  document.addEventListener('keyup',event=>{held.delete(event.key);if(event.key===' '&&event.target.id==='play')event.preventDefault();});
+  document.addEventListener('keyup',event=>{
+    held.delete(event.key);
+    if(event.key===' '&&spacePress){
+      event.preventDefault();const press=spacePress;spacePress=null;
+      if(press.wasRunning&&performance.now()-press.since<180&&running)trace();
+    }else if(event.key===' '&&event.target.id==='play')event.preventDefault();
+  });
   // Consume Escape after the focused editor and page controls have handled it.
   // Cancel dialogs ourselves so Safari never receives an unhandled Escape to
   // leave its window fullscreen mode. Keyup is consumed for the same reason.
@@ -754,8 +773,8 @@
     event.preventDefault();event.stopPropagation();
   });
   window.addEventListener('keyup',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();}});
-  window.addEventListener('blur',()=>held.clear());
-  document.addEventListener('visibilitychange',()=>{if(document.hidden){held.clear();lastTick=null;}});
+  window.addEventListener('blur',()=>{held.clear();spacePress=null;});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){held.clear();spacePress=null;lastTick=null;}});
   // Route thumbnails draw on these simple shapes until the painted sheet is ready.
   $('land').append(...window.ATLAS_LAND.map(d=>svg('path',{d})));
   document.fonts?.ready?.then(()=>{labelWidths.clear();for(const text of $('route-stops').querySelectorAll('.stop-label'))text._width=labelWidth(text);lastLayout='';scheduleView();});
