@@ -34,11 +34,13 @@
     const preview=document.getElementById?.('atlas-preview');
     const tiles=new Map(),levels=new Map(),sheet={el:null,transform:'',shown:false},queue=[],prefetched=[],urgent=[],pending=new Map(),jobs=new Map(),sprites=new Map(),shapes=new Map(),painters=[];
     let started=false,width=0,height=0,dpr=1,epoch=0,era=0,nextId=1,stamp=0,lettering=true,ruler=null,view={x:0,y:0,w:WORLD_W,h:WORLD_H},frame=0,labels=[],lettered=new Map(),resolveReady,sharpening=false,sharpened=false,retrying=false,settleTimer=0,restTimer=0,resizedAt=-Infinity,movedAt=-Infinity,needsPainting=!assets.sheet,lastTarget=-1,targetSince=0,detailTimer=0;
-    const small=window.innerWidth<900,maxTiles=small?56:140;
+    const small=window.innerWidth<900,maxTiles=small?48:96;
+    const failures=new Map();let workerRestarts=0,contextLost=false;
     // Every WebKit browser's canvases share one GPU process with the page, so a worker painting there stalls the page's own frames. On the worker's own thread it does not. Blink and Gecko keep their GPU painting.
     const agent=globalThis.navigator?.userAgent||'',software=/AppleWebKit/.test(agent)&&!/Chrom(?:e|ium)|Android/.test(agent);
-    // Software painting truly runs side by side, but every worker decodes its own land plate, so small screens keep fewer.
-    const crew=Math.max(1,Math.min(small?2:3,(globalThis.navigator?.hardwareConcurrency||4)-1));
+    // Each worker holds its own terrain and decoded plates. Two painters leave
+    // more memory and CPU for photos, labels and the camera on every screen.
+    const crew=Math.max(1,Math.min(2,(globalThis.navigator?.hardwareConcurrency||4)-1));
     const ready=new Promise(resolve=>{resolveReady=resolve;});
     // The regional atlas at 16× is the final artwork. Closer views enlarge
     // these same tiles instead of generating finer terrain at every zoom.
@@ -50,7 +52,7 @@
     function nextJob(){
       if(urgent.length)return urgent.shift();
       if(!started)return null;
-      for(let job;job=queue.shift()||prefetched.shift();){const have=tiles.get(job.key);if((!have||have.stale)&&!pending.has(job.key))return job;}
+      for(let job;job=queue.shift()||prefetched.shift();){const have=tiles.get(job.key);if((!have||have.stale)&&!pending.has(job.key)&&(failures.get(job.key)?.retryAt||0)<=performance.now())return job;}
       return null;
     }
     // One tile per free worker, the rest still waiting, so a change of camera can reorder or drop them.
@@ -59,7 +61,7 @@
         if(!painter.ready||painter.busy)continue;
         const job=nextJob();if(!job)return;
         const id=nextId++;if(job.key)pending.set(job.key,id);
-        jobs.set(id,job);painter.busy=true;painter.job=id;painter.worker.postMessage({...job.params,id});
+        job.detail=painter.sharp;jobs.set(id,job);painter.busy=true;painter.job=id;painter.worker.postMessage({...job.params,id});
       }
     }
     // A 2D canvas, because WebKit shows its surface as the layer itself. A bitmaprenderer canvas is painted again into a layer of its own, measurably longer frames in Safari, whenever it is attached.
@@ -68,20 +70,21 @@
       inscribe(el,bitmap);return el;
     }
     function inscribe(el,bitmap){el.getContext('2d',{alpha:false}).drawImage(bitmap,0,0);bitmap.close?.();}
-    function received(painter,{id,bitmap}){
+    function received(painter,{id,bitmap,retryAfter=0}){
       const job=jobs.get(id);jobs.delete(id);painter.busy=false;
       if(job?.resolve){job.resolve(bitmap);pump();return;}
       if(job?.key==='overview'){pending.delete('overview');showSheet(bitmap);pictured(true);pump();return;}
       if(!job||job.epoch!==epoch){bitmap.close?.();pump();return;}
       pending.delete(job.key);
-      const now=performance.now(),previous=tiles.get(job.key);
+      if(retryAfter)retryTile(job.key,retryAfter);else failures.delete(job.key);
+      const now=performance.now(),previous=tiles.get(job.key),stale=!!retryAfter||!job.detail&&painter.sharp;
       // A repaint of a tile already on screen swaps in place; only new tiles fade up.
-      if(previous){inscribe(previous.el,bitmap);previous.stale=false;previous.used=now;}
+      if(previous){inscribe(previous.el,bitmap);previous.stale=stale;previous.detail=job.detail;previous.used=now;}
       else{
         const {x0,y0,w,h,level:lvl}=job.params,el=picture(bitmap,'atlas-tile');
         // A layer's own pixels are device pixels. Otherwise WebKit would hold each tile enlarged at the screen's scale. Whichever arrived first, the same tile lies on top in a gutter.
         el.style.cssText=`left:${x0/dpr}px;top:${y0/dpr}px;width:${w/dpr}px;height:${h/dpr}px;z-index:${y0/TILE*65536+x0/TILE}`;
-        const tile={el,born:now,used:now,lvl,i:x0/TILE,j:y0/TILE,shown:0};tiles.set(job.key,tile);
+        const tile={el,born:now,used:now,lvl,i:x0/TILE,j:y0/TILE,shown:0,detail:job.detail,stale};tiles.set(job.key,tile);
         // The browser may take back a canvas's surface. The workers can paint this one again.
         el.addEventListener('contextlost',()=>{if(tiles.get(job.key)===tile){drop(job.key,tile);schedule();}});
       }
@@ -102,10 +105,10 @@
       const scaleChanged=ratio!==dpr||Math.abs(w/(width||1)-1)>.001;
       width=w;height=h;dpr=ratio;canvas.width=w;canvas.height=h;epoch++;lettering=true;fitSheet();
       for(const [key,tile] of tiles)drop(key,tile);
-      pending.clear();queue.length=0;prefetched.length=0;
+      pending.clear();failures.clear();queue.length=0;prefetched.length=0;
       // A region for the logbook or album does not depend on the window, and its caller is still waiting. The whole sheet just stretches.
       for(const [id,job] of jobs)if(!job.resolve&&job.key!=='overview')jobs.delete(id);
-      if(scaleChanged){sprites.clear();shapes.clear();era++;}
+      if(scaleChanged){sprites.clear();shapes.clear();era++;Promise.resolve().then(()=>labelsReady?.());}
       return true;
     }
     // Its pixels are device pixels too, so a small window still zooms into all of them.
@@ -127,7 +130,8 @@
       schedule();pump();
     }
     function ensurePainters(){while(painters.length<crew)hire();}
-    function sharpen(){sharpening=true;for(const painter of painters)if(painter.ready&&!painter.sharp)painter.worker.postMessage({type:'sharpen'});}
+    function sharpenPainter(painter){if(painter.ready&&!painter.sharp&&!painter.sharpening){painter.sharpening=true;painter.worker.postMessage({type:'sharpen'});}}
+    function sharpen(){sharpening=true;painters.forEach(sharpenPainter);}
     function schedule(){if(!frame)frame=requestAnimationFrame(()=>{frame=0;draw();});}
     function plan(lvl,frameView=view){
       const scale=2**lvl,worldW=width*scale,worldH=height*scale,left=frameView.x/WORLD_W*worldW,right=(frameView.x+frameView.w)/WORLD_W*worldW,top=frameView.y/WORLD_H*worldH,bottom=(frameView.y+frameView.h)/WORLD_H*worldH;
@@ -282,7 +286,7 @@
     }
     function paintLabels(now){
       // Tiles arriving and the camera resting leave the names as they are.
-      if(!lettering)return false;
+      if(!lettering||contextLost)return false;
       context.clearRect(0,0,width,height);let fading=false,made=0;
       for(const label of labels){
         // A few new names a frame. The rest wait their turn and then fade up, because a zoom can make dozens eligible at once.
@@ -318,7 +322,7 @@
       queue.length=0;
       for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){
         const key=`${target}/${i}/${j}`,tile=tiles.get(key);
-        if(!waiting&&(!tile||tile.stale)&&!pending.has(key))wanted.push({key,params:paramsFor(target,i,j),epoch,distance:Math.hypot(i-centerI,j-centerJ)});
+        if(!waiting&&(!tile||tile.stale)&&!pending.has(key)&&(failures.get(key)?.retryAt||0)<=now)wanted.push({key,params:paramsFor(target,i,j),epoch,distance:Math.hypot(i-centerI,j-centerJ)});
       }
       wanted.sort((a,b)=>a.distance-b.distance);queue.push(...wanted);
       if(started&&moving&&!restTimer)restTimer=setTimeout(()=>{restTimer=0;schedule();},Math.max(1,REST-(now-movedAt)));
@@ -333,30 +337,43 @@
       painter.worker.postMessage({type:'start',...assets,sheet:!preview&&painters.length===1&&assets.sheet?(small?assets.sheetSmall||assets.sheet:assets.sheet):undefined,software});
     }
     function lost(painter){
-      painter.dead=true;painter.ready=false;
+      if(painter.dead)return;
+      painter.worker.terminate?.();painter.dead=true;painter.ready=false;
       const job=jobs.get(painter.job);jobs.delete(painter.job);if(job){pending.delete(job.key);job.resolve?.(null);}
+      if(painters.some(other=>other.sharp&&!other.dead)){for(const tile of tiles.values())if(!tile.detail)tile.stale=true;schedule();}
+      if(workerRestarts<2){workerRestarts++;setTimeout(()=>{painters.splice(painters.indexOf(painter),1);hire();schedule();},1000);}
       if(painters.every(other=>other.dead)){resolveReady(false);for(const waiting of urgent.splice(0))waiting.resolve?.(null);}
       pump();
+    }
+    function retryTile(key,delay){
+      const attempts=(failures.get(key)?.attempts||0)+1;
+      delay??=Math.min(30000,1000*2**(attempts-1));
+      failures.set(key,{attempts,retryAt:attempts<=3?performance.now()+delay:Infinity});
+      if(attempts<=3)setTimeout(schedule,delay);
     }
     function heard(painter,data){
       if(data.type==='sheet'){
         if(data.bitmap){showSheet(data.bitmap);pictured(true);}else needsPainting=true;
       }else if(data.type==='ready'){
         painter.ready=true;if(needsPainting)paintOverview();
-        if(sharpening&&!painter.sharp)painter.worker.postMessage({type:'sharpen'});
+        if(sharpening)sharpenPainter(painter);
         schedule();pump();
       }else if(data.type==='detail'){
         // The sharp plate and finest coasts have arrived everywhere. Tiles stay until replaced, so the sharpening is seamless.
-        painter.sharp=true;
-        if(painters.every(other=>other.sharp||other.dead)){sharpened=true;for(const tile of tiles.values())tile.stale=true;schedule();}
+        painter.sharp=true;painter.sharpening=false;
+        if(painters.every(other=>other.sharp||other.dead)){sharpened=true;for(const tile of tiles.values())if(!tile.detail)tile.stale=true;schedule();}
       }else if(data.type==='tile')received(painter,data);
       else if(data.type==='tile-error'){
         const job=jobs.get(data.id);jobs.delete(data.id);painter.busy=false;console.error(data.message);
-        if(job){pending.delete(job.key);job.resolve?.(null);if(job.key==='overview')pictured(false);}
+        if(job){
+          pending.delete(job.key);job.resolve?.(null);
+          if(job.key==='overview')pictured(false);
+          else if(job.key)retryTile(job.key);
+        }
         pump();
       }else if(data.type==='sharpen-error'){
         // The world's tiles stop waiting for it, and it is asked for again later.
-        console.error(data.message);sharpened=true;schedule();
+        console.error(data.message);painter.sharpening=false;sharpened=true;schedule();
         if(!retrying){retrying=true;setTimeout(()=>{retrying=false;sharpening=false;schedule();},30000);}
       }else if(data.type==='error'){console.error(data.message);lost(painter);}
     }
@@ -375,7 +392,11 @@
     if(preview){if(preview.complete)firstPicture();else{preview.addEventListener('load',firstPicture,{once:true});preview.addEventListener('error',()=>{needsPainting=true;ensurePainters();},{once:true});}}
     else hire();
     // Lettering is drawn to canvas, so ask for its fonts rather than waiting for the page to use them.
-    Promise.all(['16px "Redline Hand"','700 16px "Redline Hand"','16px "IM Fell English"','italic 16px "IM Fell English"'].map(font=>document.fonts?.load?.(font))).catch(()=>{}).then(()=>{sprites.clear();shapes.clear();era++;lettering=true;labelsReady?.();schedule();});
+    const refreshLettering=()=>{sprites.clear();shapes.clear();era++;lettering=true;labelsReady?.();schedule();};
+    canvas.addEventListener('contextlost',event=>{event.preventDefault?.();contextLost=true;});
+    canvas.addEventListener('contextrestored',()=>{contextLost=false;refreshLettering();});
+    document.fonts?.addEventListener?.('loadingdone',refreshLettering);
+    Promise.allSettled(['16px "Redline Hand"','700 16px "Redline Hand"','16px "IM Fell English"','italic 16px "IM Fell English"'].map(font=>document.fonts?.load?.(font))).then(refreshLettering);
     return {
       supported:true,
       ready,

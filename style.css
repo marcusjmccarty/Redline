@@ -1,8 +1,8 @@
 /* Redline: the map, the voyage planner, and printing. The album and viewer live in gallery.css. */
-@font-face { font-family: "Redline Hand"; src: url("fonts/redline-hand.woff") format("woff"); font-display: swap; }
-@font-face { font-family: "Redline Hand"; font-weight: 700; src: url("fonts/redline-hand-bold.woff") format("woff"); font-display: swap; }
-@font-face { font-family: "IM Fell English"; src: url("fonts/im-fell-english.woff2") format("woff2"); font-display: swap; }
-@font-face { font-family: "IM Fell English"; font-style: italic; src: url("fonts/im-fell-english-italic.woff2") format("woff2"); font-display: swap; }
+@font-face { font-family: "Redline Hand"; src: url("fonts/redline-hand.woff?v=65669b965e37") format("woff"); font-display: swap; }
+@font-face { font-family: "Redline Hand"; font-weight: 700; src: url("fonts/redline-hand-bold.woff?v=6188fd1af783") format("woff"); font-display: swap; }
+@font-face { font-family: "IM Fell English"; src: url("fonts/im-fell-english.woff2?v=248300df1647") format("woff2"); font-display: swap; }
+@font-face { font-family: "IM Fell English"; font-style: italic; src: url("fonts/im-fell-english-italic.woff2?v=8fc678575e83") format("woff2"); font-display: swap; }
 :root {
   color-scheme: light;
   --paper: #efe5d2; --paper-high: #f7f0e2; --paper-low: #e4d5b9; --paper-edge: #c4b08b; --mat: #faf5e9;
