@@ -777,7 +777,9 @@
   document.addEventListener('visibilitychange',()=>{if(document.hidden){held.clear();spacePress=null;lastTick=null;}});
   // Route thumbnails draw on these simple shapes until the painted sheet is ready.
   $('land').append(...window.ATLAS_LAND.map(d=>svg('path',{d})));
-  document.fonts?.ready?.then(()=>{labelWidths.clear();for(const text of $('route-stops').querySelectorAll('.stop-label'))text._width=labelWidth(text);lastLayout='';scheduleView();});
+  const refreshRouteLettering=()=>{labelWidths.clear();labelSlots.clear();for(const text of $('route-stops').querySelectorAll('.stop-label'))text._width=labelWidth(text);lastLayout='';scheduleView();};
+  document.fonts?.ready?.then(refreshRouteLettering);
+  document.fonts?.addEventListener?.('loadingdone',refreshRouteLettering);
   // The chart's title piece follows the trip's name.
   new MutationObserver(()=>{lastLayout='';scheduleView();}).observe($('trip-title'),{childList:true,characterData:true,subtree:true});
   const photoVisibility=new MutationObserver(()=>{

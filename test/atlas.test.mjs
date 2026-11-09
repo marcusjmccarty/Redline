@@ -312,9 +312,9 @@ test('a relief tile that fails to load is asked for again rather than remembered
   runInContext(readFileSync(file('atlas-worker.js'),'utf8'),context);runInContext('scene={relief:new Map(),reliefCoverage:[]};',context);
   const prepare=()=>runInContext('prepareRelief({})',context),held=()=>runInContext('scene.relief.size',context);
   await prepare();assert.equal(held(),0);
-  await prepare();assert.deepEqual(log,['relief/16-3-2.webp','relief/16-3-2.webp'],'The next tile asks again');
-  online=true;await prepare();assert.equal(held(),1,'And has it once the network is back');
-  await prepare();assert.equal(log.length,3,'A tile in hand is not fetched twice');
+  await prepare();assert.deepEqual(log,['relief/16-3-2.webp'],'Neighbors reuse the short failure cooldown');
+  online=true;runInContext('reliefFailures.clear()',context);await prepare();assert.equal(held(),1,'And has it once the network is back');
+  await prepare();assert.equal(log.length,2,'A tile in hand is not fetched twice');
 });
 
 test('every file the docs name exists, and the README describes the map as it is',()=>{
@@ -341,7 +341,7 @@ test('a slow relief tile does not hold up the map',async()=>{
 
 // A view with fake workers. Each message remembers its worker, because a tile must be answered by the worker that was given it.
 function fakeView({native=false,innerWidth=1440,agent,cores,width=1440,height=900,dpr=1,assets={worker:'w.js',sheet:'sheet.webp',sheetSmall:'small.webp'}}={}){
-  const sent=[],workers=[],timers=[],frames=[],clears=[],draws=[],offscreens=[];let box={width,height},now=1000,stack=null;
+  const sent=[],workers=[],timers=[],frames=[],clears=[],draws=[],offscreens=[],canvasEvents={},fontEvents={};let box={width,height},now=1000,stack=null;
   class FakeWorker{constructor(){workers.push(this);}postMessage(message){sent.push({...message,from:this});}}
   const paint=new Proxy({},{get:(_,key)=>key==='canvas'?{}:(...args)=>{if(key==='clearRect')clears.push(args);if(key==='drawImage')draws.push(args[0]);return {width:1};},set:()=>true});
   // Just enough DOM for the layers: who holds whom, and the style writes.
@@ -362,11 +362,11 @@ function fakeView({native=false,innerWidth=1440,agent,cores,width=1440,height=90
   };
   const preview=native?Object.assign(element('img'),{complete:true,naturalWidth:1440,naturalHeight:800}):null;
   const context=createContext({Image:class{constructor(){return element('img');}},window:{innerWidth,devicePixelRatio:dpr,matchMedia:()=>({matches:false}),addEventListener(){},removeEventListener(){}},navigator:{userAgent:agent,hardwareConcurrency:cores},Worker:FakeWorker,OffscreenCanvas:class{constructor(){offscreens.push(this);}getContext(){return new Proxy({},{get:()=>()=>({width:1})});}},DecompressionStream:class{},
-    document:{fonts:{load:async()=>{}},createElement:element,getElementById:()=>preview},requestAnimationFrame:callback=>{frames.push(callback);return frames.length;},cancelAnimationFrame(){frames.length=0;},performance:{now:()=>now},ResizeObserver:class{observe(){}disconnect(){}},
+    document:{fonts:{load:async()=>{},addEventListener:(name,fn)=>{fontEvents[name]=fn;}},createElement:element,getElementById:()=>preview},requestAnimationFrame:callback=>{frames.push(callback);return frames.length;},cancelAnimationFrame(){frames.length=0;},performance:{now:()=>now},ResizeObserver:class{observe(){}disconnect(){}},
     setTimeout:(run,delay)=>{timers.push({run,delay});return timers.length;},clearTimeout(){},console:{error(){},log(){}}});
   context.self=context.window;context.addEventListener=()=>{};
   runInContext(readFileSync(file('atlas-view.js'),'utf8'),context);
-  const canvas={getContext:()=>paint,getBoundingClientRect:()=>box,width:0,height:0,addEventListener(){},before(node){stack=node;}};
+  const canvas={getContext:()=>paint,getBoundingClientRect:()=>box,width:0,height:0,addEventListener(name,fn){canvasEvents[name]=fn;},before(node){stack=node;}};
   const atlas=context.window.RedlineAtlasView.create(canvas,assets,{});
   const bitmap=()=>({width:64,height:64,closed:false,close(){this.closed=true;}}),world={x:0,y:0,w:1440,h:720};
   const up=()=>{workers[0].onmessage({data:{type:'sheet',bitmap:bitmap()}});for(const worker of workers)worker.onmessage({data:{type:'ready'}});};
@@ -375,7 +375,7 @@ function fakeView({native=false,innerWidth=1440,agent,cores,width=1440,height=90
   const run=(ms=0)=>{now+=ms;for(const timer of timers.splice(0)){if(timer.delay<30000)timer.run();else timers.push(timer);}for(const callback of frames.splice(0))callback(now);};
   const levelOf=lvl=>stack.children.find(node=>node.className==='atlas-level'&&node.style.zIndex===lvl+1),sheet=()=>stack.children.find(node=>node.className==='atlas-sheet');
   const finish=()=>{for(let i=0;i<400&&pendingTiles().length;i++)answer(pendingTiles()[0]);};
-  return {sent,workers,timers,frames,clears,draws,offscreens,atlas,bitmap,world,up,pendingTiles,answer,finish,run,resize(next){box=next;},stack:()=>stack,levelOf,sheet,shownOf:lvl=>levelOf(lvl)?.children.length||0};
+  return {sent,workers,timers,frames,clears,draws,offscreens,canvasEvents,fontEvents,atlas,bitmap,world,up,pendingTiles,answer,finish,run,resize(next){box=next;},stack:()=>stack,levelOf,sheet,shownOf:lvl=>levelOf(lvl)?.children.length||0};
 }
 
 test('the art lies in layers behind the canvas: one per tile, moved together by one transform per level',()=>{
@@ -539,7 +539,7 @@ test('the baked sheet is the first picture, and nothing is painted before it is 
   assert.equal(resolved,false);assert.equal(pendingTiles().length,0,'No tile is asked for before the first picture');
   const sheet=bitmap();workers[0].onmessage({data:{type:'sheet',bitmap:sheet}});
   assert.equal(await atlas.ready,true,'Ready means decoded, not painted');assert.equal(atlas.snapshot().held,sheet,'The opening fold unfolds the same sheet');
-  assert.equal(workers.length,3,'The other workers join once it is up');assert.equal(sent.slice(1).filter(message=>message.type==='start'&&message.sheet).length,0,'Only one of them is given the sheet');
+  assert.equal(workers.length,2,'The other workers join once it is up');assert.equal(sent.slice(1).filter(message=>message.type==='start'&&message.sheet).length,0,'Only one of them is given the sheet');
   for(const worker of workers)worker.onmessage({data:{type:'ready'}});
   atlas.update(world,[]);run(1000);atlas.update(world,[]);run(1000);
   assert.equal(sent.some(message=>message.level===-1),false,'The world is never painted whole at run time');
@@ -551,7 +551,7 @@ test('without the sheet the map paints one, and only then is ready',async()=>{
     let resolved=false;atlas.ready.then(()=>{resolved=true;});
     workers[0].onmessage({data:{type:'ready'}});await new Promise(setImmediate);
     assert.equal(resolved,false);const whole=pendingTiles();assert.equal(whole.length,1);assert.equal(whole[0].level,-1);assert.equal(sent.filter(message=>message.level===-1).length,1);
-    answer(whole[0]);assert.equal(await atlas.ready,true);assert.ok(atlas.snapshot());assert.equal(workers.length,3,'The map carries on as usual');
+    answer(whole[0]);assert.equal(await atlas.ready,true);assert.ok(atlas.snapshot());assert.equal(workers.length,2,'The map carries on as usual');
   }
 });
 
@@ -563,7 +563,7 @@ test('Safari and iOS paint in software, and every other engine keeps the GPU',()
 
 test('the crew and the sheet suit the screen',()=>{
   const counted=options=>{const view=fakeView(options);view.up();return {workers:view.workers.length,sheet:view.sent[0].sheet};};
-  assert.deepEqual(counted({innerWidth:1440,cores:8}),{workers:3,sheet:'sheet.webp'});
+  assert.deepEqual(counted({innerWidth:1440,cores:8}),{workers:2,sheet:'sheet.webp'});
   assert.deepEqual(counted({innerWidth:390,cores:6}),{workers:2,sheet:'small.webp'});
   assert.deepEqual(counted({innerWidth:1440,cores:2}),{workers:1,sheet:'sheet.webp'},'One core is left for the page');
 });
@@ -573,9 +573,9 @@ test('each tile goes to a free worker, regions first, and a change of camera dro
   const zoomed={x:300,y:100,w:360,h:180},rest=()=>{atlas.update(zoomed,[]);run(1000);};
   for(const worker of workers)worker.onmessage({data:{type:'detail'}});
   rest();
-  let out=pendingTiles();assert.equal(out.length,3,'One each');assert.equal(new Set(out.map(message=>message.from)).size,3);assert.ok(out.every(message=>message.level===2));
+  let out=pendingTiles();assert.equal(out.length,2,'One each');assert.equal(new Set(out.map(message=>message.from)).size,2);assert.ok(out.every(message=>message.level===2));
   let region=null;atlas.paintRegion({x:0,y:0,w:100,h:100},64,64).then(value=>{region=value;});
-  assert.equal(pendingTiles().length,3,'All are busy, so it waits');
+  assert.equal(pendingTiles().length,2,'All are busy, so it waits');
   answer(out[0]);out=pendingTiles();assert.equal(out.at(-1).level,-2,'The next free worker takes the region ahead of every tile');
   // A new camera forgets the old tile queue: only tiles of the new view go out from here.
   const far={x:1000,y:500,w:180,h:90},before=sent.length;atlas.update(far,[]);run(200);for(let i=0;i<40&&pendingTiles().length;i++)answer(pendingTiles()[0]);
@@ -728,7 +728,7 @@ test('the HTML preview shows the map before any worker exists, and zoom starts d
   atlas.update(world,[]);run(1000);assert.equal(workers.length,0,'No procedural painting or terrain downloads at world view');
   assert.equal(sent.length,0);assert.equal(sheet().width,1440);assert.equal(sheet().height,800);
   atlas.update({x:300,y:100,w:360,h:180},[]);run(200);
-  assert.equal(workers.length,3,'Detail starts only when zoomed in');
+  assert.equal(workers.length,2,'Detail starts only when zoomed in');
   assert.ok(sent.filter(message=>message.type==='start').every(message=>!message.sheet),'Workers do not download another copy of the visible map');
 });
 
@@ -759,7 +759,7 @@ test('continuous camera motion reuses the sheet without painting intermediate vi
   atlas.update(world,[]);run(1000);
   for(let i=0;i<20;i++){atlas.update({x:300+i,y:100,w:360,h:180},[]);run(40);}
   assert.equal(workers.length,0,'A moving camera never starts background terrain work');
-  run(160);assert.equal(workers.length,3,'The final view starts detail after the camera rests');
+  run(160);assert.equal(workers.length,2,'The final view starts detail after the camera rests');
   for(const worker of workers)worker.onmessage({data:{type:'ready'}});
   assert.ok(sent.some(message=>message.type==='tile'),'The final view still sharpens');
 });
@@ -770,4 +770,63 @@ test('small windows retain readable city and country letter heights',()=>{
     const measured=atlas.measure(kind,'Paris');
     assert.ok(measured.h>=min*1.34-.01,`${kind} stays readable on a phone`);
   }
+});
+
+
+test('a coarse tile still in flight when detail arrives is repainted instead of leaving a mismatched patch',()=>{
+  const {atlas,up,workers,run,pendingTiles,answer,finish,sent}=fakeView();up();
+  atlas.update({x:300,y:100,w:360,h:180},[]);run(1000);
+  const old=pendingTiles()[0];
+  for(const worker of workers)worker.onmessage({data:{type:'detail'}});
+  answer(old);run(1000);finish();run(1000);finish();
+  assert.ok(sent.filter(m=>m.type==='tile'&&m.x0===old.x0&&m.y0===old.y0&&m.level===old.level).length>=2);
+});
+
+test('a failed texture retries after a delay and keeps the underlying sheet visible',()=>{
+  const {atlas,up,run,pendingTiles,finish,sent,sheet}=fakeView();up();
+  atlas.update({x:300,y:100,w:360,h:180},[]);run(1000);
+  const first=pendingTiles()[0];first.answered=true;
+  first.from.onmessage({data:{type:'tile-error',id:first.id,message:'Temporary failure'}});
+  finish();run();assert.notEqual(sheet().style.opacity,0);
+  const attempts=()=>sent.filter(m=>m.type==='tile'&&m.x0===first.x0&&m.y0===first.y0&&m.level===first.level).length;
+  assert.equal(attempts(),1,'No tight retry loop');run(1000);assert.equal(attempts(),2);finish();run(1000);assert.equal(sheet().style.opacity,0);
+});
+
+test('canvas restoration and late fonts redraw names even when the camera is unchanged',async()=>{
+  const {atlas,up,run,world,draws,canvasEvents,fontEvents}=fakeView();up();await new Promise(setImmediate);
+  const names=[{kind:'city',text:'Paris',x:100,y:100,angle:0,curve:0}];
+  atlas.update(world,names);run(1000);draws.length=0;
+  canvasEvents.contextlost({preventDefault(){}});canvasEvents.contextrestored();run(1000);
+  assert.ok(draws.length>0,'Names return after the GPU surface is restored');
+  draws.length=0;const era=atlas.era;fontEvents.loadingdone();run(1000);
+  assert.ok(atlas.era>era&&draws.length>0,'Late fonts invalidate both collision measurements and painted names');
+});
+
+test('repeated unavailable relief is skipped briefly so every neighboring tile does not wait again',async()=>{
+  let calls=0;
+  const context=createContext({onmessage:null,importScripts(){},postMessage(){},Response,AbortSignal,createImageBitmap:async()=>({}),RedlineAtlasPainter:{reliefTiles:()=>[{key:'missing'}]},fetch:async()=>{calls++;throw Error('offline');}});
+  runInContext(readFileSync(file('atlas-worker.js'),'utf8'),context);runInContext('scene={relief:new Map(),reliefCoverage:[]};',context);
+  await runInContext('prepareRelief({})',context);await runInContext('prepareRelief({})',context);
+  assert.equal(calls,1);
+});
+
+
+test('failed texture retries are bounded instead of repainting forever',()=>{
+  const {atlas,up,run,pendingTiles,sent,finish}=fakeView();up();
+  atlas.update({x:300,y:100,w:360,h:180},[]);run(1000);
+  const first=pendingTiles()[0],matches=m=>m.type==='tile'&&m.x0===first.x0&&m.y0===first.y0&&m.level===first.level;
+  for(let i=0;i<4;i++){
+    const next=pendingTiles().find(matches);assert.ok(next);next.answered=true;
+    next.from.onmessage({data:{type:'tile-error',id:next.id,message:'offline'}});finish();run(30000);
+  }
+  assert.equal(sent.filter(matches).length,4,'One attempt and at most three retries');
+});
+
+test('a worker lost during a paint is replaced without stranding the visible tile',()=>{
+  const {atlas,up,run,pendingTiles,workers,sent,finish}=fakeView();up();
+  atlas.update({x:300,y:100,w:360,h:180},[]);run(1000);
+  const first=pendingTiles()[0];first.answered=true;first.from.onerror({message:'Worker stopped'});run(1000);
+  const replacement=workers.at(-1);assert.notEqual(replacement,first.from);
+  replacement.onmessage({data:{type:'ready'}});run(1000);finish();run(1000);
+  assert.ok(sent.filter(m=>m.type==='tile'&&m.x0===first.x0&&m.y0===first.y0&&m.level===first.level).length>=2);
 });
